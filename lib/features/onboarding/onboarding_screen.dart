@@ -404,7 +404,7 @@ class _VerifyStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -475,7 +475,8 @@ class _VerifyStep extends StatelessWidget {
                 ),
               );
             }),
-          if (errorMessage != null)
+          if (errorMessage != null) ...[
+            const SizedBox(height: 4),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -488,7 +489,8 @@ class _VerifyStep extends StatelessWidget {
                 style: const TextStyle(color: Colors.redAccent, fontSize: 13),
               ),
             ),
-          const Spacer(),
+          ],
+          const SizedBox(height: 32),
           ElevatedButton(
             onPressed: onNext,
             style: ElevatedButton.styleFrom(
