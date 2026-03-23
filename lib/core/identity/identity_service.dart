@@ -90,6 +90,22 @@ class IdentityService {
     return _current!;
   }
 
+  /// Derives and returns the Ed25519 signing key pair from the stored seed phrase.
+  ///
+  /// Uses the same SLIP-0010 derivation as [createIdentity].
+  /// Returns null if no identity has been created yet.
+  Future<SimpleKeyPair?> getSigningKeyPair() async {
+    final mnemonic = await loadSeedPhrase();
+    if (mnemonic == null) return null;
+    final seed64 = Bip39.mnemonicToSeed(mnemonic);
+    final slip10 =
+        pkg_crypto.Hmac(pkg_crypto.sha512, utf8.encode('ed25519 seed'))
+            .convert(seed64)
+            .bytes;
+    final privateKeyBytes = Uint8List.fromList(slip10.sublist(0, 32));
+    return Ed25519().newKeyPairFromSeed(privateKeyBytes);
+  }
+
   /// Reads the pod encryption key from secure storage.
   Future<Uint8List> getPodEncryptionKey() async {
     final hex = await _storage.read(key: _keyEncKey);

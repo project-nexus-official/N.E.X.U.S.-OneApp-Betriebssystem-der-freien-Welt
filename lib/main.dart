@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
 import 'package:nexus_oneapp/core/router.dart';
+import 'package:nexus_oneapp/features/chat/chat_provider.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
+import 'package:provider/provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,16 +16,19 @@ class NexusApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp.router(
-      title: 'NEXUS OneApp',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.light,
-      darkTheme: AppTheme.dark,
-      themeMode: ThemeMode.dark,
-      routerConfig: router,
-      builder: (context, child) {
-        return _SplashWrapper(child: child!);
-      },
+    return ChangeNotifierProvider(
+      create: (_) => ChatProvider(),
+      child: MaterialApp.router(
+        title: 'NEXUS OneApp',
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.light,
+        darkTheme: AppTheme.dark,
+        themeMode: ThemeMode.dark,
+        routerConfig: router,
+        builder: (context, child) {
+          return _SplashWrapper(child: child!);
+        },
+      ),
     );
   }
 }

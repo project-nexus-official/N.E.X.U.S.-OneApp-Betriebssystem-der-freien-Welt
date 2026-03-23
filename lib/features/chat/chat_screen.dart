@@ -1,25 +1,448 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
-class ChatScreen extends StatelessWidget {
+import '../../core/transport/nexus_peer.dart';
+import '../../shared/theme/app_theme.dart';
+import 'chat_provider.dart';
+import 'conversation_screen.dart';
+
+/// Main chat screen: animierter Radar + Peer-Entdeckungs-Liste.
+class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
+
+  @override
+  State<ChatScreen> createState() => _ChatScreenState();
+}
+
+class _ChatScreenState extends State<ChatScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Start BLE after the first frame so context is available
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<ChatProvider>().initialize();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('NEXUS Chat')),
-      body: const Center(
+      appBar: AppBar(
+        title: const Text('NEXUS Mesh'),
+        actions: [
+          Consumer<ChatProvider>(
+            builder: (context, provider, _) =>
+                _MeshStatusDot(running: provider.running),
+          ),
+        ],
+      ),
+      body: Consumer<ChatProvider>(
+        builder: (context, provider, _) {
+          if (!provider.initialized) {
+            return const _LoadingBody();
+          }
+          if (!provider.permissionsGranted) {
+            return _PermissionDeniedBody(onRetry: provider.initialize);
+          }
+          if (provider.error != null && !provider.running) {
+            return _ErrorBody(
+              error: provider.error!,
+              onRetry: provider.initialize,
+            );
+          }
+          return _ChatBody(provider: provider);
+        },
+      ),
+    );
+  }
+}
+
+// ── Sub-widgets ─────────────────────────────────────────────────────────────
+
+class _LoadingBody extends StatelessWidget {
+  const _LoadingBody();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircularProgressIndicator(),
+          SizedBox(height: 16),
+          Text('Initialisiere Mesh…'),
+        ],
+      ),
+    );
+  }
+}
+
+class _PermissionDeniedBody extends StatelessWidget {
+  const _PermissionDeniedBody({required this.onRetry});
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.bluetooth, size: 64, color: Colors.grey),
-            SizedBox(height: 16),
-            Text('BLE Mesh-Chat', style: TextStyle(fontSize: 18)),
-            SizedBox(height: 8),
-            Text(
-              'Phase 1a – Coming soon',
+            const Icon(Icons.bluetooth_disabled, size: 64, color: Colors.grey),
+            const SizedBox(height: 16),
+            const Text(
+              'Bluetooth-Berechtigung benötigt',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Android benötigt Standort-Berechtigung für BLE-Scanning. '
+              'Deine Daten verlassen das Gerät niemals.',
+              textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey),
             ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Erneut versuchen'),
+            ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ErrorBody extends StatelessWidget {
+  const _ErrorBody({required this.error, required this.onRetry});
+  final String error;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, size: 64, color: Colors.redAccent),
+            const SizedBox(height: 16),
+            Text(error, textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            ElevatedButton(onPressed: onRetry, child: const Text('Nochmal')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ChatBody extends StatelessWidget {
+  const _ChatBody({required this.provider});
+  final ChatProvider provider;
+
+  @override
+  Widget build(BuildContext context) {
+    final peers = provider.peers;
+
+    return Column(
+      children: [
+        // Radar section
+        SizedBox(
+          height: 220,
+          child: _RadarWidget(peerCount: peers.length),
+        ),
+
+        // Divider + heading
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              const Icon(Icons.people, size: 16, color: AppColors.gold),
+              const SizedBox(width: 6),
+              Text(
+                peers.isEmpty
+                    ? 'Suche nach Peers…'
+                    : '${peers.length} Peer${peers.length == 1 ? '' : 's'} in Reichweite',
+                style: const TextStyle(
+                  color: AppColors.gold,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const Divider(height: 1, color: AppColors.surfaceVariant),
+
+        // Peer list
+        Expanded(
+          child: peers.isEmpty
+              ? const _EmptyPeerList()
+              : ListView.builder(
+                  itemCount: peers.length,
+                  itemBuilder: (context, i) =>
+                      _PeerTile(peer: peers[i], provider: provider),
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+class _EmptyPeerList extends StatelessWidget {
+  const _EmptyPeerList();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(32),
+        child: Text(
+          'Keine NEXUS-Nodes in der Nähe.\n'
+          'Starte die App auf einem anderen Gerät.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.grey),
+        ),
+      ),
+    );
+  }
+}
+
+class _PeerTile extends StatelessWidget {
+  const _PeerTile({required this.peer, required this.provider});
+  final NexusPeer peer;
+  final ChatProvider provider;
+
+  @override
+  Widget build(BuildContext context) {
+    final signalColor = _signalColor(peer.signalLevel);
+    final signalIcon = _signalIcon(peer.signalLevel);
+
+    return ListTile(
+      leading: CircleAvatar(
+        backgroundColor: AppColors.surfaceVariant,
+        child: Text(
+          peer.pseudonym.isNotEmpty ? peer.pseudonym[0].toUpperCase() : '?',
+          style: const TextStyle(color: AppColors.gold),
+        ),
+      ),
+      title: Text(peer.pseudonym),
+      subtitle: Text(
+        peer.transportType.name.toUpperCase(),
+        style: const TextStyle(fontSize: 11, color: Colors.grey),
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(signalIcon, color: signalColor, size: 16),
+          const SizedBox(width: 4),
+          Text(
+            peer.signalLabel,
+            style: TextStyle(color: signalColor, fontSize: 12),
+          ),
+        ],
+      ),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => ChangeNotifierProvider.value(
+            value: provider,
+            child: ConversationScreen(peer: peer),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Color _signalColor(SignalLevel level) {
+    return switch (level) {
+      SignalLevel.excellent => Colors.greenAccent,
+      SignalLevel.good => Colors.lightGreen,
+      SignalLevel.fair => Colors.amber,
+      SignalLevel.poor => Colors.redAccent,
+      SignalLevel.unknown => Colors.grey,
+    };
+  }
+
+  IconData _signalIcon(SignalLevel level) {
+    return switch (level) {
+      SignalLevel.excellent || SignalLevel.good => Icons.bluetooth_connected,
+      SignalLevel.fair => Icons.bluetooth_searching,
+      SignalLevel.poor => Icons.bluetooth_disabled,
+      SignalLevel.unknown => Icons.cloud_queue,
+    };
+  }
+}
+
+// ── Radar animation ──────────────────────────────────────────────────────────
+
+class _RadarWidget extends StatefulWidget {
+  const _RadarWidget({required this.peerCount});
+  final int peerCount;
+
+  @override
+  State<_RadarWidget> createState() => _RadarWidgetState();
+}
+
+class _RadarWidgetState extends State<_RadarWidget>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 3),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: AnimatedBuilder(
+        animation: _ctrl,
+        builder: (context, child) {
+          return CustomPaint(
+            size: const Size(180, 180),
+            painter: _RadarPainter(
+              progress: _ctrl.value,
+              peerCount: widget.peerCount,
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _RadarPainter extends CustomPainter {
+  _RadarPainter({required this.progress, required this.peerCount});
+  final double progress;
+  final int peerCount;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final maxRadius = size.width / 2;
+
+    // Draw 3 concentric circles
+    for (int i = 1; i <= 3; i++) {
+      final r = maxRadius * i / 3;
+      canvas.drawCircle(
+        center,
+        r,
+        Paint()
+          ..color = AppColors.gold.withValues(alpha: 0.15)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1,
+      );
+    }
+
+    // Draw rotating sweep arc
+    final sweepRect = Rect.fromCircle(center: center, radius: maxRadius);
+    final sweepAngle = 0.4; // radians
+
+    canvas.drawArc(
+      sweepRect,
+      progress * 2 * 3.14159,
+      sweepAngle,
+      true,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            AppColors.gold.withValues(alpha: 0.35),
+            AppColors.gold.withValues(alpha: 0.0),
+          ],
+        ).createShader(sweepRect),
+    );
+
+    // Draw center dot
+    canvas.drawCircle(
+      center,
+      5,
+      Paint()..color = AppColors.gold,
+    );
+
+    // Draw peer blips (if any)
+    if (peerCount > 0) {
+      final rng = peerCount.hashCode;
+      for (int i = 0; i < peerCount.clamp(0, 6); i++) {
+        final angle = (rng + i * 43758) % 628 / 100.0;
+        final dist = maxRadius * (0.35 + (i * 0.13) % 0.5);
+        final blipPos = Offset(
+          center.dx + dist * (angle.remainder(6.28)).sin(),
+          center.dy + dist * (angle.remainder(6.28)).cos(),
+        );
+        canvas.drawCircle(
+          blipPos,
+          4,
+          Paint()..color = Colors.greenAccent.withValues(alpha: 0.9),
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_RadarPainter oldDelegate) =>
+      oldDelegate.progress != progress || oldDelegate.peerCount != peerCount;
+}
+
+// Extension for angle trig without import
+extension on double {
+  double sin() => _sin(this);
+  double cos() => _cos(this);
+
+  static double _sin(double x) {
+    // Taylor series for sin(x) – sufficient for radar blip placement
+    double result = 0;
+    double term = x;
+    for (int i = 1; i <= 10; i++) {
+      result += term;
+      term *= -x * x / ((2 * i) * (2 * i + 1));
+    }
+    return result;
+  }
+
+  static double _cos(double x) {
+    double result = 1;
+    double term = 1;
+    for (int i = 1; i <= 10; i++) {
+      term *= -x * x / ((2 * i - 1) * (2 * i));
+      result += term;
+    }
+    return result;
+  }
+}
+
+// ── Mesh status dot (AppBar) ─────────────────────────────────────────────────
+
+class _MeshStatusDot extends StatelessWidget {
+  const _MeshStatusDot({required this.running});
+  final bool running;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 14),
+      child: Center(
+        child: Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: running ? Colors.greenAccent : Colors.grey,
+            shape: BoxShape.circle,
+          ),
         ),
       ),
     );
