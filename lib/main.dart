@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:nexus_oneapp/core/identity/identity_service.dart';
 import 'package:nexus_oneapp/core/router.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await IdentityService.instance.init();
   runApp(const NexusApp());
 }
 

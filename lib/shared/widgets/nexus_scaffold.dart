@@ -25,6 +25,8 @@ class NexusScaffold extends StatelessWidget {
               context.go('/wallet');
             case 2:
               context.go('/governance');
+            case 3:
+              context.go('/profile');
           }
         },
         destinations: const [
@@ -39,6 +41,10 @@ class NexusScaffold extends StatelessWidget {
           NavigationDestination(
             icon: Icon(Icons.how_to_vote),
             label: 'Governance',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person),
+            label: 'Profil',
           ),
         ],
       ),

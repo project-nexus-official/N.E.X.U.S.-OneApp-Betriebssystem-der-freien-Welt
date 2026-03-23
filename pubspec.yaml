@@ -28,10 +28,21 @@ dependencies:
   # Secure Storage
   flutter_secure_storage: ^9.2.4
 
+  # Cryptography
+  crypto: ^3.0.3
+  cryptography: ^2.7.0
+
+  # QR Code
+  qr_flutter: ^4.1.0
+  # Database path helper
+  path: ^1.9.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # SQLite in-memory testing
+  sqflite_common_ffi: ^2.3.3
 
 flutter:
   uses-material-design: true
