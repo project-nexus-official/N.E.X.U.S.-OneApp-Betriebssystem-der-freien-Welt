@@ -40,6 +40,11 @@ dependencies:
   # Database path helper
   path: ^1.9.0
 
+  # Profile image: picker + resize + file path
+  image_picker: ^1.1.2
+  image: ^4.3.0
+  path_provider: ^2.1.5
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

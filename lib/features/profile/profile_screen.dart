@@ -1,11 +1,18 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
+import 'package:nexus_oneapp/core/identity/profile.dart';
+import 'package:nexus_oneapp/core/identity/profile_service.dart';
+import 'package:nexus_oneapp/core/storage/pod_database.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
 import 'package:nexus_oneapp/shared/widgets/identicon.dart';
 
-/// Profile screen displaying the current user's NEXUS identity.
+import 'edit_profile_screen.dart';
+
+/// Profile tab – shows the user's identity and extended profile data.
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
@@ -16,55 +23,41 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final _identityService = IdentityService.instance;
 
+  UserProfile? get _profile => ProfileService.instance.currentProfile;
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+
   void _copyPublicKey() {
     final identity = _identityService.currentIdentity;
     if (identity == null) return;
     Clipboard.setData(ClipboardData(text: identity.publicKeyHex));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Öffentlicher Schlüssel kopiert'),
-        duration: Duration(seconds: 2),
-      ),
-    );
+    _snack('Öffentlicher Schlüssel kopiert');
   }
 
   void _copyDid() {
     final identity = _identityService.currentIdentity;
     if (identity == null) return;
     Clipboard.setData(ClipboardData(text: identity.did));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('DID kopiert'),
-        duration: Duration(seconds: 2),
-      ),
-    );
+    _snack('DID kopiert');
   }
 
   Future<void> _showSeedPhrase() async {
     final seedPhrase = await _identityService.loadSeedPhrase();
     if (!mounted) return;
-
     if (seedPhrase == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Keine Seed Phrase gefunden.')),
-      );
+      _snack('Keine Seed Phrase gefunden.');
       return;
     }
-
     final words = seedPhrase.split(' ');
-
     showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          'Seed Phrase',
-          style: TextStyle(
-            color: AppColors.gold,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Seed Phrase',
+            style: TextStyle(
+                color: AppColors.gold, fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -73,7 +66,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               decoration: BoxDecoration(
                 color: const Color(0xFF3D2000),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange.withValues(alpha: 0.5)),
+                border: Border.all(
+                    color: Colors.orange.withValues(alpha: 0.5)),
               ),
               child: const Row(
                 children: [
@@ -83,8 +77,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Expanded(
                     child: Text(
                       'Teile diese Wörter niemals mit anderen!',
-                      style:
-                          TextStyle(color: Colors.orange, fontSize: 12, height: 1.4),
+                      style: TextStyle(
+                          color: Colors.orange,
+                          fontSize: 12,
+                          height: 1.4),
                     ),
                   ),
                 ],
@@ -94,7 +90,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              gridDelegate:
+                  const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 3,
                 mainAxisSpacing: 6,
                 crossAxisSpacing: 6,
@@ -106,28 +103,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   color: AppColors.surfaceVariant,
                   borderRadius: BorderRadius.circular(6),
                 ),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 4, vertical: 4),
                 child: Row(
                   children: [
-                    Text(
-                      '${index + 1}.',
-                      style: const TextStyle(
-                        color: AppColors.gold,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    Text('${index + 1}.',
+                        style: const TextStyle(
+                            color: AppColors.gold,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold)),
                     const SizedBox(width: 3),
                     Expanded(
-                      child: Text(
-                        words[index],
-                        style: const TextStyle(
-                          color: AppColors.onDark,
-                          fontSize: 11,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                      child: Text(words[index],
+                          style: const TextStyle(
+                              color: AppColors.onDark, fontSize: 11),
+                          overflow: TextOverflow.ellipsis),
                     ),
                   ],
                 ),
@@ -138,15 +128,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text(
-              'Schließen',
-              style: TextStyle(color: AppColors.gold),
-            ),
+            child: const Text('Schließen',
+                style: TextStyle(color: AppColors.gold)),
           ),
         ],
       ),
     );
   }
+
+  Future<void> _exportData() async {
+    try {
+      final blob = await PodDatabase.instance.exportEncrypted();
+      await Clipboard.setData(ClipboardData(text: blob));
+      _snack('Export in Zwischenablage kopiert');
+    } catch (e) {
+      _snack('Export fehlgeschlagen: $e');
+    }
+  }
+
+  Future<void> _openEditProfile() async {
+    final identity = _identityService.currentIdentity;
+    if (identity == null || _profile == null) return;
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => EditProfileScreen(
+          profile: _profile!,
+          identiconBytes: _hexToBytes(identity.publicKeyHex),
+        ),
+      ),
+    );
+    if (saved == true && mounted) setState(() {});
+  }
+
+  void _snack(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), duration: const Duration(seconds: 2)));
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
   static List<int> _hexToBytes(String hex) {
     final result = <int>[];
@@ -156,9 +175,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return result;
   }
 
+  static IconData _visibilityIcon(VisibilityLevel l) {
+    switch (l) {
+      case VisibilityLevel.public:
+        return Icons.public;
+      case VisibilityLevel.contacts:
+        return Icons.people_outline;
+      case VisibilityLevel.trusted:
+        return Icons.star_outline;
+      case VisibilityLevel.private:
+        return Icons.lock_outline;
+    }
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final identity = _identityService.currentIdentity;
+    final profile = _profile;
 
     return Scaffold(
       backgroundColor: AppColors.deepBlue,
@@ -168,260 +203,386 @@ class _ProfileScreenState extends State<ProfileScreen> {
         foregroundColor: AppColors.gold,
         centerTitle: true,
         automaticallyImplyLeading: false,
+        actions: [
+          if (identity != null)
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Profil bearbeiten',
+              onPressed: _openEditProfile,
+            ),
+        ],
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-          child: identity == null
-              ? const Center(
-                  child: Text(
-                    'Keine Identität gefunden.',
-                    style: TextStyle(color: AppColors.onDark),
+        child: identity == null
+            ? const Center(
+                child: Text('Keine Identität gefunden.',
+                    style: TextStyle(color: AppColors.onDark)))
+            : _buildBody(identity, profile),
+      ),
+    );
+  }
+
+  Widget _buildBody(dynamic identity, UserProfile? profile) {
+    final identiconBytes = _hexToBytes(identity.publicKeyHex);
+    final imagePath = profile?.profileImage.value;
+    final hasImage =
+        imagePath != null && File(imagePath).existsSync();
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // ── Avatar ─────────────────────────────────────────────────
+          GestureDetector(
+            onTap: _openEditProfile,
+            child: Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: AppColors.gold, width: 2.5),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: hasImage
+                  ? Image.file(File(imagePath), fit: BoxFit.cover)
+                  : Identicon(bytes: identiconBytes, size: 100),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // ── Pseudonym ───────────────────────────────────────────────
+          Text(
+            profile?.pseudonym.value ?? identity.pseudonym,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: AppColors.onDark,
+              fontSize: 26,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+
+          // ── Bio ─────────────────────────────────────────────────────
+          if (profile?.bio.value != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              profile!.bio.value!,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppColors.onDark.withValues(alpha: 0.7),
+                fontSize: 14,
+                height: 1.4,
+              ),
+            ),
+          ],
+          const SizedBox(height: 24),
+
+          // ── DID card ────────────────────────────────────────────────
+          _infoCard(
+            label: 'Dezentrale ID (DID)',
+            child: GestureDetector(
+              onTap: _copyDid,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(identity.shortDid,
+                        style: const TextStyle(
+                            color: AppColors.onDark,
+                            fontSize: 14,
+                            fontFamily: 'monospace',
+                            letterSpacing: 0.8)),
                   ),
-                )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    // Identicon avatar
-                    Container(
-                      width: 100,
-                      height: 100,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border:
-                            Border.all(color: AppColors.gold, width: 2.5),
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      child: Identicon(
-                        bytes: _hexToBytes(identity.publicKeyHex),
-                        size: 100,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    // Pseudonym
-                    Text(
-                      identity.pseudonym,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: AppColors.onDark,
-                        fontSize: 26,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    // DID card
-                    Container(
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                            color: AppColors.gold.withValues(alpha: 0.25)),
-                      ),
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Dezentrale ID (DID)',
-                            style: TextStyle(
-                              color: AppColors.gold,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 0.8,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          GestureDetector(
-                            onTap: _copyDid,
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    identity.shortDid,
-                                    style: const TextStyle(
-                                      color: AppColors.onDark,
-                                      fontSize: 14,
-                                      fontFamily: 'monospace',
-                                      letterSpacing: 0.8,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                const Icon(
-                                  Icons.copy_outlined,
-                                  color: AppColors.gold,
-                                  size: 18,
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Tippe zum Kopieren',
-                            style: TextStyle(
-                              color: AppColors.onDark.withValues(alpha: 0.5),
-                              fontSize: 11,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    // QR code section
-                    Container(
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                            color: AppColors.gold.withValues(alpha: 0.25)),
-                      ),
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          const Text(
-                            'QR-Code zum Hinzufügen',
-                            style: TextStyle(
-                              color: AppColors.gold,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 0.8,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          QrImageView(
-                            data: identity.did,
-                            version: QrVersions.auto,
-                            size: 180,
-                            backgroundColor: Colors.white,
-                            eyeStyle: const QrEyeStyle(
-                              eyeShape: QrEyeShape.square,
-                              color: Color(0xFF000000),
-                            ),
-                            dataModuleStyle: const QrDataModuleStyle(
-                              dataModuleShape: QrDataModuleShape.square,
-                              color: Color(0xFF000000),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    // Public key card
-                    Container(
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                            color: AppColors.gold.withValues(alpha: 0.25)),
-                      ),
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Öffentlicher Schlüssel',
-                            style: TextStyle(
-                              color: AppColors.gold,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 0.8,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          GestureDetector(
-                            onTap: _copyPublicKey,
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    identity.shortPublicKey,
-                                    style: const TextStyle(
-                                      color: AppColors.onDark,
-                                      fontSize: 16,
-                                      fontFamily: 'monospace',
-                                      letterSpacing: 1.2,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                const Icon(
-                                  Icons.copy_outlined,
-                                  color: AppColors.gold,
-                                  size: 18,
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Tippe zum Kopieren',
-                            style: TextStyle(
-                              color: AppColors.onDark.withValues(alpha: 0.5),
-                              fontSize: 11,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    // Seed phrase button
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: _showSeedPhrase,
-                        icon: const Icon(Icons.key_outlined,
-                            color: AppColors.gold),
-                        label: const Text(
-                          'Seed Phrase anzeigen',
-                          style: TextStyle(color: AppColors.gold),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          padding:
-                              const EdgeInsets.symmetric(vertical: 14),
-                          side: BorderSide(
-                              color: AppColors.gold.withValues(alpha: 0.5)),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 56),
-                    // NEXUS branding
-                    Container(
-                      width: 56,
-                      height: 56,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border:
-                            Border.all(color: AppColors.gold, width: 1.5),
-                        color: AppColors.surface,
-                      ),
-                      child: const Center(
-                        child: Text(
-                          'N',
-                          style: TextStyle(
-                            color: AppColors.gold,
-                            fontSize: 28,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'N.E.X.U.S. OneApp',
-                      style: TextStyle(
-                        color: AppColors.onDark.withValues(alpha: 0.5),
-                        fontSize: 12,
-                        letterSpacing: 1.2,
-                      ),
-                    ),
-                  ],
-                ),
+                  const SizedBox(width: 8),
+                  const Icon(Icons.copy_outlined,
+                      color: AppColors.gold, size: 18),
+                ],
+              ),
+            ),
+            hint: 'Tippe zum Kopieren',
+          ),
+          const SizedBox(height: 16),
+
+          // ── QR code ─────────────────────────────────────────────────
+          _infoCard(
+            label: 'QR-Code zum Hinzufügen',
+            child: Center(
+              child: QrImageView(
+                data: identity.did,
+                version: QrVersions.auto,
+                size: 180,
+                backgroundColor: Colors.white,
+                eyeStyle: const QrEyeStyle(
+                    eyeShape: QrEyeShape.square,
+                    color: Color(0xFF000000)),
+                dataModuleStyle: const QrDataModuleStyle(
+                    dataModuleShape: QrDataModuleShape.square,
+                    color: Color(0xFF000000)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // ── Public key ──────────────────────────────────────────────
+          _infoCard(
+            label: 'Öffentlicher Schlüssel',
+            child: GestureDetector(
+              onTap: _copyPublicKey,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(identity.shortPublicKey,
+                        style: const TextStyle(
+                            color: AppColors.onDark,
+                            fontSize: 16,
+                            fontFamily: 'monospace',
+                            letterSpacing: 1.2)),
+                  ),
+                  const SizedBox(width: 8),
+                  const Icon(Icons.copy_outlined,
+                      color: AppColors.gold, size: 18),
+                ],
+              ),
+            ),
+            hint: 'Tippe zum Kopieren',
+          ),
+
+          // ── Meine Daten ─────────────────────────────────────────────
+          if (profile != null) ...[
+            const SizedBox(height: 24),
+            _sectionHeader('Meine Daten'),
+            const SizedBox(height: 12),
+            _dataCard(profile),
+          ],
+          const SizedBox(height: 24),
+
+          // ── Actions ─────────────────────────────────────────────────
+          _actionButton(
+            icon: Icons.key_outlined,
+            label: 'Seed Phrase anzeigen',
+            onPressed: _showSeedPhrase,
+          ),
+          const SizedBox(height: 12),
+          _actionButton(
+            icon: Icons.upload_outlined,
+            label: 'Daten exportieren',
+            onPressed: _exportData,
+          ),
+          const SizedBox(height: 40),
+
+          // ── Branding ────────────────────────────────────────────────
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: AppColors.gold, width: 1.5),
+              color: AppColors.surface,
+            ),
+            child: const Center(
+              child: Text('N',
+                  style: TextStyle(
+                      color: AppColors.gold,
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold)),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'N.E.X.U.S. OneApp  v0.1.0',
+            style: TextStyle(
+                color: AppColors.onDark.withValues(alpha: 0.5),
+                fontSize: 12,
+                letterSpacing: 1.2),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dataCard(UserProfile p) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.gold.withValues(alpha: 0.25)),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (p.realName.value != null)
+            _dataRow(Icons.person_outline, 'Klarname', p.realName.value!,
+                p.realName.visibility),
+          if (p.location.value != null)
+            _dataRow(Icons.place_outlined, 'Standort', p.location.value!,
+                p.location.visibility),
+          if (p.languages.value.isNotEmpty) ...[
+            _dataLabel(Icons.language, 'Sprachen', p.languages.visibility),
+            const SizedBox(height: 6),
+            _chipRow(p.languages.value),
+            const SizedBox(height: 12),
+          ],
+          if (p.skills.value.isNotEmpty) ...[
+            _dataLabel(Icons.build_outlined, 'Fähigkeiten',
+                p.skills.visibility),
+            const SizedBox(height: 6),
+            _chipRow(p.skills.value),
+            const SizedBox(height: 12),
+          ],
+          _dataRow(
+            Icons.cake_outlined,
+            'Geburtsdatum',
+            p.birthDate.value != null ? 'Gesetzt ✓' : 'Nicht gesetzt',
+            p.birthDate.visibility,
+            valueColor: p.birthDate.value != null
+                ? Colors.greenAccent.shade700
+                : AppColors.onDark.withValues(alpha: 0.5),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dataRow(
+    IconData icon,
+    String label,
+    String value,
+    VisibilityLevel visibility, {
+    Color? valueColor,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          Icon(icon,
+              color: AppColors.onDark.withValues(alpha: 0.5), size: 16),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label,
+                  style: TextStyle(
+                      color: AppColors.onDark.withValues(alpha: 0.5),
+                      fontSize: 11)),
+              Text(value,
+                  style: TextStyle(
+                      color: valueColor ?? AppColors.onDark,
+                      fontSize: 14)),
+            ],
+          ),
+          const Spacer(),
+          Icon(_visibilityIcon(visibility),
+              color: AppColors.gold.withValues(alpha: 0.6), size: 14),
+        ],
+      ),
+    );
+  }
+
+  Widget _dataLabel(
+      IconData icon, String label, VisibilityLevel visibility) {
+    return Row(
+      children: [
+        Icon(icon,
+            color: AppColors.onDark.withValues(alpha: 0.5), size: 16),
+        const SizedBox(width: 8),
+        Text(label,
+            style: TextStyle(
+                color: AppColors.onDark.withValues(alpha: 0.5),
+                fontSize: 11)),
+        const Spacer(),
+        Icon(_visibilityIcon(visibility),
+            color: AppColors.gold.withValues(alpha: 0.6), size: 14),
+      ],
+    );
+  }
+
+  Widget _chipRow(List<String> items) {
+    return Wrap(
+      spacing: 6,
+      runSpacing: 4,
+      children: items
+          .map((c) => Chip(
+                label: Text(c,
+                    style: const TextStyle(
+                        fontSize: 11, color: AppColors.deepBlue)),
+                backgroundColor: AppColors.gold.withValues(alpha: 0.85),
+                padding: EdgeInsets.zero,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ))
+          .toList(),
+    );
+  }
+
+  Widget _infoCard({
+    required String label,
+    required Widget child,
+    String? hint,
+  }) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border:
+            Border.all(color: AppColors.gold.withValues(alpha: 0.25)),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: const TextStyle(
+                  color: AppColors.gold,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.8)),
+          const SizedBox(height: 8),
+          child,
+          if (hint != null) ...[
+            const SizedBox(height: 4),
+            Text(hint,
+                style: TextStyle(
+                    color: AppColors.onDark.withValues(alpha: 0.5),
+                    fontSize: 11)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionHeader(String text) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: AppColors.gold,
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.8,
+        ),
+      ),
+    );
+  }
+
+  Widget _actionButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+  }) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, color: AppColors.gold),
+        label: Text(label, style: const TextStyle(color: AppColors.gold)),
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          side:
+              BorderSide(color: AppColors.gold.withValues(alpha: 0.5)),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12)),
         ),
       ),
     );

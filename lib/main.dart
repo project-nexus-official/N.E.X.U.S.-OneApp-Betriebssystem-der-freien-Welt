@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:nexus_oneapp/core/contacts/contact_service.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
+import 'package:nexus_oneapp/core/identity/profile_service.dart';
 import 'package:nexus_oneapp/core/router.dart';
+import 'package:nexus_oneapp/core/storage/pod_database.dart';
 import 'package:nexus_oneapp/features/chat/chat_provider.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
 import 'package:provider/provider.dart';
@@ -8,7 +11,25 @@ import 'package:provider/provider.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await IdentityService.instance.init();
+  if (IdentityService.instance.hasIdentity) {
+    await initServicesAfterIdentity();
+  }
   runApp(const NexusApp());
+}
+
+/// Opens the encrypted POD and loads profile + contacts.
+/// Call this once after identity is created or restored.
+Future<void> initServicesAfterIdentity() async {
+  try {
+    final encKey = await IdentityService.instance.getPodEncryptionKey();
+    await PodDatabase.instance.open(encKey);
+    final pseudonym =
+        IdentityService.instance.currentIdentity!.pseudonym;
+    await ProfileService.instance.load(pseudonym);
+    await ContactService.instance.load();
+  } catch (e) {
+    debugPrint('[NEXUS] Storage init error: $e');
+  }
 }
 
 class NexusApp extends StatelessWidget {
