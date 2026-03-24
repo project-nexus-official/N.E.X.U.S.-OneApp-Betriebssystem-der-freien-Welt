@@ -45,6 +45,9 @@ dependencies:
   image: ^4.3.0
   path_provider: ^2.1.5
 
+  # Emoji picker panel
+  emoji_picker_flutter: ^2.2.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

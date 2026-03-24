@@ -1,0 +1,227 @@
+import 'dart:async';
+
+import '../../core/contacts/contact.dart';
+import '../../core/contacts/contact_service.dart';
+import '../../core/identity/identity_service.dart';
+import '../../core/storage/pod_database.dart';
+import '../../core/transport/nexus_message.dart';
+import 'conversation.dart';
+
+/// Manages the conversation list (inbox).
+///
+/// Reads from [PodDatabase] and provides a reactive [stream] of sorted
+/// [Conversation] objects. Call [notifyUpdate] whenever new messages arrive or
+/// are sent so the stream emits fresh data.
+class ConversationService {
+  ConversationService._();
+  static final instance = ConversationService._();
+
+  final _controller = StreamController<List<Conversation>>.broadcast();
+
+  /// Live stream of conversations, sorted by lastMessageTime (pinned first).
+  Stream<List<Conversation>> get stream => _controller.stream;
+
+  /// Millisecond timestamps of the last-read message per conversationId.
+  final Map<String, int> _lastRead = {};
+
+  // ── Initialisation ──────────────────────────────────────────────────────
+
+  /// Loads persisted last-read timestamps from the POD.
+  Future<void> load() async {
+    try {
+      final data =
+          await PodDatabase.instance.getIdentityValue('conv_last_read');
+      if (data != null) {
+        for (final entry in data.entries) {
+          _lastRead[entry.key] = (entry.value as num).toInt();
+        }
+      }
+    } catch (_) {
+      // POD might not be open yet; ignore on startup.
+    }
+  }
+
+  // ── Public API ──────────────────────────────────────────────────────────
+
+  /// Returns all conversations sorted: pinned first, then by lastMessageTime
+  /// descending.
+  Future<List<Conversation>> getConversations() async {
+    try {
+      final summaries =
+          await PodDatabase.instance.listConversationSummaries();
+
+      final myDid =
+          IdentityService.instance.currentIdentity?.did ?? '';
+
+      final conversations = <Conversation>[];
+
+      for (final summary in summaries) {
+        final convId = summary['conversation_id'] as String;
+        final lastTs = (summary['last_ts'] as num).toInt();
+
+        final lastMsgs =
+            await PodDatabase.instance.listLastMessages(convId, limit: 1);
+        final lastMsg = lastMsgs.isNotEmpty ? lastMsgs.first : null;
+
+        final lastBody = _previewBody(lastMsg);
+        final lastTime =
+            DateTime.fromMillisecondsSinceEpoch(lastTs, isUtc: true);
+
+        final lastReadTs = _lastRead[convId] ?? 0;
+        final unread =
+            await PodDatabase.instance.countMessagesAfter(convId, lastReadTs);
+
+        if (convId == NexusMessage.broadcastDid) {
+          conversations.add(Conversation(
+            id: convId,
+            peerDid: NexusMessage.broadcastDid,
+            peerPseudonym: '#mesh',
+            lastMessage: lastBody,
+            lastMessageTime: lastTime,
+            unreadCount: unread,
+            isPinned: true,
+          ));
+        } else {
+          final peerDid = Conversation.peerDidFrom(convId, myDid);
+          if (peerDid == null) continue;
+
+          // Look up pseudonym from contacts, fall back to short DID.
+          final contact = _findContact(peerDid);
+          final pseudonym = contact?.pseudonym ??
+              (peerDid.length > 12
+                  ? peerDid.substring(peerDid.length - 12)
+                  : peerDid);
+          final profileImage = contact?.profileImage;
+
+          conversations.add(Conversation(
+            id: convId,
+            peerDid: peerDid,
+            peerPseudonym: pseudonym,
+            peerProfileImage: profileImage,
+            lastMessage: lastBody,
+            lastMessageTime: lastTime,
+            unreadCount: unread,
+          ));
+        }
+      }
+
+      // Sort: pinned first, then by lastMessageTime descending.
+      conversations.sort((a, b) {
+        if (a.isPinned && !b.isPinned) return -1;
+        if (!a.isPinned && b.isPinned) return 1;
+        return b.lastMessageTime.compareTo(a.lastMessageTime);
+      });
+
+      return conversations;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Ensures the #mesh broadcast conversation always appears even before any
+  /// broadcast message has been received.
+  Future<List<Conversation>> getConversationsWithMesh() async {
+    final conversations = await getConversations();
+
+    final hasMesh =
+        conversations.any((c) => c.id == NexusMessage.broadcastDid);
+    if (!hasMesh) {
+      conversations.insert(
+        0,
+        Conversation(
+          id: NexusMessage.broadcastDid,
+          peerDid: NexusMessage.broadcastDid,
+          peerPseudonym: '#mesh',
+          lastMessage: 'Broadcast-Kanal für alle in Reichweite',
+          lastMessageTime: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+          isPinned: true,
+        ),
+      );
+    }
+
+    return conversations;
+  }
+
+  /// Finds or synthesises a [Conversation] for [peerDid].
+  Future<Conversation> getOrCreateConversation(
+    String peerDid,
+    String peerPseudonym,
+  ) async {
+    final myDid =
+        IdentityService.instance.currentIdentity?.did ?? '';
+    final convId = peerDid == NexusMessage.broadcastDid
+        ? NexusMessage.broadcastDid
+        : Conversation.directId(peerDid, myDid);
+
+    final conversations = await getConversations();
+    return conversations.firstWhere(
+      (c) => c.id == convId,
+      orElse: () => Conversation(
+        id: convId,
+        peerDid: peerDid,
+        peerPseudonym: peerPseudonym,
+        lastMessage: '',
+        lastMessageTime: DateTime.now().toUtc(),
+      ),
+    );
+  }
+
+  /// Records that the user has read all messages in [conversationId].
+  Future<void> markAsRead(String conversationId) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    _lastRead[conversationId] = now;
+    await _persistLastRead();
+    notifyUpdate();
+  }
+
+  /// Returns the number of unread messages in [conversationId].
+  Future<int> getUnreadCount(String conversationId) async {
+    final lastReadTs = _lastRead[conversationId] ?? 0;
+    return PodDatabase.instance.countMessagesAfter(conversationId, lastReadTs);
+  }
+
+  /// Deletes all messages in [conversationId] from the POD.
+  Future<void> deleteConversation(String conversationId) async {
+    await PodDatabase.instance.deleteConversation(conversationId);
+    _lastRead.remove(conversationId);
+    await _persistLastRead();
+    notifyUpdate();
+  }
+
+  /// Triggers a fresh load and emits on [stream].
+  /// Called by [ChatProvider] whenever a message is sent or received.
+  void notifyUpdate() {
+    getConversationsWithMesh().then((convs) {
+      if (!_controller.isClosed) _controller.add(convs);
+    });
+  }
+
+  // ── Internals ───────────────────────────────────────────────────────────
+
+  String _previewBody(Map<String, dynamic>? msg) {
+    if (msg == null) return '…';
+    final type = msg['type'] as String? ?? 'text';
+    if (type == 'image') return '📷 Foto';
+    final body = msg['body'] as String? ?? '';
+    return body.length > 60 ? body.substring(0, 60) : body;
+  }
+
+  Contact? _findContact(String did) {
+    try {
+      return ContactService.instance.contacts.firstWhere((c) => c.did == did);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _persistLastRead() async {
+    try {
+      await PodDatabase.instance.setIdentityValue(
+        'conv_last_read',
+        Map<String, dynamic>.from(
+          _lastRead.map((k, v) => MapEntry(k, v)),
+        ),
+      );
+    } catch (_) {}
+  }
+}

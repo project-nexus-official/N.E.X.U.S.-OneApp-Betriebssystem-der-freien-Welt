@@ -212,6 +212,67 @@ class PodDatabase {
     return result;
   }
 
+  // ── Conversation helpers ──────────────────────────────────────────────────
+
+  /// Returns one row per conversation: { conversation_id, last_ts }.
+  /// Ordered by most-recent message first.
+  Future<List<Map<String, dynamic>>> listConversationSummaries() async {
+    final rows = await _database.rawQuery('''
+      SELECT conversation_id, MAX(ts) AS last_ts
+      FROM pod_messages
+      GROUP BY conversation_id
+      ORDER BY last_ts DESC
+    ''');
+    return List<Map<String, dynamic>>.from(rows);
+  }
+
+  /// Returns the last [limit] messages for [conversationId] (newest first).
+  /// Each row is decrypted and includes sender_did and ts.
+  Future<List<Map<String, dynamic>>> listLastMessages(
+    String conversationId, {
+    int limit = 1,
+  }) async {
+    final rows = await _database.query(
+      'pod_messages',
+      where: 'conversation_id = ?',
+      whereArgs: [conversationId],
+      orderBy: 'ts DESC',
+      limit: limit,
+    );
+    final result = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      try {
+        final plain =
+            await PodEncryption.decrypt(row['enc'] as String, _key);
+        final data = jsonDecode(plain) as Map<String, dynamic>;
+        result.add({'sender_did': row['sender_did'], 'ts': row['ts'], ...data});
+      } catch (_) {
+        // Skip unreadable rows
+      }
+    }
+    return result;
+  }
+
+  /// Counts messages in [conversationId] received after [afterTimestampMs].
+  Future<int> countMessagesAfter(
+      String conversationId, int afterTimestampMs) async {
+    final rows = await _database.rawQuery(
+      'SELECT COUNT(*) AS cnt FROM pod_messages '
+      'WHERE conversation_id = ? AND ts > ?',
+      [conversationId, afterTimestampMs],
+    );
+    return (rows.first['cnt'] as int?) ?? 0;
+  }
+
+  /// Deletes all messages belonging to [conversationId].
+  Future<void> deleteConversation(String conversationId) async {
+    await _database.delete(
+      'pod_messages',
+      where: 'conversation_id = ?',
+      whereArgs: [conversationId],
+    );
+  }
+
   // ── Export / Import ───────────────────────────────────────────────────────
 
   /// Exports all pod data as a single AES-256-GCM encrypted JSON blob.

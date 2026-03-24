@@ -7,7 +7,143 @@ import '../../shared/theme/app_theme.dart';
 import 'chat_provider.dart';
 import 'conversation_screen.dart';
 
-/// Main chat screen: animierter Radar + Peer-Entdeckungs-Liste.
+/// Standalone peer-discovery screen opened from the conversations inbox FAB.
+///
+/// Shows the animated radar and a live peer list. Tapping a peer opens (or
+/// creates) the corresponding direct conversation.
+class RadarScreen extends StatefulWidget {
+  const RadarScreen({super.key});
+
+  @override
+  State<RadarScreen> createState() => _RadarScreenState();
+}
+
+class _RadarScreenState extends State<RadarScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<ChatProvider>().initialize();
+    });
+  }
+
+  void _showAddPeerDialog(BuildContext context, ChatProvider provider) {
+    final ctrl = TextEditingController();
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text(
+          'Gerät per IP verbinden',
+          style: TextStyle(color: AppColors.gold),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Gib die IP-Adresse des anderen Geräts ein.\n'
+              'Nutze dies wenn der Status-Punkt gelb bleibt '
+              '(z. B. Windows-Firewall blockiert UDP-Broadcast).',
+              style: TextStyle(
+                  color: AppColors.onDark, fontSize: 13, height: 1.5),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(color: AppColors.onDark),
+              decoration: InputDecoration(
+                hintText: '192.168.1.42',
+                hintStyle:
+                    TextStyle(color: AppColors.onDark.withValues(alpha: 0.4)),
+                filled: true,
+                fillColor: AppColors.surfaceVariant,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 10),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child:
+                const Text('Abbrechen', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.gold,
+              foregroundColor: AppColors.deepBlue,
+            ),
+            onPressed: () {
+              final ip = ctrl.text.trim();
+              if (ip.isNotEmpty) {
+                provider.addLanPeer(ip);
+                Navigator.of(ctx).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Verbindungsversuch zu $ip gestartet…'),
+                    duration: const Duration(seconds: 3),
+                  ),
+                );
+              }
+            },
+            child: const Text('Verbinden'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Peers entdecken'),
+        actions: [
+          Consumer<ChatProvider>(
+            builder: (context, provider, _) => IconButton(
+              icon: const Icon(Icons.add_link, size: 22),
+              tooltip: 'Gerät per IP verbinden',
+              onPressed: () => _showAddPeerDialog(context, provider),
+            ),
+          ),
+          Consumer<ChatProvider>(
+            builder: (context, provider, _) => _MeshStatusDot(
+              running: provider.running,
+              hasPeers: provider.peers.isNotEmpty,
+            ),
+          ),
+        ],
+      ),
+      body: Consumer<ChatProvider>(
+        builder: (context, provider, _) {
+          if (!provider.initialized) return const _LoadingBody();
+          if (!provider.permissionsGranted) {
+            return _PermissionDeniedBody(onRetry: provider.initialize);
+          }
+          if (provider.error != null && !provider.running) {
+            return _ErrorBody(
+              error: provider.error!,
+              onRetry: provider.initialize,
+            );
+          }
+          return _ChatBody(provider: provider);
+        },
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Legacy entry point kept for compatibility. Prefer [RadarScreen].
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
 
@@ -331,7 +467,11 @@ class _PeerTile extends StatelessWidget {
         MaterialPageRoute<void>(
           builder: (_) => ChangeNotifierProvider.value(
             value: provider,
-            child: ConversationScreen(peer: peer),
+            child: ConversationScreen(
+              peerDid: peer.did,
+              peerPseudonym: peer.pseudonym,
+              peer: peer,
+            ),
           ),
         ),
       ),

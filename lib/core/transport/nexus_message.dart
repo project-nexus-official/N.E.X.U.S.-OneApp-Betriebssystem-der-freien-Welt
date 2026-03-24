@@ -4,7 +4,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 /// Message types in the NEXUS mesh protocol.
-enum NexusMessageType { text, channel, system }
+enum NexusMessageType { text, channel, system, image }
 
 /// A NEXUS mesh protocol message.
 ///
@@ -28,6 +28,8 @@ class NexusMessage {
   /// Optional channel name, e.g. "#mesh" or "#hilfe".
   final String? channel;
 
+  /// Message body. For [NexusMessageType.text] this is plain text; for
+  /// [NexusMessageType.image] this is a base64-encoded JPEG (max 1024px).
   final String body;
   final DateTime timestamp;
 
@@ -40,6 +42,10 @@ class NexusMessage {
   /// Base64-encoded Ed25519 signature over [toSignableBytes()].
   final String? signature;
 
+  /// Optional metadata map. For image messages:
+  ///   { "width": int, "height": int, "thumbnail": base64String }
+  final Map<String, dynamic>? metadata;
+
   const NexusMessage({
     required this.id,
     required this.fromDid,
@@ -51,6 +57,7 @@ class NexusMessage {
     this.ttlHours = defaultTtlHours,
     this.hopCount = 0,
     this.signature,
+    this.metadata,
   });
 
   /// Creates a new outgoing message with a generated UUID.
@@ -61,6 +68,7 @@ class NexusMessage {
     String? channel,
     required String body,
     int ttlHours = defaultTtlHours,
+    Map<String, dynamic>? metadata,
   }) {
     return NexusMessage(
       id: _generateId(),
@@ -71,6 +79,7 @@ class NexusMessage {
       body: body,
       timestamp: DateTime.now().toUtc(),
       ttlHours: ttlHours,
+      metadata: metadata,
     );
   }
 
@@ -92,6 +101,7 @@ class NexusMessage {
         ttlHours: ttlHours,
         hopCount: hopCount,
         signature: sig,
+        metadata: metadata,
       );
 
   NexusMessage withIncrementedHopCount() => NexusMessage(
@@ -105,6 +115,7 @@ class NexusMessage {
         ttlHours: ttlHours,
         hopCount: hopCount + 1,
         signature: signature,
+        metadata: metadata,
       );
 
   // ── Serialization ──────────────────────────────────────────────────────────
@@ -120,6 +131,7 @@ class NexusMessage {
         'hop': hopCount,
         if (channel != null) 'ch': channel,
         if (signature != null) 'sig': signature,
+        if (metadata != null) 'meta': metadata,
       };
 
   factory NexusMessage.fromJson(Map<String, dynamic> json) {
@@ -140,6 +152,9 @@ class NexusMessage {
       hopCount: (json['hop'] as int?) ?? 0,
       channel: json['ch'] as String?,
       signature: json['sig'] as String?,
+      metadata: json['meta'] != null
+          ? Map<String, dynamic>.from(json['meta'] as Map)
+          : null,
     );
   }
 
@@ -188,5 +203,5 @@ class NexusMessage {
   @override
   String toString() =>
       'NexusMessage(id: ${id.substring(0, 8)}, from: ${fromDid.substring(0, 12)}, '
-      'body: "${body.length > 30 ? body.substring(0, 30) : body}")';
+      'type: ${type.name}, body: "${body.length > 30 ? body.substring(0, 30) : body}")';
 }

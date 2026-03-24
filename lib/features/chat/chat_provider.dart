@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:image/image.dart' as img;
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/identity/identity_service.dart';
@@ -11,6 +13,7 @@ import '../../core/transport/lan/lan_transport.dart';
 import '../../core/transport/nexus_message.dart';
 import '../../core/transport/nexus_peer.dart';
 import '../../core/transport/transport_manager.dart';
+import 'conversation_service.dart';
 
 /// ViewModel for the chat feature.
 ///
@@ -20,6 +23,7 @@ import '../../core/transport/transport_manager.dart';
 ///     and [LanTransport] (all platforms).
 ///   - Forward incoming [NexusMessage]s to the UI and persist them in the POD.
 ///   - Expose a per-conversation message list and peer list.
+///   - Notify [ConversationService] on every message event.
 class ChatProvider extends ChangeNotifier {
   ChatProvider() : _manager = TransportManager.instance;
 
@@ -140,13 +144,14 @@ class ChatProvider extends ChangeNotifier {
     final myDid = IdentityService.instance.currentIdentity?.did ?? '';
 
     final convId = msg.isBroadcast
-        ? 'broadcast'
+        ? NexusMessage.broadcastDid
         : _conversationId(msg.fromDid, myDid);
 
     _conversationCache.putIfAbsent(convId, () => []);
     _conversationCache[convId]!.add(msg);
 
     _persistMessage(convId, msg);
+    ConversationService.instance.notifyUpdate();
 
     notifyListeners();
   }
@@ -165,7 +170,7 @@ class ChatProvider extends ChangeNotifier {
 
   // ── Sending ────────────────────────────────────────────────────────────────
 
-  /// Sends a direct message to [recipientDid].
+  /// Sends a direct text message to [recipientDid].
   Future<void> sendMessage(String recipientDid, String text) async {
     final myDid = IdentityService.instance.currentIdentity?.did ?? 'unknown';
 
@@ -182,7 +187,78 @@ class ChatProvider extends ChangeNotifier {
     _conversationCache.putIfAbsent(convId, () => []);
     _conversationCache[convId]!.add(msg);
     await _persistMessage(convId, msg);
+    ConversationService.instance.notifyUpdate();
 
+    notifyListeners();
+  }
+
+  /// Sends a broadcast message to the #mesh channel.
+  Future<void> sendBroadcast(String text) async {
+    final myDid = IdentityService.instance.currentIdentity?.did ?? 'unknown';
+
+    final msg = NexusMessage.create(
+      fromDid: myDid,
+      toDid: NexusMessage.broadcastDid,
+      body: text,
+      channel: '#mesh',
+    );
+
+    await _manager.sendMessage(msg);
+
+    _conversationCache.putIfAbsent(NexusMessage.broadcastDid, () => []);
+    _conversationCache[NexusMessage.broadcastDid]!.add(msg);
+    await _persistMessage(NexusMessage.broadcastDid, msg);
+    ConversationService.instance.notifyUpdate();
+
+    notifyListeners();
+  }
+
+  /// Sends a JPEG image to [recipientDid] (or broadcast if null).
+  ///
+  /// [imageBytes] should be the raw file bytes of any supported image format.
+  /// The image is resized to max 1024 px on the longest side and compressed to
+  /// JPEG quality 75.  A 200 px thumbnail is also generated for previews.
+  ///
+  /// Throws [UnsupportedError] if the image cannot be decoded.
+  Future<void> sendImage(
+    String recipientDid,
+    Uint8List imageBytes,
+  ) async {
+    final myDid = IdentityService.instance.currentIdentity?.did ?? 'unknown';
+
+    final (base64Full, base64Thumb, width, height) =
+        await compute(_processImage, imageBytes);
+
+    final msg = NexusMessage.create(
+      fromDid: myDid,
+      toDid: recipientDid,
+      type: NexusMessageType.image,
+      body: base64Full,
+      metadata: {
+        'width': width,
+        'height': height,
+        'thumbnail': base64Thumb,
+      },
+    );
+
+    await _manager.sendMessage(msg, recipientDid: recipientDid);
+
+    final convId = recipientDid == NexusMessage.broadcastDid
+        ? NexusMessage.broadcastDid
+        : _conversationId(recipientDid, myDid);
+
+    _conversationCache.putIfAbsent(convId, () => []);
+    _conversationCache[convId]!.add(msg);
+    await _persistMessage(convId, msg);
+    ConversationService.instance.notifyUpdate();
+
+    notifyListeners();
+  }
+
+  /// Deletes all messages in [conversationId] from cache and POD.
+  Future<void> deleteConversation(String conversationId) async {
+    _conversationCache.remove(conversationId);
+    await ConversationService.instance.deleteConversation(conversationId);
     notifyListeners();
   }
 
@@ -241,4 +317,52 @@ class ChatProvider extends ChangeNotifier {
     _manager.stop();
     super.dispose();
   }
+}
+
+// ── Image processing (runs in isolate via compute) ────────────────────────────
+
+/// Resizes and compresses an image for transport.
+///
+/// Returns (base64Full, base64Thumbnail, width, height).
+(String, String, int, int) _processImage(Uint8List rawBytes) {
+  final original = img.decodeImage(rawBytes);
+  if (original == null) {
+    throw UnsupportedError('Ungültiges Bildformat.');
+  }
+
+  // Resize to max 1024 px on the longest side
+  const maxSize = 1024;
+  final img.Image resized;
+  if (original.width >= original.height) {
+    resized = original.width > maxSize
+        ? img.copyResize(original, width: maxSize)
+        : original;
+  } else {
+    resized = original.height > maxSize
+        ? img.copyResize(original, height: maxSize)
+        : original;
+  }
+
+  // Thumbnail – max 200 px on the longest side
+  const thumbSize = 200;
+  final img.Image thumb;
+  if (resized.width >= resized.height) {
+    thumb = resized.width > thumbSize
+        ? img.copyResize(resized, width: thumbSize)
+        : resized;
+  } else {
+    thumb = resized.height > thumbSize
+        ? img.copyResize(resized, height: thumbSize)
+        : resized;
+  }
+
+  final jpegFull = img.encodeJpg(resized, quality: 75);
+  final jpegThumb = img.encodeJpg(thumb, quality: 75);
+
+  return (
+    base64Encode(jpegFull),
+    base64Encode(jpegThumb),
+    resized.width,
+    resized.height,
+  );
 }

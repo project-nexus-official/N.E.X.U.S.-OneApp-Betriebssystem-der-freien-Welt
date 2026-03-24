@@ -1,6 +1,6 @@
 import 'package:go_router/go_router.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
-import 'package:nexus_oneapp/features/chat/chat_screen.dart';
+import 'package:nexus_oneapp/features/chat/conversations_screen.dart';
 import 'package:nexus_oneapp/features/governance/governance_screen.dart';
 import 'package:nexus_oneapp/features/onboarding/onboarding_screen.dart';
 import 'package:nexus_oneapp/features/onboarding/restore_screen.dart';
@@ -43,7 +43,7 @@ final router = GoRouter(
       routes: [
         GoRoute(
           path: '/chat',
-          builder: (context, state) => const ChatScreen(),
+          builder: (context, state) => const ConversationsScreen(),
         ),
         GoRoute(
           path: '/wallet',
