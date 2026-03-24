@@ -10,19 +10,21 @@ import 'nexus_peer.dart';
 /// Manages all registered transport backends with automatic fallback.
 ///
 /// Fallback cascade (registration order):
-///   BLE (preferred, offline-first) → Nostr (internet) → LoRa → …
+///   LAN (preferred for direct messages) → BLE → Nostr → …
 ///
 /// Responsibilities:
 ///   - Start / stop all transports.
-///   - Merge peer lists and message streams across all transports.
+///   - Merge peer lists across transports; track which transports each peer
+///     is visible on ([NexusPeer.availableTransports]).
 ///   - Deduplicate incoming messages by ID.
 ///   - Sign outgoing messages with the node's Ed25519 key pair.
-///   - Relay messages via the best available transport.
+///   - For directed messages: prefer LAN when the recipient is reachable via LAN.
 ///
 /// Usage:
 /// ```dart
 /// final manager = TransportManager.instance;
 /// manager.registerTransport(BleTransport(myDid));
+/// manager.registerTransport(LanTransport(myDid));
 /// manager.setSigningKeyPair(keyPair);
 /// await manager.start();
 /// manager.sendMessage(NexusMessage.create(...));
@@ -39,6 +41,10 @@ class TransportManager {
 
   // All known peers keyed by DID (merged across transports)
   final Map<String, NexusPeer> _peers = {};
+
+  // Transport type → set of peer DIDs currently visible on that transport.
+  // Used for LAN-prefer routing and for maintaining availableTransports.
+  final Map<TransportType, Set<String>> _peersByTransport = {};
 
   // Message deduplication
   final Set<String> _seenIds = {};
@@ -75,13 +81,17 @@ class TransportManager {
   bool get isRunning => activeTransportType != null;
 
   /// Registers a transport backend. Call before [start].
-  /// Register in fallback priority order (BLE first, Nostr second, …).
+  /// BLE should be registered first (so it acts as the default fallback when
+  /// LAN is unavailable).
   void registerTransport(MessageTransport transport) {
     _transports.add(transport);
   }
 
   /// Clears all registered transports (call [stop] first).
-  void clearTransports() => _transports.clear();
+  void clearTransports() {
+    _transports.clear();
+    _peersByTransport.clear();
+  }
 
   /// Sets the Ed25519 key pair used to sign every outgoing message.
   void setSigningKeyPair(SimpleKeyPair keyPair) {
@@ -102,8 +112,11 @@ class TransportManager {
 
   /// Sends a message. Signs it if a key pair is configured.
   ///
-  /// Tries transports in registration order; falls back to the next one
-  /// if the preferred transport is unavailable.
+  /// Routing strategy for directed messages ([recipientDid] != null):
+  ///   1. Prefer LAN if the recipient is known via LAN (faster, no fragmentation).
+  ///   2. Otherwise try transports in registration order.
+  ///
+  /// For broadcast messages the registration-order cascade is used.
   Future<void> sendMessage(
     NexusMessage message, {
     String? recipientDid,
@@ -122,8 +135,10 @@ class TransportManager {
     // Mark as seen so we don't echo our own messages
     _markSeen(msg.id);
 
-    // Try transports in order (fallback cascade)
-    for (final transport in _transports) {
+    // Build the transport priority list
+    final ordered = _buildTransportOrder(recipientDid);
+
+    for (final transport in ordered) {
       if (transport.state == TransportState.error) continue;
       try {
         await transport.sendMessage(msg, recipientDid: recipientDid);
@@ -149,6 +164,25 @@ class TransportManager {
       } catch (_) {}
     }
     _peers.clear();
+    _peersByTransport.clear();
+  }
+
+  // ── Routing helpers ────────────────────────────────────────────────────────
+
+  /// Returns transports sorted so that LAN comes first for a directed message
+  /// if (and only if) the recipient is currently visible via LAN.
+  List<MessageTransport> _buildTransportOrder(String? recipientDid) {
+    if (recipientDid == null) return List.from(_transports);
+
+    final lanTransports = _transports.where((t) =>
+        t.type == TransportType.lan &&
+        t.state != TransportState.error &&
+        t.currentPeers.any((p) => p.did == recipientDid)).toList();
+
+    if (lanTransports.isEmpty) return List.from(_transports);
+
+    final rest = _transports.where((t) => !lanTransports.contains(t)).toList();
+    return [...lanTransports, ...rest];
   }
 
   // ── Internals ──────────────────────────────────────────────────────────────
@@ -163,12 +197,70 @@ class TransportManager {
 
     // Peer list updates
     _subs.add(transport.onPeersChanged.listen((peers) {
-      for (final peer in peers) {
-        _peers[peer.did] = peer;
-      }
-      _evictStalePeers();
-      _peersController.add(List.from(_peers.values));
+      _mergePeerUpdate(transport.type, peers);
     }));
+  }
+
+  void _mergePeerUpdate(
+    TransportType transportType,
+    List<NexusPeer> updatedPeers,
+  ) {
+    final newDids = updatedPeers.map((p) => p.did).toSet();
+    final oldDids = _peersByTransport[transportType] ?? const <String>{};
+
+    // Update the per-transport DID set
+    _peersByTransport[transportType] = newDids;
+
+    // Handle peers that disappeared from this transport
+    for (final removedDid in oldDids.difference(newDids)) {
+      final existing = _peers[removedDid];
+      if (existing == null) continue;
+
+      final remaining = Set<TransportType>.from(existing.availableTransports)
+        ..remove(transportType);
+
+      if (remaining.isEmpty) {
+        _peers.remove(removedDid);
+      } else {
+        // Demote to the next best transport
+        final newPrimary = _preferredType(remaining);
+        _peers[removedDid] = existing.copyWith(
+          transportType: newPrimary,
+          availableTransports: remaining,
+        );
+      }
+    }
+
+    // Add / update peers reported by this transport
+    for (final peer in updatedPeers) {
+      final existing = _peers[peer.did];
+      final allTransports = <TransportType>{
+        ...(existing?.availableTransports ?? const <TransportType>{}),
+        transportType,
+      };
+      final primary = _preferredType(allTransports);
+
+      _peers[peer.did] = NexusPeer(
+        did: peer.did,
+        pseudonym: peer.pseudonym,
+        transportType: primary,
+        availableTransports: allTransports,
+        signalStrength: peer.signalStrength ?? existing?.signalStrength,
+        lastSeen: peer.lastSeen,
+      );
+    }
+
+    _evictStalePeers();
+    _peersController.add(List.from(_peers.values));
+  }
+
+  /// Returns the preferred primary transport type from a set of available ones.
+  /// Priority: LAN > BLE > Nostr > others.
+  static TransportType _preferredType(Set<TransportType> types) {
+    if (types.contains(TransportType.lan)) return TransportType.lan;
+    if (types.contains(TransportType.ble)) return TransportType.ble;
+    if (types.contains(TransportType.nostr)) return TransportType.nostr;
+    return types.first;
   }
 
   bool _isDuplicate(String msgId) {
@@ -179,7 +271,6 @@ class TransportManager {
 
   void _markSeen(String msgId) {
     if (_seenIds.length >= _maxSeenIds) {
-      // Simple eviction: remove half the oldest entries
       final toRemove = _seenIds.take(_maxSeenIds ~/ 2).toList();
       _seenIds.removeAll(toRemove);
     }

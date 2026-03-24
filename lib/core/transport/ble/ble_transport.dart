@@ -80,14 +80,29 @@ class BleTransport implements MessageTransport {
   // Subscriptions
   final List<StreamSubscription<dynamic>> _subs = [];
 
+  // ── currentPeers ───────────────────────────────────────────────────────────
+
+  @override
+  List<NexusPeer> get currentPeers => List.unmodifiable(_connectedPeers.values);
+
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   @override
   Future<void> start() async {
     if (_state != TransportState.idle) return;
 
-    final adapterState = await FlutterBluePlus.adapterState.first;
-    if (adapterState != BluetoothAdapterState.on) {
+    try {
+      // Use a short timeout so desktop platforms don't hang indefinitely
+      // when BLE hardware is absent or the platform is unsupported.
+      final adapterState = await FlutterBluePlus.adapterState.first
+          .timeout(const Duration(seconds: 4));
+      if (adapterState != BluetoothAdapterState.on) {
+        _state = TransportState.error;
+        return;
+      }
+    } catch (_) {
+      // BLE adapter unavailable (desktop without BLE hardware, unsupported
+      // platform, or permission denied). Degrade gracefully.
       _state = TransportState.error;
       return;
     }

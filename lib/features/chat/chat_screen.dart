@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/transport/message_transport.dart';
 import '../../core/transport/nexus_peer.dart';
 import '../../shared/theme/app_theme.dart';
 import 'chat_provider.dart';
@@ -18,7 +19,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    // Start BLE after the first frame so context is available
+    // Start transport stack after the first frame so context is available.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<ChatProvider>().initialize();
     });
@@ -31,8 +32,10 @@ class _ChatScreenState extends State<ChatScreen> {
         title: const Text('NEXUS Mesh'),
         actions: [
           Consumer<ChatProvider>(
-            builder: (context, provider, _) =>
-                _MeshStatusDot(running: provider.running),
+            builder: (context, provider, _) => _MeshStatusDot(
+              running: provider.running,
+              hasPeers: provider.peers.isNotEmpty,
+            ),
           ),
         ],
       ),
@@ -57,7 +60,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 }
 
-// ── Sub-widgets ─────────────────────────────────────────────────────────────
+// ── Sub-widgets ──────────────────────────────────────────────────────────────
 
 class _LoadingBody extends StatelessWidget {
   const _LoadingBody();
@@ -149,47 +152,60 @@ class _ChatBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final peers = provider.peers;
 
-    return Column(
-      children: [
-        // Radar section
-        SizedBox(
-          height: 220,
-          child: _RadarWidget(peerCount: peers.length),
-        ),
+    // Responsive: cap width on wide screens (desktop)
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final inner = Column(
+          children: [
+            // Radar section
+            SizedBox(
+              height: 220,
+              child: _RadarWidget(peerCount: peers.length),
+            ),
 
-        // Divider + heading
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: [
-              const Icon(Icons.people, size: 16, color: AppColors.gold),
-              const SizedBox(width: 6),
-              Text(
-                peers.isEmpty
-                    ? 'Suche nach Peers…'
-                    : '${peers.length} Peer${peers.length == 1 ? '' : 's'} in Reichweite',
-                style: const TextStyle(
-                  color: AppColors.gold,
-                  fontWeight: FontWeight.w600,
-                ),
+            // Divider + heading
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.people, size: 16, color: AppColors.gold),
+                  const SizedBox(width: 6),
+                  Text(
+                    peers.isEmpty
+                        ? 'Suche nach Peers…'
+                        : '${peers.length} Peer${peers.length == 1 ? '' : 's'} in Reichweite',
+                    style: const TextStyle(
+                      color: AppColors.gold,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
+            ),
 
-        const Divider(height: 1, color: AppColors.surfaceVariant),
+            const Divider(height: 1, color: AppColors.surfaceVariant),
 
-        // Peer list
-        Expanded(
-          child: peers.isEmpty
-              ? const _EmptyPeerList()
-              : ListView.builder(
-                  itemCount: peers.length,
-                  itemBuilder: (context, i) =>
-                      _PeerTile(peer: peers[i], provider: provider),
-                ),
-        ),
-      ],
+            // Peer list
+            Expanded(
+              child: peers.isEmpty
+                  ? const _EmptyPeerList()
+                  : ListView.builder(
+                      itemCount: peers.length,
+                      itemBuilder: (context, i) =>
+                          _PeerTile(peer: peers[i], provider: provider),
+                    ),
+            ),
+          ],
+        );
+
+        if (constraints.maxWidth > 640) {
+          // Desktop: center and cap width
+          return Center(
+            child: SizedBox(width: 620, child: inner),
+          );
+        }
+        return inner;
+      },
     );
   }
 }
@@ -204,7 +220,7 @@ class _EmptyPeerList extends StatelessWidget {
         padding: EdgeInsets.all(32),
         child: Text(
           'Keine NEXUS-Nodes in der Nähe.\n'
-          'Starte die App auf einem anderen Gerät.',
+          'Starte die App auf einem anderen Gerät im selben Netzwerk.',
           textAlign: TextAlign.center,
           style: TextStyle(color: Colors.grey),
         ),
@@ -220,9 +236,6 @@ class _PeerTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final signalColor = _signalColor(peer.signalLevel);
-    final signalIcon = _signalIcon(peer.signalLevel);
-
     return ListTile(
       leading: CircleAvatar(
         backgroundColor: AppColors.surfaceVariant,
@@ -232,21 +245,8 @@ class _PeerTile extends StatelessWidget {
         ),
       ),
       title: Text(peer.pseudonym),
-      subtitle: Text(
-        peer.transportType.name.toUpperCase(),
-        style: const TextStyle(fontSize: 11, color: Colors.grey),
-      ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(signalIcon, color: signalColor, size: 16),
-          const SizedBox(width: 4),
-          Text(
-            peer.signalLabel,
-            style: TextStyle(color: signalColor, fontSize: 12),
-          ),
-        ],
-      ),
+      subtitle: _TransportBadges(transports: peer.availableTransports),
+      trailing: _SignalIndicator(peer: peer),
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => ChangeNotifierProvider.value(
@@ -255,6 +255,54 @@ class _PeerTile extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Shows one icon per transport type the peer is reachable on.
+class _TransportBadges extends StatelessWidget {
+  const _TransportBadges({required this.transports});
+  final Set<TransportType> transports;
+
+  @override
+  Widget build(BuildContext context) {
+    final icons = transports.map(_iconFor).toList();
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: icons
+          .expand((icon) => [icon, const SizedBox(width: 4)])
+          .toList()
+        ..removeLast(),
+    );
+  }
+
+  Widget _iconFor(TransportType t) {
+    return switch (t) {
+      TransportType.ble => const Icon(Icons.bluetooth, size: 14, color: Colors.lightBlueAccent),
+      TransportType.lan => const Icon(Icons.wifi, size: 14, color: Colors.greenAccent),
+      _ => const Icon(Icons.cloud_queue, size: 14, color: Colors.grey),
+    };
+  }
+}
+
+class _SignalIndicator extends StatelessWidget {
+  const _SignalIndicator({required this.peer});
+  final NexusPeer peer;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _signalColor(peer.signalLevel);
+    final icon = _signalIcon(peer.signalLevel, peer.transportType);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: color, size: 16),
+        const SizedBox(width: 4),
+        Text(
+          peer.signalLabel,
+          style: TextStyle(color: color, fontSize: 12),
+        ),
+      ],
     );
   }
 
@@ -268,7 +316,8 @@ class _PeerTile extends StatelessWidget {
     };
   }
 
-  IconData _signalIcon(SignalLevel level) {
+  IconData _signalIcon(SignalLevel level, TransportType primary) {
+    if (primary == TransportType.lan) return Icons.wifi;
     return switch (level) {
       SignalLevel.excellent || SignalLevel.good => Icons.bluetooth_connected,
       SignalLevel.fair => Icons.bluetooth_searching,
@@ -351,7 +400,7 @@ class _RadarPainter extends CustomPainter {
 
     // Draw rotating sweep arc
     final sweepRect = Rect.fromCircle(center: center, radius: maxRadius);
-    final sweepAngle = 0.4; // radians
+    const sweepAngle = 0.4; // radians
 
     canvas.drawArc(
       sweepRect,
@@ -368,11 +417,7 @@ class _RadarPainter extends CustomPainter {
     );
 
     // Draw center dot
-    canvas.drawCircle(
-      center,
-      5,
-      Paint()..color = AppColors.gold,
-    );
+    canvas.drawCircle(center, 5, Paint()..color = AppColors.gold);
 
     // Draw peer blips (if any)
     if (peerCount > 0) {
@@ -404,7 +449,6 @@ extension on double {
   double cos() => _cos(this);
 
   static double _sin(double x) {
-    // Taylor series for sin(x) – sufficient for radar blip placement
     double result = 0;
     double term = x;
     for (int i = 1; i <= 10; i++) {
@@ -425,24 +469,32 @@ extension on double {
   }
 }
 
-// ── Mesh status dot (AppBar) ─────────────────────────────────────────────────
+// ── Mesh status dot (AppBar) ──────────────────────────────────────────────────
 
+/// Three-state connection indicator:
+///   green  = running AND at least one peer found
+///   yellow = running but no peers yet
+///   red    = no transport active
 class _MeshStatusDot extends StatelessWidget {
-  const _MeshStatusDot({required this.running});
+  const _MeshStatusDot({required this.running, required this.hasPeers});
   final bool running;
+  final bool hasPeers;
 
   @override
   Widget build(BuildContext context) {
+    final color = !running
+        ? Colors.redAccent
+        : hasPeers
+            ? Colors.greenAccent
+            : Colors.amber;
+
     return Padding(
       padding: const EdgeInsets.only(right: 14),
       child: Center(
         child: Container(
           width: 10,
           height: 10,
-          decoration: BoxDecoration(
-            color: running ? Colors.greenAccent : Colors.grey,
-            shape: BoxShape.circle,
-          ),
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
       ),
     );

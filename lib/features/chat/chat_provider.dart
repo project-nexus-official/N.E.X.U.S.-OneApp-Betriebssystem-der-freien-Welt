@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -6,6 +7,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../core/identity/identity_service.dart';
 import '../../core/storage/pod_database.dart';
 import '../../core/transport/ble/ble_transport.dart';
+import '../../core/transport/lan/lan_transport.dart';
 import '../../core/transport/nexus_message.dart';
 import '../../core/transport/nexus_peer.dart';
 import '../../core/transport/transport_manager.dart';
@@ -13,8 +15,9 @@ import '../../core/transport/transport_manager.dart';
 /// ViewModel for the chat feature.
 ///
 /// Responsibilities:
-///   - Request runtime BLE permissions (Android).
-///   - Initialize and start [TransportManager] with [BleTransport].
+///   - Request runtime permissions (Android only).
+///   - Initialize and start [TransportManager] with [BleTransport] (mobile)
+///     and [LanTransport] (all platforms).
 ///   - Forward incoming [NexusMessage]s to the UI and persist them in the POD.
 ///   - Expose a per-conversation message list and peer list.
 class ChatProvider extends ChangeNotifier {
@@ -45,7 +48,7 @@ class ChatProvider extends ChangeNotifier {
 
   // ── Initialization ─────────────────────────────────────────────────────────
 
-  /// Requests BLE permissions and starts the transport stack.
+  /// Requests permissions (Android only) and starts the transport stack.
   ///
   /// Safe to call multiple times; subsequent calls are no-ops if already
   /// initialized.
@@ -74,10 +77,22 @@ class ChatProvider extends ChangeNotifier {
         _manager.setSigningKeyPair(keyPair);
       }
 
-      // Register BLE transport (registration is idempotent only if cleared first)
       _manager.clearTransports();
+
+      // BLE transport – mobile only (desktop degrades gracefully via timeout,
+      // but we skip registration entirely on desktop to avoid plugin issues).
+      if (Platform.isAndroid || Platform.isIOS) {
+        _manager.registerTransport(
+          BleTransport(
+            localDid: identity.did,
+            localPseudonym: identity.pseudonym,
+          ),
+        );
+      }
+
+      // LAN transport – all platforms (uses dart:io, no extra permissions).
       _manager.registerTransport(
-        BleTransport(
+        LanTransport(
           localDid: identity.did,
           localPseudonym: identity.pseudonym,
         ),
@@ -101,8 +116,9 @@ class ChatProvider extends ChangeNotifier {
   // ── Permissions ────────────────────────────────────────────────────────────
 
   Future<bool> _requestPermissions() async {
-    // On non-Android platforms (iOS, Desktop) flutter_blue_plus handles this
-    // natively; permission_handler is only needed on Android.
+    // Desktop platforms don't use permission_handler for BLE.
+    if (!Platform.isAndroid && !Platform.isIOS) return true;
+
     final results = await [
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
@@ -120,16 +136,13 @@ class ChatProvider extends ChangeNotifier {
   void _onMessageReceived(NexusMessage msg) {
     final myDid = IdentityService.instance.currentIdentity?.did ?? '';
 
-    // Determine conversation ID
     final convId = msg.isBroadcast
         ? 'broadcast'
         : _conversationId(msg.fromDid, myDid);
 
-    // Cache in memory
     _conversationCache.putIfAbsent(convId, () => []);
     _conversationCache[convId]!.add(msg);
 
-    // Persist to POD
     _persistMessage(convId, msg);
 
     notifyListeners();
@@ -161,7 +174,7 @@ class ChatProvider extends ChangeNotifier {
 
     await _manager.sendMessage(msg, recipientDid: recipientDid);
 
-    // Also add to local cache immediately (optimistic)
+    // Optimistic local cache update
     final convId = _conversationId(recipientDid, myDid);
     _conversationCache.putIfAbsent(convId, () => []);
     _conversationCache[convId]!.add(msg);
@@ -178,7 +191,6 @@ class ChatProvider extends ChangeNotifier {
       return List.unmodifiable(_conversationCache[convId]!);
     }
 
-    // Load from persistent storage
     try {
       final rows = await PodDatabase.instance.listMessages(convId);
       final msgs = rows.map((row) {
@@ -201,7 +213,6 @@ class ChatProvider extends ChangeNotifier {
 
   // ── Utilities ──────────────────────────────────────────────────────────────
 
-  /// Stable conversation ID between two DIDs (order-independent).
   static String _conversationId(String didA, String didB) {
     final sorted = [didA, didB]..sort();
     return '${sorted[0]}:${sorted[1]}';

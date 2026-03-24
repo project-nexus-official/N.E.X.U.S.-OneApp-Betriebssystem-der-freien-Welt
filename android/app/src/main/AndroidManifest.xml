@@ -6,7 +6,14 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+    <!-- BLE is optional so the app installs on devices without it (tablets, Desktop) -->
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+
+    <!-- LAN transport permissions -->
+    <!-- INTERNET is needed for TCP/UDP socket operations on Android -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Required to receive UDP broadcast/multicast packets on WiFi -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
     <application
         android:label="nexus_oneapp"

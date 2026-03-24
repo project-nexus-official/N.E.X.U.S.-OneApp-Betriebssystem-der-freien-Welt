@@ -2,7 +2,7 @@ import 'nexus_message.dart';
 import 'nexus_peer.dart';
 
 /// The physical channel a transport uses.
-enum TransportType { ble, nostr, wifiDirect, lora }
+enum TransportType { ble, lan, nostr, wifiDirect, lora }
 
 /// Lifecycle state of a transport.
 enum TransportState { idle, scanning, connected, error }
@@ -31,6 +31,9 @@ abstract class MessageTransport {
 
   /// Emits an updated list of peers whenever the peer set changes.
   Stream<List<NexusPeer>> get onPeersChanged;
+
+  /// Current snapshot of peers known to this transport.
+  List<NexusPeer> get currentPeers;
 
   /// Starts scanning / advertising / connecting.
   Future<void> start();

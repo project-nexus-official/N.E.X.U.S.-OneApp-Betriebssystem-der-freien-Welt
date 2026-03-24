@@ -4,27 +4,34 @@ import 'message_transport.dart';
 enum SignalLevel { excellent, good, fair, poor, unknown }
 
 /// A NEXUS peer discovered over any transport.
+///
+/// [transportType] is the *primary* transport (used for display and routing).
+/// [availableTransports] contains ALL transports on which this peer is visible;
+/// when a peer is reachable via both BLE and LAN this set contains both.
 class NexusPeer {
   final String did;
   final String pseudonym;
   final TransportType transportType;
+  final Set<TransportType> availableTransports;
 
-  /// RSSI in dBm. Only available for BLE; null for Nostr/LoRa/etc.
+  /// RSSI in dBm. Only available for BLE; null for LAN/Nostr/etc.
   final int? signalStrength;
 
   final DateTime lastSeen;
 
-  const NexusPeer({
+  NexusPeer({
     required this.did,
     required this.pseudonym,
     required this.transportType,
+    Set<TransportType>? availableTransports,
     this.signalStrength,
     required this.lastSeen,
-  });
+  }) : availableTransports = availableTransports ?? {transportType};
 
   NexusPeer copyWith({
     String? pseudonym,
     TransportType? transportType,
+    Set<TransportType>? availableTransports,
     int? signalStrength,
     DateTime? lastSeen,
   }) {
@@ -32,6 +39,7 @@ class NexusPeer {
       did: did,
       pseudonym: pseudonym ?? this.pseudonym,
       transportType: transportType ?? this.transportType,
+      availableTransports: availableTransports ?? this.availableTransports,
       signalStrength: signalStrength ?? this.signalStrength,
       lastSeen: lastSeen ?? this.lastSeen,
     );
@@ -48,6 +56,7 @@ class NexusPeer {
 
   /// Returns a display string for signal strength.
   String get signalLabel {
+    if (transportType == TransportType.lan) return 'LAN';
     if (signalStrength == null) return 'Internet';
     return '$signalStrength dBm';
   }
@@ -60,6 +69,6 @@ class NexusPeer {
 
   @override
   String toString() =>
-      'NexusPeer(pseudonym: $pseudonym, transport: ${transportType.name}, '
+      'NexusPeer(pseudonym: $pseudonym, transports: ${availableTransports.map((t) => t.name).join('+')}, '
       'rssi: $signalStrength)';
 }
