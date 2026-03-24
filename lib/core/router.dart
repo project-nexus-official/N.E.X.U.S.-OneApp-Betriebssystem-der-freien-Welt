@@ -1,6 +1,7 @@
 import 'package:go_router/go_router.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
 import 'package:nexus_oneapp/features/chat/conversations_screen.dart';
+import 'package:nexus_oneapp/features/discover/discover_screen.dart';
 import 'package:nexus_oneapp/features/governance/governance_screen.dart';
 import 'package:nexus_oneapp/features/onboarding/onboarding_screen.dart';
 import 'package:nexus_oneapp/features/onboarding/restore_screen.dart';
@@ -46,12 +47,16 @@ final router = GoRouter(
           builder: (context, state) => const ConversationsScreen(),
         ),
         GoRoute(
-          path: '/wallet',
-          builder: (context, state) => const WalletScreen(),
-        ),
-        GoRoute(
           path: '/governance',
           builder: (context, state) => const GovernanceScreen(),
+        ),
+        GoRoute(
+          path: '/discover',
+          builder: (context, state) => const DiscoverScreen(),
+        ),
+        GoRoute(
+          path: '/wallet',
+          builder: (context, state) => const WalletScreen(),
         ),
         GoRoute(
           path: '/profile',
@@ -63,8 +68,9 @@ final router = GoRouter(
 );
 
 int _indexForLocation(String path) {
-  if (path.startsWith('/wallet')) return 1;
-  if (path.startsWith('/governance')) return 2;
-  if (path.startsWith('/profile')) return 3;
-  return 0;
+  if (path.startsWith('/governance')) return 1;
+  if (path.startsWith('/discover')) return 2;
+  if (path.startsWith('/wallet')) return 3;
+  if (path.startsWith('/profile')) return 4;
+  return 0; // /chat
 }
