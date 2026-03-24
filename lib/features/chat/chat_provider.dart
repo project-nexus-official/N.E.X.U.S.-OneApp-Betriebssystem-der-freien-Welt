@@ -25,6 +25,10 @@ class ChatProvider extends ChangeNotifier {
 
   final TransportManager _manager;
 
+  // Direct reference so the UI can call addManualPeer without going through
+  // the manager (which doesn't expose transport internals).
+  LanTransport? _lanTransport;
+
   // ── State ──────────────────────────────────────────────────────────────────
 
   bool _initialized = false;
@@ -91,12 +95,11 @@ class ChatProvider extends ChangeNotifier {
       }
 
       // LAN transport – all platforms (uses dart:io, no extra permissions).
-      _manager.registerTransport(
-        LanTransport(
-          localDid: identity.did,
-          localPseudonym: identity.pseudonym,
-        ),
+      _lanTransport = LanTransport(
+        localDid: identity.did,
+        localPseudonym: identity.pseudonym,
       );
+      _manager.registerTransport(_lanTransport!);
 
       // Subscribe to events before starting
       _msgSub = _manager.onMessageReceived.listen(_onMessageReceived);
@@ -181,6 +184,19 @@ class ChatProvider extends ChangeNotifier {
     await _persistMessage(convId, msg);
 
     notifyListeners();
+  }
+
+  // ── Manual LAN peer (broadcast-firewall workaround) ───────────────────────
+
+  /// Adds [ipAddress] as a manual unicast target for LAN discovery.
+  ///
+  /// Use this when UDP broadcast is blocked by the remote device's firewall
+  /// (most commonly Windows with default settings).  Once called, this device
+  /// sends unicast UDP announcements directly to that IP.  The remote device
+  /// receives them, automatically adds a mutual target, and replies — both
+  /// devices discover each other without relying on broadcast.
+  void addLanPeer(String ipAddress) {
+    _lanTransport?.addManualPeer(ipAddress.trim());
   }
 
   // ── Message history ────────────────────────────────────────────────────────

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import '../message_transport.dart';
 import '../nexus_message.dart';
@@ -17,7 +18,6 @@ import 'lan_peer_discovery.dart';
 ///
 /// No additional packages required — uses only dart:io.
 class LanTransport implements MessageTransport {
-  static const int _udpPort = 51000;
   static const int _tcpPort = 51001;
 
   LanTransport({
@@ -61,6 +61,23 @@ class LanTransport implements MessageTransport {
   late final LanPeerDiscovery _discovery;
   late final LanMessageChannel _channel;
   final List<StreamSubscription<dynamic>> _subs = [];
+
+  // ── Manual unicast fallback ────────────────────────────────────────────────
+
+  /// Adds [ipAddress] as a manual unicast target for peer discovery.
+  ///
+  /// Use this when UDP broadcast is blocked by the remote device's firewall
+  /// (common on Windows with default settings).  After adding the IP, this
+  /// device starts sending unicast announcements to that address.  The remote
+  /// device receives the announcement, automatically adds a mutual unicast
+  /// target, and starts sending its own announcements back.
+  void addManualPeer(String ipAddress) {
+    try {
+      _discovery.addManualTarget(InternetAddress(ipAddress));
+    } catch (_) {
+      // Invalid IP address format – silently ignore.
+    }
+  }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 

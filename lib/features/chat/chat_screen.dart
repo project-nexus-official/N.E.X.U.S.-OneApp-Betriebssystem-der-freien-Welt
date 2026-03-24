@@ -19,10 +19,83 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    // Start transport stack after the first frame so context is available.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<ChatProvider>().initialize();
     });
+  }
+
+  void _showAddPeerDialog(BuildContext context, ChatProvider provider) {
+    final ctrl = TextEditingController();
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text(
+          'Gerät per IP verbinden',
+          style: TextStyle(color: AppColors.gold),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Gib die IP-Adresse des anderen Geräts ein.\n'
+              'Nutze dies wenn der Status-Punkt gelb bleibt '
+              '(z. B. Windows-Firewall blockiert UDP-Broadcast).',
+              style: TextStyle(color: AppColors.onDark, fontSize: 13, height: 1.5),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(color: AppColors.onDark),
+              decoration: InputDecoration(
+                hintText: '192.168.1.42',
+                hintStyle: TextStyle(
+                    color: AppColors.onDark.withValues(alpha: 0.4)),
+                filled: true,
+                fillColor: AppColors.surfaceVariant,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 10),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Abbrechen',
+                style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.gold,
+              foregroundColor: AppColors.deepBlue,
+            ),
+            onPressed: () {
+              final ip = ctrl.text.trim();
+              if (ip.isNotEmpty) {
+                provider.addLanPeer(ip);
+                Navigator.of(ctx).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                        'Verbindungsversuch zu $ip gestartet…'),
+                    duration: const Duration(seconds: 3),
+                  ),
+                );
+              }
+            },
+            child: const Text('Verbinden'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -31,6 +104,13 @@ class _ChatScreenState extends State<ChatScreen> {
       appBar: AppBar(
         title: const Text('NEXUS Mesh'),
         actions: [
+          Consumer<ChatProvider>(
+            builder: (context, provider, _) => IconButton(
+              icon: const Icon(Icons.add_link, size: 22),
+              tooltip: 'Gerät per IP verbinden',
+              onPressed: () => _showAddPeerDialog(context, provider),
+            ),
+          ),
           Consumer<ChatProvider>(
             builder: (context, provider, _) => _MeshStatusDot(
               running: provider.running,

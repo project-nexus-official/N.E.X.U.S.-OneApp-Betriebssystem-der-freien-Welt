@@ -171,13 +171,17 @@ class _WelcomeStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 32),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 100,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          minHeight: MediaQuery.of(context).size.height,
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 100,
             height: 100,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
@@ -250,6 +254,7 @@ class _WelcomeStep extends StatelessWidget {
             ),
           ),
         ],
+        ),
       ),
     );
   }
@@ -265,7 +270,7 @@ class _SeedPhraseStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -363,7 +368,7 @@ class _SeedPhraseStep extends StatelessWidget {
               ],
             ),
           ),
-          const Spacer(),
+          const SizedBox(height: 32),
           ElevatedButton(
             onPressed: onNext,
             style: ElevatedButton.styleFrom(
@@ -527,7 +532,7 @@ class _PseudonymStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -587,7 +592,7 @@ class _PseudonymStep extends StatelessWidget {
               ],
             ),
           ),
-          const Spacer(),
+          const SizedBox(height: 40),
           ElevatedButton(
             onPressed: loading ? null : onFinish,
             style: ElevatedButton.styleFrom(
@@ -660,12 +665,16 @@ class _CompleteStepState extends State<_CompleteStep>
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 32),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          ScaleTransition(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          minHeight: MediaQuery.of(context).size.height,
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ScaleTransition(
             scale: _scaleAnim,
             child: Container(
               width: 100,
@@ -710,6 +719,7 @@ class _CompleteStepState extends State<_CompleteStep>
             ),
           ),
         ],
+        ),
       ),
     );
   }
