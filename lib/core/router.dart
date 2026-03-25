@@ -6,6 +6,7 @@ import 'package:nexus_oneapp/features/governance/governance_screen.dart';
 import 'package:nexus_oneapp/features/onboarding/onboarding_screen.dart';
 import 'package:nexus_oneapp/features/onboarding/restore_screen.dart';
 import 'package:nexus_oneapp/features/profile/profile_screen.dart';
+import 'package:nexus_oneapp/features/settings/settings_screen.dart';
 import 'package:nexus_oneapp/features/wallet/wallet_screen.dart';
 import 'package:nexus_oneapp/shared/widgets/nexus_scaffold.dart';
 
@@ -61,6 +62,10 @@ final router = GoRouter(
         GoRoute(
           path: '/profile',
           builder: (context, state) => const ProfileScreen(),
+        ),
+        GoRoute(
+          path: '/settings',
+          builder: (context, state) => const SettingsScreen(),
         ),
       ],
     ),

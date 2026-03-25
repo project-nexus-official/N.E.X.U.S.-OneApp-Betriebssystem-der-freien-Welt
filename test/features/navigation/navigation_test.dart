@@ -171,7 +171,7 @@ void main() {
       expect(find.text('Entdecken'), findsOneWidget);
     });
 
-    testWidgets('Einstellungen tile shows snackbar (no screen exists)',
+    testWidgets('Einstellungen tile is active (has a route)',
         (tester) async {
       await tester.pumpWidget(_appFor(const DiscoverScreen()));
       await tester.pumpAndSettle();
@@ -183,10 +183,15 @@ void main() {
         scrollable: find.byType(Scrollable).first,
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Einstellungen'));
-      await tester.pump(); // allow SnackBar to appear
 
-      expect(find.text('Einstellungen – Kommt bald'), findsOneWidget);
+      // Tile should be fully opaque (active), not dimmed
+      final opacity = tester.widget<Opacity>(
+        find.ancestor(
+          of: find.text('Einstellungen'),
+          matching: find.byType(Opacity),
+        ).first,
+      );
+      expect(opacity.opacity, 1.0);
     });
   });
 

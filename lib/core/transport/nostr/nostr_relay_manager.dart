@@ -170,13 +170,15 @@ class NostrRelayManager {
   void _connect(String url) {
     if (!_running) return;
     _statuses[url]?.state = RelayState.connecting;
+    print('[NOSTR] Connecting to $url …');
 
     final connectStart = DateTime.now().millisecondsSinceEpoch;
     late WebSocketChannel channel;
 
     try {
       channel = WebSocketChannel.connect(Uri.parse(url));
-    } catch (_) {
+    } catch (e) {
+      print('[NOSTR] $url – sync connect error: $e');
       _statuses[url]?.state = RelayState.error;
       _scheduleReconnect(url);
       return;
@@ -184,31 +186,35 @@ class NostrRelayManager {
 
     _channels[url] = channel;
 
-    // Absorb connection-level errors (e.g. SocketException before first message)
-    channel.ready.catchError((_) {
+    // channel.ready completes when the WebSocket handshake succeeds.
+    // This is the correct place to mark a relay as connected and send
+    // initial subscriptions – not on the first received message, because
+    // relays only send data AFTER we send a REQ.
+    channel.ready.then((_) {
+      if (!_running) return;
+      final latency = DateTime.now().millisecondsSinceEpoch - connectStart;
+      print('[NOSTR] $url – connected (${latency}ms)');
+      _statuses[url]?.latencyMs = latency;
+      _statuses[url]?.state = RelayState.connected;
+      _resubscribe(url);
+    }).catchError((Object e) {
+      print('[NOSTR] $url – handshake error: $e');
       _statuses[url]?.state = RelayState.error;
       _channels.remove(url);
       _scheduleReconnect(url);
     });
 
     final sub = channel.stream.listen(
-      (data) {
-        if (_statuses[url]?.state == RelayState.connecting) {
-          final now = DateTime.now().millisecondsSinceEpoch;
-          _statuses[url]?.latencyMs = now - connectStart;
-          _statuses[url]?.state = RelayState.connected;
-          // Re-send active subscriptions
-          _resubscribe(url);
-        }
-        _handleMessage(url, data as String);
-      },
-      onError: (_) {
+      (data) => _handleMessage(url, data as String),
+      onError: (Object e) {
+        print('[NOSTR] $url – stream error: $e');
         _statuses[url]?.state = RelayState.error;
         _channels.remove(url);
         _scheduleReconnect(url);
       },
       onDone: () {
         if (_statuses[url]?.state != RelayState.disconnected) {
+          print('[NOSTR] $url – disconnected, scheduling reconnect');
           _statuses[url]?.state = RelayState.error;
           _channels.remove(url);
           _scheduleReconnect(url);
@@ -222,6 +228,7 @@ class NostrRelayManager {
 
   void _scheduleReconnect(String url) {
     if (!_running) return;
+    print('[NOSTR] $url – reconnect in 10s');
     _reconnectTimers[url]?.cancel();
     _reconnectTimers[url] = Timer(const Duration(seconds: 10), () {
       if (_running) _connectSafe(url);
@@ -240,8 +247,10 @@ class NostrRelayManager {
   void _resubscribe(String url) {
     final channel = _channels[url];
     if (channel == null) return;
+    print('[NOSTR] $url – resubscribing ${_subscriptions.length} filters');
     for (final entry in _subscriptions.entries) {
       try {
+        print('[NOSTR]   REQ ${entry.key.substring(0, 8)} kinds=${entry.value['kinds']}');
         channel.sink.add(jsonEncode(['REQ', entry.key, entry.value]));
       } catch (_) {}
     }
@@ -249,6 +258,9 @@ class NostrRelayManager {
 
   /// Seen event IDs for relay-level deduplication.
   final Set<String> _seenEventIds = {};
+
+  static String _shortUrl(String url) =>
+      url.replaceAll('wss://', '').replaceAll('ws://', '');
 
   void _handleMessage(String url, String data) {
     try {
@@ -261,6 +273,11 @@ class NostrRelayManager {
           final eventJson = msg[2] as Map<String, dynamic>;
           final event = NostrEvent.fromJson(eventJson);
 
+          print('[NOSTR] ← EVENT kind=${event.kind} '
+              'id=${event.id.substring(0, 8)} '
+              'from=${event.pubkey.substring(0, 8)} '
+              '(relay: ${_shortUrl(url)})');
+
           // Relay-level deduplication
           if (_seenEventIds.contains(event.id)) return;
           if (_seenEventIds.length > 5000) _seenEventIds.clear();
@@ -269,12 +286,10 @@ class NostrRelayManager {
           _eventController.add(event);
 
         case 'NOTICE':
-          // Relay notices are silently discarded
-          break;
+          print('[NOSTR] NOTICE from ${_shortUrl(url)}: ${msg.length > 1 ? msg[1] : ""}');
 
         case 'EOSE':
-          // End of stored events – nothing to do for now
-          break;
+          print('[NOSTR] EOSE from ${_shortUrl(url)} sub=${msg.length > 1 ? (msg[1] as String).substring(0, 8) : "?"}');
       }
     } catch (_) {
       // Malformed message – ignore

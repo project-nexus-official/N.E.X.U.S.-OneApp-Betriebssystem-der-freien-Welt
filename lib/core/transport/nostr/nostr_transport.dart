@@ -98,23 +98,44 @@ class NostrTransport implements MessageTransport {
 
   /// Initialises the Nostr keypair and connects to relays.
   ///
+  /// **Idempotent** – safe to call multiple times.  If already connected this
+  /// only (re)activates subscriptions when new keys are provided; it never
+  /// reconnects relays or creates a second event listener.
+  ///
   /// [keysOverride] allows injecting a keypair in tests.
   @override
   Future<void> start({NostrKeys? keysOverride}) async {
-    _state = TransportState.scanning;
+    if (keysOverride != null) _keys = keysOverride;
 
-    _keys = keysOverride;
-    // If no override, caller must call initKeys() separately after loading
-    // the mnemonic from IdentityService.
+    // ── Already running ────────────────────────────────────────────────────
+    // Called a second time (e.g. connectivity watcher or _startNostrIfConnected
+    // after _manager.start() already started us).  Just ensure subs are live.
+    if (_state == TransportState.connected ||
+        _state == TransportState.scanning) {
+      if (_keys != null) {
+        _setupSubscriptions();
+        await _sendPresenceAnnouncement();
+        _startPresenceTimer();
+      }
+      return;
+    }
+
+    // ── First start ────────────────────────────────────────────────────────
+    _state = TransportState.scanning;
+    print('[NOSTR] Transport starting…');
 
     await _relayManager.start();
 
+    // Cancel any stale listener before creating a new one.
+    await _eventSub?.cancel();
     _eventSub = _relayManager.onEvent.listen(_onRelayEvent);
 
     if (_keys != null) {
       _setupSubscriptions();
       await _sendPresenceAnnouncement();
       _startPresenceTimer();
+    } else {
+      print('[NOSTR] No keys yet – subscriptions deferred until initKeys()');
     }
 
     _state = TransportState.connected;
@@ -124,6 +145,7 @@ class NostrTransport implements MessageTransport {
   /// Must be called before the transport can send/receive DMs.
   Future<void> initKeys(Uint8List seed64) async {
     _keys = NostrKeys.fromBip39Seed(seed64);
+    print('[NOSTR] Keys initialised, pubkey: ${_keys!.publicKeyHex}');
     if (_state == TransportState.connected) {
       _setupSubscriptions();
       await _sendPresenceAnnouncement();
@@ -182,9 +204,13 @@ class NostrTransport implements MessageTransport {
   Future<void> _sendDm(NexusMessage message) async {
     final recipientNostrPubkey = _didToNostrPubkey[message.toDid];
     if (recipientNostrPubkey == null) {
-      // Don't know recipient's Nostr pubkey yet – can't send DM
+      print('[NOSTR] DM send FAILED – no Nostr pubkey known for DID: '
+          '${message.toDid}  (known DIDs: ${_didToNostrPubkey.keys.join(', ')})');
       return;
     }
+
+    print('[NOSTR] Sending DM → pubkey: '
+        '${recipientNostrPubkey.substring(0, 8)}…  DID: ${message.toDid}');
 
     final recipientPubBytes =
         Uint8List.fromList(_hexToBytes(recipientNostrPubkey));
@@ -202,6 +228,7 @@ class NostrTransport implements MessageTransport {
       ],
     );
     _relayManager.publish(event);
+    print('[NOSTR] DM published, event id: ${event.id.substring(0, 8)}…');
   }
 
   // ── Presence ──────────────────────────────────────────────────────────────
@@ -266,12 +293,22 @@ class NostrTransport implements MessageTransport {
     final myPubkey = _keys!.publicKeyHex;
     final since = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
 
+    // Close stale subscriptions before recreating to avoid accumulating
+    // orphaned REQ IDs in the relay manager.
+    if (_dmSubId != null) _relayManager.closeSubscription(_dmSubId!);
+    if (_meshSubId != null) _relayManager.closeSubscription(_meshSubId!);
+    if (_presenceSubId != null) _relayManager.closeSubscription(_presenceSubId!);
+
+    print('[NOSTR] Setting up subscriptions for pubkey: '
+        '${myPubkey.substring(0, 8)}…${myPubkey.substring(myPubkey.length - 4)}');
+
     // DMs addressed to us (last hour)
     _dmSubId = _relayManager.subscribe({
       'kinds': [NostrKind.encryptedDm],
       '#p': [myPubkey],
       'since': since - 3600,
     });
+    print('[NOSTR] DM sub: $_dmSubId  (#p: ${myPubkey.substring(0, 8)}…)');
 
     // Mesh broadcasts (last hour)
     final meshFilters = <String, dynamic>{
@@ -291,6 +328,7 @@ class NostrTransport implements MessageTransport {
       '#t': ['nexus-presence'],
       'since': since - 300,
     });
+    print('[NOSTR] Presence sub: $_presenceSubId');
   }
 
   void _onRelayEvent(NostrEvent event) {
@@ -311,16 +349,20 @@ class NostrTransport implements MessageTransport {
     // Ignore our own events
     if (event.pubkey == _keys!.publicKeyHex) return;
 
+    print('[NOSTR] DM received from pubkey: ${event.pubkey.substring(0, 8)}…, '
+        'event: ${event.id.substring(0, 8)}…  decrypting…');
+
     try {
       final senderPubBytes = Uint8List.fromList(_hexToBytes(event.pubkey));
       final plaintext = await _nip04Decrypt(event.content, senderPubBytes);
       final msgJson = jsonDecode(plaintext) as Map<String, dynamic>;
       final message = NexusMessage.fromJson(msgJson);
 
+      print('[NOSTR] DM decrypted OK: ${message.fromDid} → ${message.toDid}');
       _learnPeer(event.pubkey, message.fromDid, message.metadata);
       _msgController.add(message);
-    } catch (_) {
-      // Decryption failure (message not for us or malformed)
+    } catch (e) {
+      print('[NOSTR] DM decrypt FAILED (not for us or malformed): $e');
     }
   }
 

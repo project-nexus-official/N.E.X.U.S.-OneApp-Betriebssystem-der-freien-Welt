@@ -329,6 +329,10 @@ class BleTransport implements MessageTransport {
         await _sendChunksToDevice(deviceId, chunks);
         return;
       }
+
+      // Recipient not reachable via BLE – signal TransportManager to try the
+      // next transport (LAN → Nostr) instead of silently succeeding here.
+      throw StateError('BLE: peer $recipientDid not reachable');
     }
 
     // Broadcast: send to all connected peers

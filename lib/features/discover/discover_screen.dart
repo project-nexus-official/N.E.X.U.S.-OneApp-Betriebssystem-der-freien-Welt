@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:nexus_oneapp/features/settings/settings_screen.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
 
 /// A single entry in the Entdecken grid.
@@ -95,9 +94,7 @@ class DiscoverScreen extends StatelessWidget {
   void _onTileTap(BuildContext context, _TileItem tile) {
     if (!tile.isActive) return;
     if (tile.route == '/settings') {
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(builder: (_) => const SettingsScreen()),
-      );
+      context.push('/settings');
       return;
     }
     context.go(tile.route!);
