@@ -250,11 +250,18 @@ class ChatProvider extends ChangeNotifier {
         ? NexusMessage.broadcastDid
         : _conversationId(msg.fromDid, myDid);
 
+    debugPrint('[CHAT] Message received: convId=$convId  from=${msg.fromDid}');
+
     _conversationCache.putIfAbsent(convId, () => []);
     _conversationCache[convId]!.add(msg);
 
-    _persistMessage(convId, msg);
-    ConversationService.instance.notifyUpdate();
+    // Persist first, then notify so the DB query in notifyUpdate() finds the
+    // new message (avoids a race condition where the query runs before the
+    // INSERT completes).
+    _persistMessage(convId, msg).then((_) {
+      debugPrint('[CHAT] Persisted → notifying ConversationService');
+      ConversationService.instance.notifyUpdate();
+    });
 
     notifyListeners();
   }
@@ -266,8 +273,9 @@ class ChatProvider extends ChangeNotifier {
         senderDid: msg.fromDid,
         data: msg.toJson(),
       );
-    } catch (_) {
-      // POD might not be open yet; ignore.
+      debugPrint('[CHAT] DB insert OK: convId=$convId');
+    } catch (e) {
+      debugPrint('[CHAT] DB insert FAILED: $e');
     }
   }
 

@@ -36,6 +36,12 @@ final router = GoRouter(
         ),
       ],
     ),
+    // Settings – outside ShellRoute so it appears as a full-screen page
+    // without the bottom navigation bar.
+    GoRoute(
+      path: '/settings',
+      builder: (context, state) => const SettingsScreen(),
+    ),
     // Main app shell with bottom navigation
     ShellRoute(
       builder: (context, state, child) {
@@ -62,10 +68,6 @@ final router = GoRouter(
         GoRoute(
           path: '/profile',
           builder: (context, state) => const ProfileScreen(),
-        ),
-        GoRoute(
-          path: '/settings',
-          builder: (context, state) => const SettingsScreen(),
         ),
       ],
     ),

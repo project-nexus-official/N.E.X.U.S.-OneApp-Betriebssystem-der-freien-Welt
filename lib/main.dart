@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:nexus_oneapp/core/contacts/contact_service.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
@@ -7,9 +9,17 @@ import 'package:nexus_oneapp/core/storage/pod_database.dart';
 import 'package:nexus_oneapp/features/chat/chat_provider.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
 import 'package:provider/provider.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // sqflite on desktop requires FFI initialisation.
+  if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  }
+
   await IdentityService.instance.init();
   if (IdentityService.instance.hasIdentity) {
     await initServicesAfterIdentity();

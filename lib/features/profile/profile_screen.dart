@@ -148,11 +148,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _openEditProfile() async {
     final identity = _identityService.currentIdentity;
-    if (identity == null || _profile == null) return;
+    if (identity == null) return;
+    // Profile may still be null if the POD opened after the screen was built.
+    final profile = _profile ?? UserProfile.defaults(identity.pseudonym);
     final saved = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => EditProfileScreen(
-          profile: _profile!,
+          profile: profile,
           identiconBytes: _hexToBytes(identity.publicKeyHex),
         ),
       ),
