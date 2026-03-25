@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
+import '../settings/settings_screen.dart';
 
 /// A single entry in the Entdecken grid.
 class _TileItem {
@@ -93,8 +94,15 @@ class DiscoverScreen extends StatelessWidget {
 
   void _onTileTap(BuildContext context, _TileItem tile) {
     if (!tile.isActive) return;
+    debugPrint('[DISCOVER] Tile tapped: ${tile.label} → ${tile.route}');
+
     if (tile.route == '/settings') {
-      context.push('/settings');
+      // GoRouter.push does not reliably cross ShellRoute boundaries in
+      // GoRouter 15.x.  Use the root Navigator directly – the same
+      // approach used by ConversationScreen and EditProfileScreen.
+      Navigator.of(context, rootNavigator: true).push(
+        MaterialPageRoute<void>(builder: (_) => const SettingsScreen()),
+      );
       return;
     }
     context.go(tile.route!);
@@ -188,8 +196,9 @@ class _DiscoverTile extends StatelessWidget {
 
     return Opacity(
       opacity: isActive ? 1.0 : 0.55,
-      child: GestureDetector(
+      child: InkWell(
         onTap: isActive ? onTap : null,
+        borderRadius: BorderRadius.circular(16),
         child: Container(
           decoration: BoxDecoration(
             color: AppColors.surface,
