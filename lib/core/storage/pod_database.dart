@@ -273,6 +273,38 @@ class PodDatabase {
     );
   }
 
+  /// Returns the total number of stored messages.
+  Future<int> getTotalMessageCount() async {
+    final rows = await _database.rawQuery('SELECT COUNT(*) AS cnt FROM pod_messages');
+    return (rows.first['cnt'] as int?) ?? 0;
+  }
+
+  /// Returns the approximate storage size of messages in bytes
+  /// (measures encrypted column length as a proxy for DB space used).
+  Future<int> estimateStorageSizeBytes() async {
+    final rows = await _database.rawQuery(
+      'SELECT COALESCE(SUM(LENGTH(enc)), 0) AS total FROM pod_messages',
+    );
+    return (rows.first['total'] as int?) ?? 0;
+  }
+
+  /// Deletes messages in [conversationId] older than [cutoff].
+  Future<void> deleteMessagesOlderThan(
+    String conversationId,
+    DateTime cutoff,
+  ) async {
+    await _database.delete(
+      'pod_messages',
+      where: 'conversation_id = ? AND ts < ?',
+      whereArgs: [conversationId, cutoff.millisecondsSinceEpoch],
+    );
+  }
+
+  /// Deletes all messages from all conversations.
+  Future<void> deleteAllMessages() async {
+    await _database.delete('pod_messages');
+  }
+
   // ── Export / Import ───────────────────────────────────────────────────────
 
   /// Exports all pod data as a single AES-256-GCM encrypted JSON blob.

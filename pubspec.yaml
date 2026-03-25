@@ -58,6 +58,9 @@ dependencies:
   # GPS for geohash-based Nostr channels
   geolocator: ^10.1.0
 
+  # Retention settings persistence
+  shared_preferences: ^2.3.5
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

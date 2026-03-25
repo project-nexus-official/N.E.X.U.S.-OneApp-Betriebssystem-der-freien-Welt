@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/storage/retention_service.dart';
 import '../../core/transport/message_transport.dart';
 import '../../core/transport/nexus_message.dart';
 import '../../core/transport/nexus_peer.dart';
@@ -47,6 +48,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
   bool _loading = true;
   bool _showEmojiPicker = false;
   bool _showScrollDown = false;
+  RetentionPeriod? _perChatRetention; // null = use global setting
 
   String get _convId {
     if (widget.isBroadcast) return NexusMessage.broadcastDid;
@@ -66,6 +68,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
   void initState() {
     super.initState();
     _loadMessages();
+    _loadRetention();
     _scrollCtrl.addListener(_onScroll);
   }
 
@@ -211,6 +214,76 @@ class _ConversationScreenState extends State<ConversationScreen> {
         .showSnackBar(SnackBar(content: Text(msg)));
   }
 
+  Future<void> _loadRetention() async {
+    final period =
+        await RetentionService.instance.getForConversation(_convId);
+    if (mounted) setState(() => _perChatRetention = period);
+  }
+
+  void _showRetentionSheet() {
+    final global = RetentionService.instance.global;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+                child: const Text(
+                  'Aufbewahrung für diesen Chat',
+                  style: TextStyle(
+                    color: AppColors.gold,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                  'Global: ${global.label}',
+                  style: const TextStyle(color: Colors.grey, fontSize: 12),
+                ),
+              ),
+              // "Standard" = follow global setting
+              ListTile(
+                title: const Text('Standard (globale Einstellung)'),
+                subtitle: Text(global.label),
+                trailing: _perChatRetention == null
+                    ? const Icon(Icons.check, color: AppColors.gold)
+                    : null,
+                onTap: () async {
+                  Navigator.pop(sheetCtx);
+                  await RetentionService.instance
+                      .setForConversation(_convId, null);
+                  if (mounted) setState(() => _perChatRetention = null);
+                },
+              ),
+              const Divider(height: 1),
+              ...RetentionPeriod.values.map((p) => ListTile(
+                    title: Text(p.label),
+                    trailing: _perChatRetention == p
+                        ? const Icon(Icons.check, color: AppColors.gold)
+                        : null,
+                    onTap: () async {
+                      Navigator.pop(sheetCtx);
+                      await RetentionService.instance
+                          .setForConversation(_convId, p);
+                      if (mounted) setState(() => _perChatRetention = p);
+                    },
+                  )),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   // ── Context menu (long press) ───────────────────────────────────────────
 
   void _showMessageMenu(BuildContext context, NexusMessage msg) {
@@ -302,9 +375,21 @@ class _ConversationScreenState extends State<ConversationScreen> {
               actions: [
                 if (widget.peer != null)
                   Padding(
-                    padding: const EdgeInsets.only(right: 12),
+                    padding: const EdgeInsets.only(right: 4),
                     child: _ConnectionIndicator(peer: widget.peer!),
                   ),
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert),
+                  onSelected: (value) {
+                    if (value == 'retention') _showRetentionSheet();
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: 'retention',
+                      child: Text('Aufbewahrung'),
+                    ),
+                  ],
+                ),
               ],
             ),
             body: Column(

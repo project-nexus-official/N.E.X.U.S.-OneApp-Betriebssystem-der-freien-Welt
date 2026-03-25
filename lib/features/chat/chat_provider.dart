@@ -69,6 +69,9 @@ class ChatProvider extends ChangeNotifier {
   // Per-conversation cached messages
   final Map<String, List<NexusMessage>> _conversationCache = {};
 
+  // Tracks which convIds have been merged with the DB at least once.
+  final Set<String> _cacheLoadedFromDb = {};
+
   // Subscriptions
   StreamSubscription<NexusMessage>? _msgSub;
   StreamSubscription<List<NexusPeer>>? _peersSub;
@@ -369,6 +372,7 @@ class ChatProvider extends ChangeNotifier {
   /// Deletes all messages in [conversationId] from cache and POD.
   Future<void> deleteConversation(String conversationId) async {
     _conversationCache.remove(conversationId);
+    _cacheLoadedFromDb.remove(conversationId);
     await ConversationService.instance.deleteConversation(conversationId);
     notifyListeners();
   }
@@ -405,15 +409,25 @@ class ChatProvider extends ChangeNotifier {
 
   // ── Message history ────────────────────────────────────────────────────────
 
-  /// Returns cached messages for [convId]. Loads from POD on first access.
+  /// Returns messages for [convId].
+  ///
+  /// On first access per convId, loads from DB and merges with any in-memory
+  /// messages accumulated before the load (e.g. messages received during app
+  /// startup before the UI opened the conversation).  Subsequent calls return
+  /// the merged cache directly without hitting the DB again.
   Future<List<NexusMessage>> getMessages(String convId) async {
-    if (_conversationCache.containsKey(convId)) {
-      return List.unmodifiable(_conversationCache[convId]!);
+    if (!_cacheLoadedFromDb.contains(convId)) {
+      await _loadAndMergeFromDb(convId);
     }
+    return List.unmodifiable(_conversationCache[convId] ?? []);
+  }
 
+  /// Loads messages for [convId] from the DB and merges them with any existing
+  /// in-memory messages, deduplicating by message ID and sorting by timestamp.
+  Future<void> _loadAndMergeFromDb(String convId) async {
     try {
       final rows = await PodDatabase.instance.listMessages(convId);
-      final msgs = rows.map((row) {
+      final dbMsgs = rows.map((row) {
         try {
           return NexusMessage.fromJson(
             Map<String, dynamic>.from(row)
@@ -424,11 +438,31 @@ class ChatProvider extends ChangeNotifier {
         }
       }).whereType<NexusMessage>().toList();
 
-      _conversationCache[convId] = msgs;
-      return List.unmodifiable(msgs);
+      // Merge: start with DB messages, then add in-memory messages not in DB.
+      final dbIds = dbMsgs.map((m) => m.id).toSet();
+      final inMemory = _conversationCache[convId] ?? [];
+      final newOnly = inMemory.where((m) => !dbIds.contains(m.id)).toList();
+
+      final merged = [...dbMsgs, ...newOnly]
+        ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+      _conversationCache[convId] = merged;
+      _cacheLoadedFromDb.add(convId);
     } catch (_) {
-      return const [];
+      // On error, mark as loaded so we don't retry on every call, and keep
+      // whatever in-memory messages exist.
+      _cacheLoadedFromDb.add(convId);
     }
+  }
+
+  /// Clears all in-memory message caches and the DB-loaded tracking set.
+  ///
+  /// Call this after a bulk deletion (e.g. "delete all messages") so that the
+  /// next [getMessages] call reloads from the (now empty) DB.
+  void clearAllCaches() {
+    _conversationCache.clear();
+    _cacheLoadedFromDb.clear();
+    notifyListeners();
   }
 
   // ── Utilities ──────────────────────────────────────────────────────────────
