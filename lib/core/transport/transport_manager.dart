@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:flutter/foundation.dart';
 
 import 'message_transport.dart';
 import 'nexus_message.dart';
@@ -112,11 +113,12 @@ class TransportManager {
 
   /// Sends a message. Signs it if a key pair is configured.
   ///
-  /// Routing strategy for directed messages ([recipientDid] != null):
-  ///   1. Prefer LAN if the recipient is known via LAN (faster, no fragmentation).
-  ///   2. Otherwise try transports in registration order.
-  ///
-  /// For broadcast messages the registration-order cascade is used.
+  /// Routing strategy:
+  ///   - **Broadcasts**: sent via ALL transports (BLE + LAN + Nostr) so every
+  ///     reachable peer receives the message regardless of transport type.
+  ///   - **Directed messages**: prefer LAN if recipient is reachable via LAN,
+  ///     otherwise try transports in registration order (cascade: first success
+  ///     wins).
   Future<void> sendMessage(
     NexusMessage message, {
     String? recipientDid,
@@ -135,7 +137,28 @@ class TransportManager {
     // Mark as seen so we don't echo our own messages
     _markSeen(msg.id);
 
-    // Build the transport priority list
+    if (msg.isBroadcast) {
+      // Broadcasts are delivered on every transport – do not cascade-stop.
+      // BLE reaches nearby BLE peers, LAN reaches local network peers,
+      // Nostr reaches internet peers.  Failures on individual transports are
+      // suppressed so one bad transport does not block the others.
+      debugPrint('[TRANSPORT] Broadcast fan-out → ${_transports.length} transports');
+      for (final transport in _transports) {
+        if (transport.state == TransportState.error) {
+          debugPrint('[TRANSPORT]   skip ${transport.type} (error state)');
+          continue;
+        }
+        try {
+          await transport.sendMessage(msg);
+          debugPrint('[TRANSPORT]   ✓ ${transport.type}');
+        } catch (e) {
+          debugPrint('[TRANSPORT]   ✗ ${transport.type}: $e');
+        }
+      }
+      return;
+    }
+
+    // Directed message: cascade – first transport that delivers successfully wins.
     final ordered = _buildTransportOrder(recipientDid);
 
     for (final transport in ordered) {

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:nexus_oneapp/core/contacts/contact_service.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
 import 'package:nexus_oneapp/core/identity/profile_service.dart';
+import 'package:nexus_oneapp/features/chat/conversation_service.dart';
 import 'package:nexus_oneapp/core/router.dart';
 import 'package:nexus_oneapp/core/storage/pod_database.dart';
 import 'package:nexus_oneapp/features/chat/chat_provider.dart';
@@ -37,6 +38,7 @@ Future<void> initServicesAfterIdentity() async {
         IdentityService.instance.currentIdentity!.pseudonym;
     await ProfileService.instance.load(pseudonym);
     await ContactService.instance.load();
+    await ConversationService.instance.load();
   } catch (e) {
     debugPrint('[NEXUS] Storage init error: $e');
   }

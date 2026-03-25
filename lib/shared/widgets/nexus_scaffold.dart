@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
 import 'package:nexus_oneapp/core/identity/profile_service.dart';
+import 'package:nexus_oneapp/features/settings/settings_screen.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
 import 'package:nexus_oneapp/shared/widgets/identicon.dart';
 
@@ -201,6 +202,13 @@ class _DrawerContent extends StatelessWidget {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
+  void _openSettings(BuildContext context) {
+    if (!isPermanent) Navigator.of(context).pop(); // close drawer on mobile
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(builder: (_) => const SettingsScreen()),
+    );
+  }
+
   void _showAbout(BuildContext context) {
     if (!isPermanent) Navigator.of(context).pop();
     showAboutDialog(
@@ -331,7 +339,7 @@ class _DrawerContent extends StatelessWidget {
             leading: const Icon(Icons.settings_outlined, color: AppColors.onDark),
             title: const Text('Einstellungen', style: TextStyle(color: AppColors.onDark)),
             dense: true,
-            onTap: () => _snack(context, 'Einstellungen – Kommt bald'),
+            onTap: () => _openSettings(context),
           ),
           ListTile(
             leading: const Icon(Icons.info_outline, color: AppColors.onDark),

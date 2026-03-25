@@ -198,6 +198,8 @@ class NostrTransport implements MessageTransport {
       content: jsonEncode(message.toJson()),
       tags: tags,
     );
+    print('[NOSTR] Publishing broadcast kind=1 '
+        'id=${event.id.substring(0, 8)}… tags=${event.tags.map((t) => t.join('=')).join(',')}');
     _relayManager.publish(event);
   }
 
@@ -310,16 +312,21 @@ class NostrTransport implements MessageTransport {
     });
     print('[NOSTR] DM sub: $_dmSubId  (#p: ${myPubkey.substring(0, 8)}…)');
 
-    // Mesh broadcasts (last hour)
+    // Mesh broadcasts (last hour).
+    // Always subscribe to 'nexus-mesh' tag.  If we have a geohash we also
+    // add it so geo-filtered senders reach us – but the base tag alone is
+    // sufficient to receive all broadcasts regardless of sender location.
+    final meshTagFilter = <String>['nexus-mesh'];
+    if (currentGeohash != null) {
+      meshTagFilter.add('nexus-geo-$currentGeohash');
+    }
     final meshFilters = <String, dynamic>{
       'kinds': [NostrKind.textNote],
-      '#t': ['nexus-mesh'],
+      '#t': meshTagFilter,
       'since': since - 3600,
     };
-    if (currentGeohash != null) {
-      meshFilters['#t'] = ['nexus-mesh', 'nexus-geo-$currentGeohash'];
-    }
     _meshSubId = _relayManager.subscribe(meshFilters);
+    print('[NOSTR] Mesh sub: $_meshSubId  (#t: $meshTagFilter)');
 
     // Presence announcements – last 5 minutes for initial peer discovery,
     // then live as new nodes come online.
@@ -373,12 +380,19 @@ class NostrTransport implements MessageTransport {
     // Must have nexus-mesh tag
     if (!event.tagValues('t').contains('nexus-mesh')) return;
 
+    print('[NOSTR] Broadcast received from ${event.pubkey.substring(0, 8)}… '
+        'id=${event.id.substring(0, 8)} tags=${event.tagValues('t')}');
+
     try {
       final msgJson = jsonDecode(event.content) as Map<String, dynamic>;
       final message = NexusMessage.fromJson(msgJson);
+      print('[NOSTR] Broadcast parsed OK: from=${message.fromDid.substring(0, 12)}… '
+          'body="${message.body.length > 40 ? message.body.substring(0, 40) : message.body}"');
       _learnPeer(event.pubkey, message.fromDid, message.metadata);
       _msgController.add(message);
-    } catch (_) {}
+    } catch (e) {
+      print('[NOSTR] Broadcast parse FAILED: $e');
+    }
   }
 
   void _handlePresenceEvent(NostrEvent event) {
