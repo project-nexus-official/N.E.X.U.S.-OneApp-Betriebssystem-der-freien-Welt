@@ -308,6 +308,7 @@ void main() {
       );
 
       await transport.start(keysOverride: keys);
+      fakeRelay.published.clear(); // start() publishes a presence event; ignore it
 
       final msg = NexusMessage.create(
         fromDid: 'did:key:alice',

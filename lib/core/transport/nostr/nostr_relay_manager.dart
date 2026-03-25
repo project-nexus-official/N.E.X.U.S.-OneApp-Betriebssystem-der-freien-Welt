@@ -184,6 +184,13 @@ class NostrRelayManager {
 
     _channels[url] = channel;
 
+    // Absorb connection-level errors (e.g. SocketException before first message)
+    channel.ready.catchError((_) {
+      _statuses[url]?.state = RelayState.error;
+      _channels.remove(url);
+      _scheduleReconnect(url);
+    });
+
     final sub = channel.stream.listen(
       (data) {
         if (_statuses[url]?.state == RelayState.connecting) {
@@ -217,8 +224,17 @@ class NostrRelayManager {
     if (!_running) return;
     _reconnectTimers[url]?.cancel();
     _reconnectTimers[url] = Timer(const Duration(seconds: 10), () {
-      if (_running) _connect(url);
+      if (_running) _connectSafe(url);
     });
+  }
+
+  Future<void> _connectSafe(String url) async {
+    try {
+      _connect(url);
+    } catch (_) {
+      _statuses[url]?.state = RelayState.error;
+      _scheduleReconnect(url);
+    }
   }
 
   void _resubscribe(String url) {

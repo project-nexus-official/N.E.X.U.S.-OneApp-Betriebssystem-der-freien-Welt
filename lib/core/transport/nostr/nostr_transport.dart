@@ -13,22 +13,33 @@ import 'nostr_event.dart';
 import 'nostr_keys.dart';
 import 'nostr_relay_manager.dart';
 
-/// Internet fallback transport via Nostr protocol (NIP-01, NIP-04).
+/// Internet fallback transport via Nostr protocol (NIP-01, NIP-04, NIP-78).
 ///
 /// - Encrypted DMs (Kind 4 / NIP-04) for peer-to-peer messages.
 /// - Public Kind 1 notes tagged with ["t","nexus-mesh"] for #mesh broadcasts.
-/// - Peers are discovered when they send messages; no active "scanning".
-/// - Geohash channel tag is appended to broadcasts when location is available.
+/// - Kind 30078 presence announcements every [presenceInterval] so peers can
+///   discover this node.  Peers that stop announcing for [peerTimeout] are
+///   removed from the peer list.
+/// - Geohash channel tag is appended to broadcasts and presence events when
+///   location is available.
 class NostrTransport implements MessageTransport {
   NostrTransport({
     required this.localDid,
     required this.localPseudonym,
     NostrRelayManager? relayManager,
+    this.presenceInterval = const Duration(seconds: 30),
+    this.peerTimeout = const Duration(minutes: 2),
   }) : _relayManager = relayManager ?? NostrRelayManager();
 
   final String localDid;
   final String localPseudonym;
   final NostrRelayManager _relayManager;
+
+  /// How often to (re)publish a presence announcement.
+  final Duration presenceInterval;
+
+  /// How long without a presence announcement before a peer is evicted.
+  final Duration peerTimeout;
 
   NostrKeys? _keys;
 
@@ -37,17 +48,22 @@ class NostrTransport implements MessageTransport {
   final _msgController = StreamController<NexusMessage>.broadcast();
   final _peersController = StreamController<List<NexusPeer>>.broadcast();
 
-  // DID → Nostr pubkey hex (learned from received messages)
+  // DID → Nostr pubkey hex (learned from presence / received messages)
   final Map<String, String> _didToNostrPubkey = {};
 
   // Nostr pubkey hex → NexusPeer
   final Map<String, NexusPeer> _peers = {};
 
+  // Nostr pubkey hex → last presence timestamp (for timeout eviction)
+  final Map<String, DateTime> _peerLastPresence = {};
+
   // Active relay subscriptions
   String? _dmSubId;
   String? _meshSubId;
+  String? _presenceSubId;
 
   StreamSubscription<NostrEvent>? _eventSub;
+  Timer? _presenceTimer;
 
   // ── Public API ────────────────────────────────────────────────────────────
 
@@ -96,7 +112,9 @@ class NostrTransport implements MessageTransport {
     _eventSub = _relayManager.onEvent.listen(_onRelayEvent);
 
     if (_keys != null) {
-      _subscribeToOwnPubkey();
+      _setupSubscriptions();
+      await _sendPresenceAnnouncement();
+      _startPresenceTimer();
     }
 
     _state = TransportState.connected;
@@ -107,18 +125,24 @@ class NostrTransport implements MessageTransport {
   Future<void> initKeys(Uint8List seed64) async {
     _keys = NostrKeys.fromBip39Seed(seed64);
     if (_state == TransportState.connected) {
-      _subscribeToOwnPubkey();
+      _setupSubscriptions();
+      await _sendPresenceAnnouncement();
+      _startPresenceTimer();
     }
   }
 
   @override
   Future<void> stop() async {
     _state = TransportState.idle;
+    _presenceTimer?.cancel();
+    _presenceTimer = null;
     if (_dmSubId != null) _relayManager.closeSubscription(_dmSubId!);
     if (_meshSubId != null) _relayManager.closeSubscription(_meshSubId!);
+    if (_presenceSubId != null) _relayManager.closeSubscription(_presenceSubId!);
     await _eventSub?.cancel();
     await _relayManager.stop();
     _peers.clear();
+    _peerLastPresence.clear();
   }
 
   // ── Sending ───────────────────────────────────────────────────────────────
@@ -180,29 +204,93 @@ class NostrTransport implements MessageTransport {
     _relayManager.publish(event);
   }
 
+  // ── Presence ──────────────────────────────────────────────────────────────
+
+  /// Publishes a Kind 30078 presence announcement so other nodes can find us.
+  Future<void> _sendPresenceAnnouncement() async {
+    if (_keys == null) return;
+
+    final tags = <List<String>>[
+      ['d', 'nexus-presence'],          // NIP-78 parameterized replaceable key
+      ['t', 'nexus-presence'],          // filter tag
+      ['did', localDid],                // DID for relay-side filtering
+      ['name', localPseudonym],
+    ];
+    if (currentGeohash != null) {
+      tags.add(['t', 'nexus-geo-$currentGeohash']);
+    }
+
+    final event = NostrEvent.create(
+      keys: _keys!,
+      kind: NostrKind.presence,
+      content: jsonEncode({
+        'did': localDid,
+        'pseudonym': localPseudonym,
+      }),
+      tags: tags,
+    );
+    _relayManager.publish(event);
+  }
+
+  void _startPresenceTimer() {
+    _presenceTimer?.cancel();
+    _presenceTimer = Timer.periodic(presenceInterval, (_) async {
+      await _sendPresenceAnnouncement();
+      _evictStalePeers();
+    });
+  }
+
+  /// Removes peers whose last presence announcement is older than [peerTimeout].
+  void _evictStalePeers() {
+    final cutoff = DateTime.now().toUtc().subtract(peerTimeout);
+    final stale = _peerLastPresence.entries
+        .where((e) => e.value.isBefore(cutoff))
+        .map((e) => e.key)
+        .toList();
+
+    if (stale.isEmpty) return;
+
+    for (final pubkey in stale) {
+      _peers.remove(pubkey);
+      _peerLastPresence.remove(pubkey);
+      // Also clean up DID mapping for this pubkey
+      _didToNostrPubkey.removeWhere((_, v) => v == pubkey);
+    }
+    _peersController.add(List.from(_peers.values));
+  }
+
   // ── Receiving ─────────────────────────────────────────────────────────────
 
-  void _subscribeToOwnPubkey() {
+  void _setupSubscriptions() {
     if (_keys == null) return;
     final myPubkey = _keys!.publicKeyHex;
+    final since = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
 
-    // DMs addressed to us
+    // DMs addressed to us (last hour)
     _dmSubId = _relayManager.subscribe({
       'kinds': [NostrKind.encryptedDm],
       '#p': [myPubkey],
-      'since': DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000 - 3600,
+      'since': since - 3600,
     });
 
-    // Mesh broadcasts
+    // Mesh broadcasts (last hour)
     final meshFilters = <String, dynamic>{
       'kinds': [NostrKind.textNote],
       '#t': ['nexus-mesh'],
-      'since': DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000 - 3600,
+      'since': since - 3600,
     };
     if (currentGeohash != null) {
       meshFilters['#t'] = ['nexus-mesh', 'nexus-geo-$currentGeohash'];
     }
     _meshSubId = _relayManager.subscribe(meshFilters);
+
+    // Presence announcements – last 5 minutes for initial peer discovery,
+    // then live as new nodes come online.
+    _presenceSubId = _relayManager.subscribe({
+      'kinds': [NostrKind.presence],
+      '#t': ['nexus-presence'],
+      'since': since - 300,
+    });
   }
 
   void _onRelayEvent(NostrEvent event) {
@@ -213,6 +301,8 @@ class NostrTransport implements MessageTransport {
         _handleDm(event);
       case NostrKind.textNote:
         _handleBroadcast(event);
+      case NostrKind.presence:
+        _handlePresenceEvent(event);
     }
   }
 
@@ -249,6 +339,38 @@ class NostrTransport implements MessageTransport {
     } catch (_) {}
   }
 
+  void _handlePresenceEvent(NostrEvent event) {
+    if (_keys == null) return;
+    // Ignore our own presence events
+    if (event.pubkey == _keys!.publicKeyHex) return;
+
+    try {
+      final data = jsonDecode(event.content) as Map<String, dynamic>;
+      final did = (data['did'] as String?) ?? event.tagValue('did');
+      final pseudonym = (data['pseudonym'] as String?) ??
+          event.tagValue('name') ??
+          _shortDid(event.pubkey);
+
+      if (did == null || did.isEmpty) return;
+
+      // Store DID ↔ Nostr pubkey mapping so we can send DMs
+      _didToNostrPubkey[did] = event.pubkey;
+
+      // Update peer record
+      _peers[event.pubkey] = NexusPeer(
+        did: did,
+        pseudonym: pseudonym,
+        transportType: TransportType.nostr,
+        lastSeen: DateTime.now().toUtc(),
+      );
+
+      // Record presence timestamp for timeout tracking
+      _peerLastPresence[event.pubkey] = DateTime.now().toUtc();
+
+      _peersController.add(List.from(_peers.values));
+    } catch (_) {}
+  }
+
   void _learnPeer(
     String nostrPubkey,
     String senderDid,
@@ -264,8 +386,7 @@ class NostrTransport implements MessageTransport {
     }
 
     final existing = _peers[nostrPubkey];
-    final pseudonym = existing?.pseudonym ??
-        _shortDid(senderDid);
+    final pseudonym = existing?.pseudonym ?? _shortDid(senderDid);
 
     _peers[nostrPubkey] = NexusPeer(
       did: senderDid,

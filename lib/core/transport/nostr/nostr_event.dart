@@ -8,11 +8,17 @@ import 'nostr_keys.dart';
 
 /// Nostr event kinds used by NEXUS.
 class NostrKind {
+  /// NIP-01 text note (used for #mesh broadcasts).
+  static const int textNote = 1;
+
   /// NIP-04 encrypted direct message.
   static const int encryptedDm = 4;
 
-  /// NIP-01 text note (used for #mesh broadcasts).
-  static const int textNote = 1;
+  /// NIP-78 parameterized replaceable event – NEXUS presence announcements.
+  ///
+  /// Each node publishes one of these every 30 s so peers can discover it.
+  /// Relays keep only the latest event per pubkey+d-tag, which is efficient.
+  static const int presence = 30078;
 }
 
 /// A NIP-01 Nostr event.
