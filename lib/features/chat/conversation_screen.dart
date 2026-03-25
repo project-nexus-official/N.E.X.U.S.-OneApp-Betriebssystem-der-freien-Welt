@@ -787,6 +787,21 @@ class _ConnectionIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Nostr peers: blue globe
+    if (peer.transportType == TransportType.nostr) {
+      return const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.language, size: 12, color: Colors.blueAccent),
+          SizedBox(width: 4),
+          Text(
+            'Internet',
+            style: TextStyle(color: Colors.blueAccent, fontSize: 11),
+          ),
+        ],
+      );
+    }
+
     final color = switch (peer.signalLevel) {
       SignalLevel.excellent || SignalLevel.good => Colors.greenAccent,
       SignalLevel.fair => Colors.amber,

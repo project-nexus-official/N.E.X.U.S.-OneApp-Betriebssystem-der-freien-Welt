@@ -48,6 +48,16 @@ dependencies:
   # Emoji picker panel
   emoji_picker_flutter: ^2.2.0
 
+  # Nostr transport
+  web_socket_channel: ^2.4.0
+  pointycastle: ^3.7.3
+
+  # Network connectivity monitoring (Nostr on/off)
+  connectivity_plus: ^6.0.3
+
+  # GPS for geohash-based Nostr channels
+  geolocator: ^10.1.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -2,16 +2,22 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:image/image.dart' as img;
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../core/identity/bip39.dart';
 import '../../core/identity/identity_service.dart';
 import '../../core/storage/pod_database.dart';
 import '../../core/transport/ble/ble_transport.dart';
 import '../../core/transport/lan/lan_transport.dart';
 import '../../core/transport/nexus_message.dart';
+import '../../core/transport/message_transport.dart';
 import '../../core/transport/nexus_peer.dart';
+import '../../core/transport/nostr/nostr_keys.dart';
+import '../../core/transport/nostr/nostr_transport.dart';
 import '../../core/transport/transport_manager.dart';
 import 'conversation_service.dart';
 
@@ -33,6 +39,14 @@ class ChatProvider extends ChangeNotifier {
   // the manager (which doesn't expose transport internals).
   LanTransport? _lanTransport;
 
+  // Nostr transport – started/stopped based on internet connectivity.
+  NostrTransport? _nostrTransport;
+
+  // Whether the user has enabled Nostr (persisted via POD).
+  bool _nostrEnabled = true;
+
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+
   // ── State ──────────────────────────────────────────────────────────────────
 
   bool _initialized = false;
@@ -44,6 +58,11 @@ class ChatProvider extends ChangeNotifier {
   bool get permissionsGranted => _permissionsGranted;
   bool get running => _running;
   String? get error => _error;
+
+  bool get nostrEnabled => _nostrEnabled;
+
+  /// Direct access to the Nostr transport (for settings screen).
+  NostrTransport? get nostrTransport => _nostrTransport;
 
   List<NexusPeer> get peers => _manager.peers;
 
@@ -105,6 +124,13 @@ class ChatProvider extends ChangeNotifier {
       );
       _manager.registerTransport(_lanTransport!);
 
+      // Nostr transport – internet fallback; started conditionally below.
+      _nostrTransport = NostrTransport(
+        localDid: identity.did,
+        localPseudonym: identity.pseudonym,
+      );
+      _manager.registerTransport(_nostrTransport!);
+
       // Subscribe to events before starting
       _msgSub = _manager.onMessageReceived.listen(_onMessageReceived);
       _peersSub = _manager.onPeersChanged.listen((_) => notifyListeners());
@@ -112,6 +138,11 @@ class ChatProvider extends ChangeNotifier {
       await _manager.start();
       _running = true;
       _error = null;
+
+      // Derive Nostr keys from seed and start Nostr if internet is available.
+      await _initNostrKeys(identity);
+      await _startNostrIfConnected();
+      _watchConnectivity();
     } catch (e) {
       _error = 'Fehler beim Starten: $e';
       _running = false;
@@ -119,6 +150,78 @@ class ChatProvider extends ChangeNotifier {
 
     notifyListeners();
   }
+
+  Future<void> _initNostrKeys(dynamic identity) async {
+    try {
+      final mnemonic = await IdentityService.instance.loadSeedPhrase();
+      if (mnemonic == null) return;
+      final seed64 = Bip39.mnemonicToSeed(mnemonic);
+      await _nostrTransport?.initKeys(seed64);
+    } catch (_) {}
+  }
+
+  Future<void> _startNostrIfConnected() async {
+    if (!_nostrEnabled) return;
+    try {
+      final results = await Connectivity().checkConnectivity();
+      final hasInternet = _hasInternet(results);
+      if (hasInternet && _nostrTransport != null) {
+        await _nostrTransport!.start();
+        await _tryGetGeohash();
+      }
+    } catch (_) {}
+  }
+
+  void _watchConnectivity() {
+    _connectivitySub?.cancel();
+    _connectivitySub =
+        Connectivity().onConnectivityChanged.listen((results) async {
+      if (!_nostrEnabled) return;
+      final hasInternet = _hasInternet(results);
+      final nostrRunning =
+          _nostrTransport?.state == TransportState.connected;
+
+      if (hasInternet && !nostrRunning) {
+        try {
+          await _nostrTransport?.start();
+          await _tryGetGeohash();
+          notifyListeners();
+        } catch (_) {}
+      } else if (!hasInternet && nostrRunning) {
+        try {
+          await _nostrTransport?.stop();
+          notifyListeners();
+        } catch (_) {}
+      }
+    });
+  }
+
+  Future<void> _tryGetGeohash() async {
+    if (_nostrTransport == null) return;
+    try {
+      final permission = await Geolocator.checkPermission();
+      LocationPermission resolved = permission;
+      if (permission == LocationPermission.denied) {
+        resolved = await Geolocator.requestPermission();
+      }
+      if (resolved == LocationPermission.whileInUse ||
+          resolved == LocationPermission.always) {
+        final pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.low,
+        );
+        _nostrTransport!.currentGeohash =
+            geohashEncode(pos.latitude, pos.longitude);
+      }
+    } catch (_) {
+      // Location unavailable – skip geohash
+    }
+  }
+
+  static bool _hasInternet(List<ConnectivityResult> results) =>
+      results.any((r) =>
+          r == ConnectivityResult.wifi ||
+          r == ConnectivityResult.mobile ||
+          r == ConnectivityResult.ethernet);
 
   // ── Permissions ────────────────────────────────────────────────────────────
 
@@ -264,6 +367,23 @@ class ChatProvider extends ChangeNotifier {
 
   // ── Manual LAN peer (broadcast-firewall workaround) ───────────────────────
 
+  /// Enables or disables the Nostr transport.
+  Future<void> setNostrEnabled(bool enabled) async {
+    _nostrEnabled = enabled;
+    if (enabled) {
+      await _startNostrIfConnected();
+    } else {
+      await _nostrTransport?.stop();
+    }
+    notifyListeners();
+  }
+
+  /// Adds a custom Nostr relay URL.
+  void addNostrRelay(String url) {
+    _nostrTransport?.addRelay(url);
+    notifyListeners();
+  }
+
   /// Adds [ipAddress] as a manual unicast target for LAN discovery.
   ///
   /// Use this when UDP broadcast is blocked by the remote device's firewall
@@ -314,6 +434,7 @@ class ChatProvider extends ChangeNotifier {
   void dispose() {
     _msgSub?.cancel();
     _peersSub?.cancel();
+    _connectivitySub?.cancel();
     _manager.stop();
     super.dispose();
   }

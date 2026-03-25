@@ -401,15 +401,11 @@ class _ChatBody extends StatelessWidget {
 
             const Divider(height: 1, color: AppColors.surfaceVariant),
 
-            // Peer list
+            // Peer list: local peers, then Nostr peers in a separate section
             Expanded(
               child: peers.isEmpty
                   ? const _EmptyPeerList()
-                  : ListView.builder(
-                      itemCount: peers.length,
-                      itemBuilder: (context, i) =>
-                          _PeerTile(peer: peers[i], provider: provider),
-                    ),
+                  : _PeerListWithNostr(peers: peers, provider: provider),
             ),
           ],
         );
@@ -422,6 +418,65 @@ class _ChatBody extends StatelessWidget {
         }
         return inner;
       },
+    );
+  }
+}
+
+/// Peer list split into local (BLE/LAN) and Nostr sections.
+class _PeerListWithNostr extends StatelessWidget {
+  const _PeerListWithNostr({required this.peers, required this.provider});
+  final List<NexusPeer> peers;
+  final ChatProvider provider;
+
+  @override
+  Widget build(BuildContext context) {
+    final local = peers
+        .where((p) =>
+            p.transportType == TransportType.lan ||
+            p.transportType == TransportType.ble)
+        .toList();
+    final nostrOnly = peers
+        .where((p) =>
+            p.transportType == TransportType.nostr &&
+            !local.any((l) => l.did == p.did))
+        .toList();
+
+    return ListView(
+      children: [
+        if (local.isNotEmpty) ...[
+          ...local.map((p) => _PeerTile(peer: p, provider: provider)),
+        ],
+        if (nostrOnly.isNotEmpty) ...[
+          const _SectionDivider(label: 'Online im NEXUS-Netzwerk'),
+          ...nostrOnly.map((p) => _PeerTile(peer: p, provider: provider)),
+        ],
+      ],
+    );
+  }
+}
+
+class _SectionDivider extends StatelessWidget {
+  const _SectionDivider({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Row(
+        children: [
+          const Icon(Icons.language, size: 14, color: Colors.blueAccent),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.blueAccent,
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -498,8 +553,12 @@ class _TransportBadges extends StatelessWidget {
 
   Widget _iconFor(TransportType t) {
     return switch (t) {
-      TransportType.ble => const Icon(Icons.bluetooth, size: 14, color: Colors.lightBlueAccent),
-      TransportType.lan => const Icon(Icons.wifi, size: 14, color: Colors.greenAccent),
+      TransportType.ble =>
+        const Icon(Icons.bluetooth, size: 14, color: Colors.lightBlueAccent),
+      TransportType.lan =>
+        const Icon(Icons.wifi, size: 14, color: Colors.greenAccent),
+      TransportType.nostr =>
+        const Icon(Icons.language, size: 14, color: Colors.blueAccent),
       _ => const Icon(Icons.cloud_queue, size: 14, color: Colors.grey),
     };
   }
@@ -538,6 +597,7 @@ class _SignalIndicator extends StatelessWidget {
 
   IconData _signalIcon(SignalLevel level, TransportType primary) {
     if (primary == TransportType.lan) return Icons.wifi;
+    if (primary == TransportType.nostr) return Icons.language;
     return switch (level) {
       SignalLevel.excellent || SignalLevel.good => Icons.bluetooth_connected,
       SignalLevel.fair => Icons.bluetooth_searching,
