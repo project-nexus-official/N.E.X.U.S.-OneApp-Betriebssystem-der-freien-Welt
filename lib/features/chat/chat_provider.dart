@@ -431,9 +431,10 @@ class ChatProvider extends ChangeNotifier {
         try {
           return NexusMessage.fromJson(
             Map<String, dynamic>.from(row)
-              ..removeWhere((k, _) => k == 'sender_did' || k == 'ts'),
+              ..remove('sender_did'),
           );
-        } catch (_) {
+        } catch (e) {
+          debugPrint('[CHAT] Failed to deserialize message from DB: $e');
           return null;
         }
       }).whereType<NexusMessage>().toList();
