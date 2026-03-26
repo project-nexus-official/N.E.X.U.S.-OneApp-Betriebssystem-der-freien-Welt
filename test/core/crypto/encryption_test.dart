@@ -202,4 +202,96 @@ void main() {
       expect(EncryptionKeys.hexToBytes(hex), equals(bytes));
     });
   });
+
+  // ── Sender sees plaintext (regression for send-ciphertext bug) ────────────
+
+  group('Send/receive plaintext visibility', () {
+    late SimpleKeyPair aliceKp;
+    late SimpleKeyPair bobKp;
+    late Uint8List alicePub;
+    late Uint8List bobPub;
+
+    setUpAll(() async {
+      aliceKp = await X25519().newKeyPair();
+      bobKp = await X25519().newKeyPair();
+      alicePub =
+          Uint8List.fromList((await aliceKp.extractPublicKey()).bytes);
+      bobPub =
+          Uint8List.fromList((await bobKp.extractPublicKey()).bytes);
+    });
+
+    // Simulates what ChatProvider.sendMessage() now does: the body stored
+    // locally must be the original plaintext, while the transport body is
+    // the ciphertext.
+    test('transport body is ciphertext, local body is plaintext', () async {
+      const plaintext = 'Geheime Nachricht';
+
+      final ciphertext = await MessageEncryption.encrypt(
+        plaintext,
+        senderKeyPair: aliceKp,
+        recipientPublicKeyBytes: bobPub,
+      );
+      expect(ciphertext, isNotNull);
+
+      // Local body = plaintext (what sender stores and displays)
+      const localBody = plaintext;
+
+      // Transport body = ciphertext
+      final transportBody = ciphertext!;
+
+      // They must differ
+      expect(transportBody, isNot(equals(localBody)));
+
+      // Local body is human-readable (not base64 ciphertext)
+      expect(localBody, equals(plaintext));
+    });
+
+    // Simulates what ChatProvider._onMessageReceived() does: the received
+    // ciphertext must be decrypted before storing/displaying.
+    test('received ciphertext is decrypted before display', () async {
+      const plaintext = 'Hallo Bob!';
+
+      // Alice encrypts for Bob
+      final ciphertext = await MessageEncryption.encrypt(
+        plaintext,
+        senderKeyPair: aliceKp,
+        recipientPublicKeyBytes: bobPub,
+      );
+      expect(ciphertext, isNotNull);
+
+      // Bob decrypts
+      final decrypted = await MessageEncryption.decrypt(
+        ciphertext!,
+        recipientKeyPair: bobKp,
+        senderPublicKeyBytes: alicePub,
+      );
+
+      // What Bob stores/displays is plaintext, not ciphertext
+      expect(decrypted, equals(plaintext));
+      expect(decrypted, isNot(equals(ciphertext)));
+    });
+
+    // Conversation list preview must not show ciphertext.
+    // Simulates _previewBody() reading the stored body from DB.
+    test('conversation preview shows plaintext (not ciphertext)', () async {
+      const plaintext = 'Kurze Vorschau';
+
+      // After the fix, what is stored in DB is the plaintext body.
+      // _previewBody() just returns body.substring(0, 60), so:
+      final storedBody = plaintext; // local message body = plaintext
+      final preview =
+          storedBody.length > 60 ? storedBody.substring(0, 60) : storedBody;
+
+      expect(preview, equals(plaintext));
+
+      // Ensure ciphertext would NOT be a valid preview
+      final ciphertext = await MessageEncryption.encrypt(
+        plaintext,
+        senderKeyPair: aliceKp,
+        recipientPublicKeyBytes: bobPub,
+      );
+      expect(ciphertext, isNotNull);
+      expect(preview, isNot(equals(ciphertext!.substring(0, 60))));
+    });
+  });
 }

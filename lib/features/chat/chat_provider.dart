@@ -441,10 +441,25 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     final myDid = IdentityService.instance.currentIdentity?.did ?? 'unknown';
     final contact = ContactService.instance.findByDid(recipientDid);
     final recipientEncKey = contact?.encryptionPublicKey;
+    final myEncKeyHex = EncryptionKeys.instance.publicKeyHex;
 
-    String body = text;
-    Map<String, dynamic>? extraMeta;
+    // Base metadata includes our encryption public key so the recipient can
+    // start encrypting to us on their next message even if they had no key yet.
+    final baseMeta = myEncKeyHex != null ? {'enc_key': myEncKeyHex} : null;
 
+    // Local message (always plaintext – what we display and persist locally).
+    final localMsg = NexusMessage.create(
+      fromDid: myDid,
+      toDid: recipientDid,
+      body: text,
+      metadata: baseMeta != null
+          ? {...baseMeta, if (recipientEncKey != null) 'encrypted': true}
+          : null,
+    );
+
+    // Transport message: encrypted body when the recipient's key is known,
+    // otherwise identical to the local message.
+    NexusMessage transportMsg = localMsg;
     if (recipientEncKey != null) {
       final encryptedBody = await MessageEncryption.encrypt(
         text,
@@ -452,31 +467,32 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
         recipientPublicKeyBytes: EncryptionKeys.hexToBytes(recipientEncKey),
       );
       if (encryptedBody != null) {
-        body = encryptedBody;
-        extraMeta = {
-          'encrypted': true,
-          'enc_key': EncryptionKeys.instance.publicKeyHex,
-        };
+        transportMsg = NexusMessage(
+          id: localMsg.id,
+          fromDid: localMsg.fromDid,
+          toDid: localMsg.toDid,
+          type: localMsg.type,
+          channel: localMsg.channel,
+          body: encryptedBody,
+          timestamp: localMsg.timestamp,
+          ttlHours: localMsg.ttlHours,
+          hopCount: localMsg.hopCount,
+          signature: localMsg.signature,
+          metadata: {
+            ...?baseMeta,
+            'encrypted': true,
+          },
+        );
       }
-    } else if (EncryptionKeys.instance.publicKeyHex != null) {
-      // Include our enc key in metadata so recipient can encrypt future messages
-      extraMeta = {'enc_key': EncryptionKeys.instance.publicKeyHex};
     }
 
-    final msg = NexusMessage.create(
-      fromDid: myDid,
-      toDid: recipientDid,
-      body: body,
-      metadata: extraMeta,
-    );
+    await _manager.sendMessage(transportMsg, recipientDid: recipientDid);
 
-    await _manager.sendMessage(msg, recipientDid: recipientDid);
-
-    // Optimistic local cache update
+    // Optimistic local cache update – always use plaintext local message.
     final convId = _conversationId(recipientDid, myDid);
     _conversationCache.putIfAbsent(convId, () => []);
-    _conversationCache[convId]!.add(msg);
-    await _persistMessage(convId, msg);
+    _conversationCache[convId]!.add(localMsg);
+    await _persistMessage(convId, localMsg);
     ConversationService.instance.notifyUpdate();
 
     notifyListeners();
