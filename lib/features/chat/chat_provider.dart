@@ -437,7 +437,12 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   // ── Sending ────────────────────────────────────────────────────────────────
 
   /// Sends a direct text message to [recipientDid].
-  Future<void> sendMessage(String recipientDid, String text) async {
+  Future<void> sendMessage(
+    String recipientDid,
+    String text, {
+    NexusMessage? replyTo,
+    String? replyToSenderName,
+  }) async {
     final myDid = IdentityService.instance.currentIdentity?.did ?? 'unknown';
     final contact = ContactService.instance.findByDid(recipientDid);
     final recipientEncKey = contact?.encryptionPublicKey;
@@ -447,13 +452,34 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     // start encrypting to us on their next message even if they had no key yet.
     final baseMeta = myEncKeyHex != null ? {'enc_key': myEncKeyHex} : null;
 
+    // Add reply metadata if replying to a message
+    Map<String, dynamic>? replyMeta;
+    if (replyTo != null) {
+      final isImg = replyTo.type == NexusMessageType.image;
+      replyMeta = {
+        'reply_to_id': replyTo.id,
+        'reply_to_sender': replyToSenderName ?? replyTo.fromDid,
+        'reply_to_preview':
+            isImg ? 'Foto' : replyTo.body.substring(0, replyTo.body.length.clamp(0, 100)),
+        if (isImg) 'reply_to_image': true,
+      };
+    }
+
     // Local message (always plaintext – what we display and persist locally).
     final localMsg = NexusMessage.create(
       fromDid: myDid,
       toDid: recipientDid,
       body: text,
-      metadata: baseMeta != null
-          ? {...baseMeta, if (recipientEncKey != null) 'encrypted': true}
+      metadata: {
+        ...?baseMeta,
+        if (recipientEncKey != null) 'encrypted': true,
+        ...?replyMeta,
+      }.isNotEmpty
+          ? {
+              ...?baseMeta,
+              if (recipientEncKey != null) 'encrypted': true,
+              ...?replyMeta,
+            }
           : null,
     );
 
@@ -481,6 +507,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
           metadata: {
             ...?baseMeta,
             'encrypted': true,
+            ...?replyMeta,
           },
         );
       }
@@ -499,16 +526,40 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// Sends a broadcast message to the #mesh channel.
-  Future<void> sendBroadcast(String text) async {
+  Future<void> sendBroadcast(
+    String text, {
+    NexusMessage? replyTo,
+    String? replyToSenderName,
+  }) async {
     final myDid = IdentityService.instance.currentIdentity?.did ?? 'unknown';
+
+    Map<String, dynamic>? replyMeta;
+    if (replyTo != null) {
+      final isImg = replyTo.type == NexusMessageType.image;
+      replyMeta = {
+        'reply_to_id': replyTo.id,
+        'reply_to_sender': replyToSenderName ?? replyTo.fromDid,
+        'reply_to_preview':
+            isImg ? 'Foto' : replyTo.body.substring(0, replyTo.body.length.clamp(0, 100)),
+        if (isImg) 'reply_to_image': true,
+      };
+    }
 
     final msg = NexusMessage.create(
       fromDid: myDid,
       toDid: NexusMessage.broadcastDid,
       body: text,
       channel: '#mesh',
-      metadata: EncryptionKeys.instance.publicKeyHex != null
-          ? {'enc_key': EncryptionKeys.instance.publicKeyHex}
+      metadata: {
+        if (EncryptionKeys.instance.publicKeyHex != null)
+          'enc_key': EncryptionKeys.instance.publicKeyHex!,
+        ...?replyMeta,
+      }.isNotEmpty
+          ? {
+              if (EncryptionKeys.instance.publicKeyHex != null)
+                'enc_key': EncryptionKeys.instance.publicKeyHex!,
+              ...?replyMeta,
+            }
           : null,
     );
 

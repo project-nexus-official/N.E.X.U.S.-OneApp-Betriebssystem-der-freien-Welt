@@ -57,6 +57,15 @@ Phase 2: Care-System + Sphären-Plugins
   - Schlüsselwechsel-Warnung im Chat
   - Fallback: unverschlüsselt wenn Peer keinen Key hat (mit Warnung)
   - Broadcasts bleiben unverschlüsselt (öffentlich by design)
+- **Antworten / Zitieren (komplett)**:
+  - Swipe-to-Reply (rechts wischen) auf eigene und fremde Nachrichten
+  - Long-Press Kontextmenü: Antworten, Kopieren, Weiterleiten (UI), Löschen
+  - Antwort-Banner über Eingabefeld mit Goldlinie, Absender, Vorschau, X-Button
+  - Zitat-Block in Chat-Bubble: Goldlinie, Absender, Vorschautext, Bild-Placeholder
+  - Tippen auf Zitat → scrollt zur Originalnachricht mit Goldflash (1 Sek.)
+  - Toast wenn Originalnachricht nicht mehr verfügbar
+  - Reply-Daten in metadata (reply_to_id/sender/preview/image), alle Transports
+  - Verschlüsselte Antworten zeigen Klartext im Zitat
 
 ## Aktueller Fokus
 >>> PHASE 1a: Fundament + Identität (in Fertigstellung) <<<

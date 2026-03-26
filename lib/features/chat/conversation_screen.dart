@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' show min;
 
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:flutter/material.dart';
@@ -55,6 +56,14 @@ class _ConversationScreenState extends State<ConversationScreen> {
   bool _showScrollDown = false;
   RetentionPeriod? _perChatRetention; // null = use global setting
 
+  // ── Reply state ─────────────────────────────────────────────────────────────
+  NexusMessage? _replyToMessage;
+  String? _replyToSenderName;
+
+  // ── Highlight state (for scroll-to-original) ────────────────────────────────
+  final ValueNotifier<String?> _highlightedId = ValueNotifier(null);
+  final Map<String, GlobalKey> _messageKeys = {};
+
   // Stored reference to ChatProvider so we can safely call it in dispose().
   ChatProvider? _chatProvider;
 
@@ -98,6 +107,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
     _textCtrl.dispose();
     _scrollCtrl.dispose();
     _textFocus.dispose();
+    _highlightedId.dispose();
     super.dispose();
   }
 
@@ -138,12 +148,17 @@ class _ConversationScreenState extends State<ConversationScreen> {
     if (text.isEmpty) return;
     _textCtrl.clear();
 
+    // Capture and clear reply state before async gap
+    final reply = _replyToMessage;
+    final replyName = _replyToSenderName;
+    if (mounted) setState(() { _replyToMessage = null; _replyToSenderName = null; });
+
     final provider = context.read<ChatProvider>();
     try {
       if (widget.isBroadcast) {
-        await provider.sendBroadcast(text);
+        await provider.sendBroadcast(text, replyTo: reply, replyToSenderName: replyName);
       } else {
-        await provider.sendMessage(widget.peerDid, text);
+        await provider.sendMessage(widget.peerDid, text, replyTo: reply, replyToSenderName: replyName);
       }
       await _refreshMessages();
     } catch (e) {
@@ -233,6 +248,57 @@ class _ConversationScreenState extends State<ConversationScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  // ── Reply / scroll helpers ──────────────────────────────────────────────────
+
+  void _startReply(NexusMessage msg) {
+    final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+    final isMe = msg.fromDid == myDid;
+    final String senderName;
+    if (isMe) {
+      senderName = 'Du';
+    } else {
+      final contact = ContactService.instance.findByDid(msg.fromDid);
+      senderName = contact?.pseudonym ?? widget.peerPseudonym;
+    }
+    setState(() {
+      _replyToMessage = msg;
+      _replyToSenderName = senderName;
+    });
+    _textFocus.requestFocus();
+  }
+
+  void _cancelReply() {
+    setState(() {
+      _replyToMessage = null;
+      _replyToSenderName = null;
+    });
+  }
+
+  void _scrollToMessage(String messageId) {
+    final key = _messageKeys[messageId];
+    if (key?.currentContext == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Originalnachricht nicht mehr verfügbar'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
+    Scrollable.ensureVisible(
+      key!.currentContext!,
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeInOut,
+      alignment: 0.5,
+    );
+    _highlightedId.value = messageId;
+    Future.delayed(const Duration(seconds: 1), () {
+      if (mounted) _highlightedId.value = null;
+    });
   }
 
   void _openContactDetail(BuildContext context) {
@@ -328,6 +394,16 @@ class _ConversationScreenState extends State<ConversationScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // ── Antworten (primary action) ──
+            ListTile(
+              leading: const Icon(Icons.reply, color: AppColors.gold),
+              title: const Text('Antworten'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _startReply(msg);
+              },
+            ),
+            // ── Kopieren (text only) ──
             if (msg.type == NexusMessageType.text)
               ListTile(
                 leading: const Icon(Icons.copy, color: AppColors.gold),
@@ -340,15 +416,22 @@ class _ConversationScreenState extends State<ConversationScreen> {
                   );
                 },
               ),
+            // ── Weiterleiten (UI only, Phase 1b) ──
+            ListTile(
+              leading: const Icon(Icons.forward, color: Colors.grey),
+              title: const Text('Weiterleiten',
+                  style: TextStyle(color: Colors.grey)),
+              onTap: () => Navigator.pop(ctx),
+            ),
+            // ── Löschen (own messages only) ──
             if (isMe)
               ListTile(
-                leading:
-                    const Icon(Icons.delete_outline, color: Colors.redAccent),
+                leading: const Icon(Icons.delete_outline,
+                    color: Colors.redAccent),
                 title: const Text('Löschen',
                     style: TextStyle(color: Colors.redAccent)),
                 onTap: () async {
                   Navigator.pop(ctx);
-                  // Local removal only (no protocol-level delete yet).
                   setState(() => _messages.remove(msg));
                   ConversationService.instance.notifyUpdate();
                 },
@@ -463,6 +546,10 @@ class _ConversationScreenState extends State<ConversationScreen> {
                               isBroadcast: widget.isBroadcast,
                               onLongPress: (msg) =>
                                   _showMessageMenu(context, msg),
+                              onSwipeReply: _startReply,
+                              onTapQuote: _scrollToMessage,
+                              highlightedId: _highlightedId,
+                              messageKeys: _messageKeys,
                             ),
                       // Scroll-to-bottom FAB
                       if (_showScrollDown)
@@ -482,6 +569,13 @@ class _ConversationScreenState extends State<ConversationScreen> {
                     ],
                   ),
                 ),
+                // Reply banner
+                if (_replyToMessage != null)
+                  _ReplyBanner(
+                    message: _replyToMessage!,
+                    senderName: _replyToSenderName ?? '',
+                    onCancel: _cancelReply,
+                  ),
                 // Input bar
                 _InputBar(
                   ctrl: _textCtrl,
@@ -547,12 +641,20 @@ class _MessageList extends StatelessWidget {
     required this.scrollCtrl,
     required this.isBroadcast,
     required this.onLongPress,
+    required this.onSwipeReply,
+    required this.onTapQuote,
+    required this.highlightedId,
+    required this.messageKeys,
   });
 
   final List<NexusMessage> messages;
   final ScrollController scrollCtrl;
   final bool isBroadcast;
   final void Function(NexusMessage) onLongPress;
+  final void Function(NexusMessage) onSwipeReply;
+  final void Function(String) onTapQuote;
+  final ValueNotifier<String?> highlightedId;
+  final Map<String, GlobalKey> messageKeys;
 
   @override
   Widget build(BuildContext context) {
@@ -575,13 +677,135 @@ class _MessageList extends StatelessWidget {
       itemBuilder: (context, i) {
         final msg = messages[i];
         final isMe = msg.fromDid == myDid;
-        return _MessageBubble(
-          message: msg,
-          isMe: isMe,
-          showSender: isBroadcast && !isMe,
-          onLongPress: () => onLongPress(msg),
+        // Assign a stable GlobalKey for scroll-to support
+        messageKeys.putIfAbsent(msg.id, () => GlobalKey());
+        return ValueListenableBuilder<String?>(
+          valueListenable: highlightedId,
+          builder: (context, hlId, child) {
+            return AnimatedContainer(
+              duration: Duration(milliseconds: hlId == msg.id ? 0 : 600),
+              color: hlId == msg.id
+                  ? AppColors.gold.withValues(alpha: 0.18)
+                  : Colors.transparent,
+              child: child,
+            );
+          },
+          child: _SwipeableMessageBubble(
+            key: messageKeys[msg.id],
+            message: msg,
+            isMe: isMe,
+            showSender: isBroadcast && !isMe,
+            onLongPress: () => onLongPress(msg),
+            onSwipeReply: () => onSwipeReply(msg),
+            onTapQuote: onTapQuote,
+          ),
         );
       },
+    );
+  }
+}
+
+// ── Swipeable wrapper for reply gesture ───────────────────────────────────────
+
+class _SwipeableMessageBubble extends StatefulWidget {
+  const _SwipeableMessageBubble({
+    super.key,
+    required this.message,
+    required this.isMe,
+    required this.showSender,
+    required this.onLongPress,
+    required this.onSwipeReply,
+    required this.onTapQuote,
+  });
+
+  final NexusMessage message;
+  final bool isMe;
+  final bool showSender;
+  final VoidCallback onLongPress;
+  final VoidCallback onSwipeReply;
+  final void Function(String) onTapQuote;
+
+  @override
+  State<_SwipeableMessageBubble> createState() =>
+      _SwipeableMessageBubbleState();
+}
+
+class _SwipeableMessageBubbleState extends State<_SwipeableMessageBubble>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _anim;
+  double _dragExtent = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _anim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 120),
+    );
+  }
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    super.dispose();
+  }
+
+  void _onDragUpdate(DragUpdateDetails d) {
+    if (d.delta.dx > 0) {
+      _dragExtent = (_dragExtent + d.delta.dx).clamp(0, 80);
+      _anim.value = _dragExtent / 80;
+    }
+  }
+
+  void _onDragEnd(DragEndDetails _) {
+    if (_dragExtent >= 40) {
+      HapticFeedback.mediumImpact();
+      widget.onSwipeReply();
+    }
+    _dragExtent = 0;
+    _anim.animateTo(0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onHorizontalDragUpdate: _onDragUpdate,
+      onHorizontalDragEnd: _onDragEnd,
+      child: AnimatedBuilder(
+        animation: _anim,
+        builder: (context, child) {
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              // Reply icon (fades in as you swipe)
+              if (_anim.value > 0)
+                Positioned(
+                  left: 8,
+                  top: 0,
+                  bottom: 0,
+                  child: Opacity(
+                    opacity: _anim.value,
+                    child: const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Icon(Icons.reply, color: AppColors.gold, size: 20),
+                    ),
+                  ),
+                ),
+              Transform.translate(
+                offset: Offset(_anim.value * 40, 0),
+                child: child,
+              ),
+            ],
+          );
+        },
+        child: _MessageBubble(
+          message: widget.message,
+          isMe: widget.isMe,
+          showSender: widget.showSender,
+          onLongPress: widget.onLongPress,
+          onTapQuote: widget.onTapQuote,
+        ),
+      ),
     );
   }
 }
@@ -594,15 +818,19 @@ class _MessageBubble extends StatelessWidget {
     required this.isMe,
     required this.showSender,
     required this.onLongPress,
+    required this.onTapQuote,
   });
 
   final NexusMessage message;
   final bool isMe;
   final bool showSender; // show sender name above bubble in broadcast channel
   final VoidCallback onLongPress;
+  final void Function(String) onTapQuote;
 
   @override
   Widget build(BuildContext context) {
+    final hasReply = message.metadata?['reply_to_id'] != null;
+
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: GestureDetector(
@@ -637,6 +865,23 @@ class _MessageBubble extends StatelessWidget {
                     ),
                   ),
                 ),
+              // ── Quoted message block ──────────────────────────────────────
+              if (hasReply)
+                _ReplyQuoteBlock(
+                  replyToId:
+                      message.metadata!['reply_to_id'] as String,
+                  senderName:
+                      (message.metadata!['reply_to_sender'] as String?) ??
+                          '…',
+                  preview:
+                      (message.metadata!['reply_to_preview'] as String?) ??
+                          '',
+                  isImage:
+                      message.metadata!['reply_to_image'] as bool? ?? false,
+                  isMe: isMe,
+                  onTap: onTapQuote,
+                ),
+              // ── Message content ───────────────────────────────────────────
               if (message.type == NexusMessageType.image)
                 _ImageContent(message: message)
               else
@@ -924,6 +1169,178 @@ class _InputBar extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ── Reply quote block (inside message bubble) ─────────────────────────────────
+
+class _ReplyQuoteBlock extends StatelessWidget {
+  const _ReplyQuoteBlock({
+    required this.replyToId,
+    required this.senderName,
+    required this.preview,
+    required this.isImage,
+    required this.isMe,
+    required this.onTap,
+  });
+
+  final String replyToId;
+  final String senderName;
+  final String preview;
+  final bool isImage;
+  final bool isMe;
+  final void Function(String) onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => onTap(replyToId),
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+        padding: const EdgeInsets.fromLTRB(0, 6, 8, 6),
+        decoration: BoxDecoration(
+          color: isMe
+              ? AppColors.deepBlue.withValues(alpha: 0.25)
+              : AppColors.surface.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Gold accent line
+            Container(
+              width: 3,
+              height: isImage ? 44 : 36,
+              decoration: BoxDecoration(
+                color: AppColors.gold,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (isImage) ...[
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceVariant,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Icon(Icons.image, color: Colors.grey, size: 20),
+              ),
+              const SizedBox(width: 8),
+            ],
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    senderName,
+                    style: const TextStyle(
+                      color: AppColors.gold,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                  Text(
+                    isImage ? 'Foto' : preview,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isMe
+                          ? AppColors.deepBlue.withValues(alpha: 0.7)
+                          : Colors.grey,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Reply banner (shown above input bar when reply mode is active) ─────────────
+
+class _ReplyBanner extends StatelessWidget {
+  const _ReplyBanner({
+    required this.message,
+    required this.senderName,
+    required this.onCancel,
+  });
+
+  final NexusMessage message;
+  final String senderName;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final isImage = message.type == NexusMessageType.image;
+    final preview = isImage
+        ? 'Foto'
+        : message.body.substring(0, min(message.body.length, 80));
+
+    return Container(
+      color: AppColors.surfaceVariant,
+      padding: const EdgeInsets.only(left: 0, right: 4, top: 6, bottom: 6),
+      child: Row(
+        children: [
+          // Gold accent line
+          Container(
+            width: 3,
+            height: 40,
+            color: AppColors.gold,
+          ),
+          const SizedBox(width: 10),
+          // Thumbnail if image
+          if (isImage) ...[
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Icon(Icons.image, color: Colors.grey, size: 18),
+            ),
+            const SizedBox(width: 8),
+          ],
+          // Sender + preview
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  senderName,
+                  style: const TextStyle(
+                    color: AppColors.gold,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                ),
+                Text(
+                  preview,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.grey, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          // Cancel button
+          IconButton(
+            onPressed: onCancel,
+            icon: const Icon(Icons.close, color: Colors.grey, size: 18),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+          ),
+        ],
       ),
     );
   }
