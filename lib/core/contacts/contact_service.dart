@@ -109,6 +109,26 @@ class ContactService {
   bool isBlocked(String did) =>
       _contacts.any((c) => c.did == did && c.blocked);
 
+  /// Mutes a contact – their messages arrive but don't produce notifications.
+  Future<void> muteContact(String did) async {
+    final contact = _findByDid(did);
+    if (contact == null) return;
+    contact.muted = true;
+    await _persist(contact);
+  }
+
+  /// Unmutes a contact.
+  Future<void> unmuteContact(String did) async {
+    final contact = _findByDid(did);
+    if (contact == null) return;
+    contact.muted = false;
+    await _persist(contact);
+  }
+
+  /// Returns true if [did] is muted (notifications silenced).
+  bool isMuted(String did) =>
+      _contacts.any((c) => c.did == did && c.muted);
+
   /// Updates the private local note for a contact.
   Future<void> updateNotes(String did, String? notes) async {
     final contact = _findByDid(did);

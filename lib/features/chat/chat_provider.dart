@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image/image.dart' as img;
 import 'package:permission_handler/permission_handler.dart';
@@ -20,6 +21,10 @@ import '../../core/transport/nexus_peer.dart';
 import '../../core/transport/nostr/nostr_keys.dart';
 import '../../core/transport/nostr/nostr_transport.dart';
 import '../../core/transport/transport_manager.dart';
+import '../../services/background_service.dart';
+import '../../services/notification_service.dart';
+import '../../services/notification_settings_service.dart';
+import '../../shared/widgets/notification_banner.dart';
 import 'conversation_service.dart';
 
 /// ViewModel for the chat feature.
@@ -31,7 +36,7 @@ import 'conversation_service.dart';
 ///   - Forward incoming [NexusMessage]s to the UI and persist them in the POD.
 ///   - Expose a per-conversation message list and peer list.
 ///   - Notify [ConversationService] on every message event.
-class ChatProvider extends ChangeNotifier {
+class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   ChatProvider() : _manager = TransportManager.instance;
 
   final TransportManager _manager;
@@ -73,6 +78,10 @@ class ChatProvider extends ChangeNotifier {
   // Tracks which convIds have been merged with the DB at least once.
   final Set<String> _cacheLoadedFromDb = {};
 
+  // Notification state
+  bool _appInForeground = true;
+  String? _activeConversationId;
+
   // Subscriptions
   StreamSubscription<NexusMessage>? _msgSub;
   StreamSubscription<List<NexusPeer>>? _peersSub;
@@ -86,6 +95,8 @@ class ChatProvider extends ChangeNotifier {
   Future<void> initialize() async {
     if (_initialized) return;
     _initialized = true;
+
+    WidgetsBinding.instance.addObserver(this);
 
     try {
       _permissionsGranted = await _requestPermissions();
@@ -227,6 +238,24 @@ class ChatProvider extends ChangeNotifier {
           r == ConnectivityResult.mobile ||
           r == ConnectivityResult.ethernet);
 
+  // ── App lifecycle & notification helpers ───────────────────────────────────
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _appInForeground = state == AppLifecycleState.resumed;
+    if (Platform.isAndroid) {
+      if (_appInForeground) {
+        BackgroundServiceManager.instance.pauseNostr();
+      } else {
+        BackgroundServiceManager.instance.resumeNostr();
+      }
+    }
+  }
+
+  /// Sets the conversation currently visible in the UI so that in-app banners
+  /// are suppressed for that conversation.
+  void setActiveConversation(String? id) => _activeConversationId = id;
+
   // ── Permissions ────────────────────────────────────────────────────────────
 
   Future<bool> _requestPermissions() async {
@@ -273,6 +302,50 @@ class ChatProvider extends ChangeNotifier {
       debugPrint('[CHAT] Persisted → notifying ConversationService');
       ConversationService.instance.notifyUpdate();
     });
+
+    // ── Notifications ────────────────────────────────────────────────────────
+    // Don't notify if this exact conversation is open in the UI.
+    if (_activeConversationId != convId) {
+      final contact = ContactService.instance.findByDid(msg.fromDid);
+      final muted = !msg.isBroadcast && (contact?.muted ?? false);
+
+      if (!muted) {
+        final senderName = contact?.pseudonym ??
+            (msg.fromDid.length > 12
+                ? msg.fromDid.substring(msg.fromDid.length - 12)
+                : msg.fromDid);
+        final preview = msg.type == NexusMessageType.image
+            ? '\u{1F4F7} Foto'
+            : (msg.body.length > 100
+                ? '${msg.body.substring(0, 100)}…'
+                : msg.body);
+
+        if (_appInForeground) {
+          // In-app banner
+          InAppNotificationController.instance.show(InAppBannerData(
+            senderName: msg.isBroadcast ? '#mesh' : senderName,
+            preview: preview,
+            conversationId: convId,
+            isBroadcast: msg.isBroadcast,
+          ));
+        } else {
+          // System notification
+          if (msg.isBroadcast) {
+            NotificationService.instance.showBroadcastNotification(
+              senderName: senderName,
+              messagePreview: preview,
+            );
+          } else {
+            NotificationService.instance.showMessageNotification(
+              senderDid: msg.fromDid,
+              senderName: senderName,
+              messagePreview: preview,
+              conversationId: convId,
+            );
+          }
+        }
+      }
+    }
 
     notifyListeners();
   }
@@ -483,6 +556,7 @@ class ChatProvider extends ChangeNotifier {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _msgSub?.cancel();
     _peersSub?.cancel();
     _connectivitySub?.cancel();

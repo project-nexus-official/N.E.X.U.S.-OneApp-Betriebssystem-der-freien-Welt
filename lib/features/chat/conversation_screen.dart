@@ -12,6 +12,7 @@ import '../../core/transport/message_transport.dart';
 import '../../core/transport/nexus_message.dart';
 import '../../core/transport/nexus_peer.dart';
 import '../../core/identity/identity_service.dart';
+import '../../services/notification_service.dart';
 import '../../shared/theme/app_theme.dart';
 import '../contacts/contact_detail_screen.dart';
 import '../contacts/widgets/trust_badge.dart';
@@ -53,6 +54,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
   bool _showScrollDown = false;
   RetentionPeriod? _perChatRetention; // null = use global setting
 
+  // Stored reference to ChatProvider so we can safely call it in dispose().
+  ChatProvider? _chatProvider;
+
   String get _convId {
     if (widget.isBroadcast) return NexusMessage.broadcastDid;
     final myDid = IdentityService.instance.currentIdentity?.did ?? '';
@@ -76,7 +80,20 @@ class _ConversationScreenState extends State<ConversationScreen> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Store the provider reference here so it is available in dispose().
+    _chatProvider ??= context.read<ChatProvider>();
+    _chatProvider!.setActiveConversation(_convId);
+    // Cancel any existing system notification for this sender when opening chat.
+    if (!widget.isBroadcast) {
+      NotificationService.instance.cancelForSender(widget.peerDid);
+    }
+  }
+
+  @override
   void dispose() {
+    _chatProvider?.setActiveConversation(null);
     _textCtrl.dispose();
     _scrollCtrl.dispose();
     _textFocus.dispose();

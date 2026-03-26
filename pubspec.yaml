@@ -61,6 +61,11 @@ dependencies:
   # Retention settings persistence
   shared_preferences: ^2.3.5
 
+  # Push notifications (local, no FCM)
+  flutter_local_notifications: ^18.0.1
+  # Background service for Nostr keepalive (Android)
+  flutter_background_service: ^5.0.5
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

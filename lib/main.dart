@@ -9,7 +9,11 @@ import 'package:nexus_oneapp/core/router.dart';
 import 'package:nexus_oneapp/core/storage/pod_database.dart';
 import 'package:nexus_oneapp/core/storage/retention_service.dart';
 import 'package:nexus_oneapp/features/chat/chat_provider.dart';
+import 'package:nexus_oneapp/services/background_service.dart';
+import 'package:nexus_oneapp/services/notification_service.dart';
+import 'package:nexus_oneapp/services/notification_settings_service.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
+import 'package:nexus_oneapp/shared/widgets/notification_banner.dart';
 import 'package:provider/provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -42,6 +46,14 @@ Future<void> initServicesAfterIdentity() async {
     await ConversationService.instance.load();
     await RetentionService.instance.load();
     RetentionService.instance.runCleanup(); // fire-and-forget
+    await NotificationSettingsService.instance.load();
+    await NotificationService.instance.init(
+      onTap: (payload) {
+        // Navigation happens via global key – see router
+        debugPrint('[NOTIF] Tapped: $payload');
+      },
+    );
+    await BackgroundServiceManager.instance.init();
   } catch (e) {
     debugPrint('[NEXUS] Storage init error: $e');
   }
@@ -62,7 +74,12 @@ class NexusApp extends StatelessWidget {
         themeMode: ThemeMode.dark,
         routerConfig: router,
         builder: (context, child) {
-          return _SplashWrapper(child: child!);
+          return NotificationBannerOverlay(
+            onTap: (conversationId) {
+              debugPrint('[NOTIF] Banner tap: $conversationId');
+            },
+            child: _SplashWrapper(child: child!),
+          );
         },
       ),
     );

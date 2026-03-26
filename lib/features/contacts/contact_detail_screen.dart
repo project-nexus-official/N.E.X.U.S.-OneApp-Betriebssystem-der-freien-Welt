@@ -461,6 +461,37 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
 
           const SizedBox(height: 8),
 
+          // ── Notification toggle ──────────────────────────────────────────
+          _SectionHeader('BENACHRICHTIGUNGEN'),
+          _InfoCard(
+            children: [
+              ListTile(
+                leading: Icon(
+                  _contact.muted
+                      ? Icons.notifications_off_outlined
+                      : Icons.notifications_outlined,
+                  color: _contact.muted ? Colors.grey : AppColors.gold,
+                ),
+                title: const Text('Benachrichtigungen'),
+                subtitle: Text(_contact.muted ? 'Stumm geschaltet' : 'Aktiviert'),
+                trailing: Switch(
+                  value: !_contact.muted,
+                  activeColor: AppColors.gold,
+                  onChanged: (v) async {
+                    if (v) {
+                      await ContactService.instance.unmuteContact(_contact.did);
+                    } else {
+                      await ContactService.instance.muteContact(_contact.did);
+                    }
+                    _load();
+                  },
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 8),
+
           // ── Visible profile fields ───────────────────────────────────────
           _SectionHeader('FREIGEGEBENE PROFILFELDER'),
           _InfoCard(

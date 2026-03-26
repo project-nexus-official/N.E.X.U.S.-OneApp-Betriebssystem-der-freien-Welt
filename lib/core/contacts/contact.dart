@@ -75,6 +75,7 @@ class Contact {
   DateTime lastSeen;
   String? notes; // private local note, never transmitted
   bool blocked;  // local-only, never transmitted
+  bool muted;    // local-only, silences notifications without blocking
 
   Contact({
     required this.did,
@@ -85,6 +86,7 @@ class Contact {
     required this.lastSeen,
     this.notes,
     this.blocked = false,
+    this.muted = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -96,6 +98,7 @@ class Contact {
         'lastSeen': lastSeen.toIso8601String(),
         'notes': notes,
         'blocked': blocked,
+        'muted': muted,
       };
 
   factory Contact.fromJson(Map<String, dynamic> json) => Contact(
@@ -110,6 +113,7 @@ class Contact {
         lastSeen: _parseDate(json['lastSeen']),
         notes: json['notes'] as String?,
         blocked: json['blocked'] as bool? ?? false,
+        muted: json['muted'] as bool? ?? false,
       );
 
   static DateTime _parseDate(dynamic v) {

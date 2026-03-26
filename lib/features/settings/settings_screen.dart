@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../../core/contacts/contact_service.dart';
 import '../../core/storage/pod_database.dart';
 import '../../core/storage/retention_service.dart';
+import '../../services/notification_settings_service.dart';
 import '../../shared/theme/app_theme.dart';
 import '../chat/chat_provider.dart';
 import '../contacts/widgets/trust_badge.dart';
@@ -38,6 +39,8 @@ class SettingsScreen extends StatelessWidget {
               ),
             ),
           ),
+          const Divider(height: 1),
+          const _NotificationSection(),
           const Divider(height: 1),
           _NachrichtenSection(chatProvider: context.read<ChatProvider>()),
           const Divider(height: 1),
@@ -371,6 +374,143 @@ class _SectionHeader extends StatelessWidget {
           letterSpacing: 1.5,
         ),
       ),
+    );
+  }
+}
+
+// ── Notifications section ─────────────────────────────────────────────────────
+
+class _NotificationSection extends StatefulWidget {
+  const _NotificationSection();
+
+  @override
+  State<_NotificationSection> createState() => _NotificationSectionState();
+}
+
+class _NotificationSectionState extends State<_NotificationSection> {
+  final _svc = NotificationSettingsService.instance;
+
+  String _formatTime(TimeOfDay t) {
+    final h = t.hour.toString().padLeft(2, '0');
+    final m = t.minute.toString().padLeft(2, '0');
+    return '$h:$m';
+  }
+
+  Future<void> _pickTime({required bool isFrom}) async {
+    final current = isFrom ? _svc.dndFrom : _svc.dndUntil;
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: current,
+    );
+    if (picked == null || !mounted) return;
+    if (isFrom) {
+      await _svc.setDndFrom(picked);
+    } else {
+      await _svc.setDndUntil(picked);
+    }
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader('Benachrichtigungen'),
+        SwitchListTile(
+          secondary: const Icon(Icons.notifications_outlined, color: AppColors.gold),
+          title: const Text('Benachrichtigungen aktivieren'),
+          value: _svc.enabled,
+          activeColor: AppColors.gold,
+          onChanged: (v) async {
+            await _svc.setEnabled(v);
+            setState(() {});
+          },
+        ),
+        SwitchListTile(
+          secondary: const Icon(Icons.preview_outlined, color: AppColors.gold),
+          title: const Text('Nachrichtenvorschau anzeigen'),
+          value: _svc.showPreview,
+          activeColor: AppColors.gold,
+          onChanged: _svc.enabled
+              ? (v) async {
+                  await _svc.setShowPreview(v);
+                  setState(() {});
+                }
+              : null,
+        ),
+        SwitchListTile(
+          secondary: const Icon(Icons.hub_outlined, color: AppColors.gold),
+          title: const Text('#mesh Broadcasts'),
+          value: _svc.broadcastEnabled,
+          activeColor: AppColors.gold,
+          onChanged: _svc.enabled
+              ? (v) async {
+                  await _svc.setBroadcastEnabled(v);
+                  setState(() {});
+                }
+              : null,
+        ),
+        SwitchListTile(
+          secondary: const Icon(Icons.volume_off_outlined, color: AppColors.gold),
+          title: const Text('Stiller Modus'),
+          subtitle: const Text('Kein Ton, keine Vibration'),
+          value: _svc.silentMode,
+          activeColor: AppColors.gold,
+          onChanged: _svc.enabled
+              ? (v) async {
+                  await _svc.setSilentMode(v);
+                  setState(() {});
+                }
+              : null,
+        ),
+        const Divider(height: 1, indent: 16),
+        SwitchListTile(
+          secondary: const Icon(Icons.do_not_disturb_on_outlined,
+              color: AppColors.gold),
+          title: const Text('Nicht stören'),
+          subtitle: _svc.dndEnabled
+              ? Text(
+                  '${_formatTime(_svc.dndFrom)} – ${_formatTime(_svc.dndUntil)}')
+              : const Text('Deaktiviert'),
+          value: _svc.dndEnabled,
+          activeColor: AppColors.gold,
+          onChanged: _svc.enabled
+              ? (v) async {
+                  await _svc.setDndEnabled(v);
+                  setState(() {});
+                }
+              : null,
+        ),
+        if (_svc.dndEnabled) ...[
+          ListTile(
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+            leading: const SizedBox(width: 24),
+            title: const Text('Von'),
+            trailing: TextButton(
+              onPressed: () => _pickTime(isFrom: true),
+              child: Text(
+                _formatTime(_svc.dndFrom),
+                style: const TextStyle(color: AppColors.gold),
+              ),
+            ),
+          ),
+          ListTile(
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+            leading: const SizedBox(width: 24),
+            title: const Text('Bis'),
+            trailing: TextButton(
+              onPressed: () => _pickTime(isFrom: false),
+              child: Text(
+                _formatTime(_svc.dndUntil),
+                style: const TextStyle(color: AppColors.gold),
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
