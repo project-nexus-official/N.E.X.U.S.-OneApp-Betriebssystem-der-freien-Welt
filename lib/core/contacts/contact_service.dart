@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:nexus_oneapp/core/identity/profile.dart';
 import 'package:nexus_oneapp/core/storage/pod_database.dart';
 import 'contact.dart';
@@ -8,7 +11,14 @@ class ContactService {
   ContactService._();
 
   final List<Contact> _contacts = [];
-  List<Contact> get contacts => List.unmodifiable(_contacts);
+
+  /// All non-blocked contacts.
+  List<Contact> get contacts =>
+      List.unmodifiable(_contacts.where((c) => !c.blocked));
+
+  /// All blocked contacts (for the settings blocked-list screen).
+  List<Contact> get blockedContacts =>
+      List.unmodifiable(_contacts.where((c) => c.blocked));
 
   /// Loads all contacts from the POD into memory.
   Future<void> load() async {
@@ -65,9 +75,62 @@ class ContactService {
         .upsertContact(did, {'did': did, '_deleted': true});
   }
 
+  /// Blocks a contact – their messages will be silently dropped.
+  /// The contact remains in [_contacts] but is excluded from [contacts].
+  Future<void> blockContact(String did) async {
+    var contact = _findByDid(did);
+    if (contact == null) {
+      // Create a minimal blocked entry so the DID stays blocked.
+      final now = DateTime.now();
+      contact = Contact(
+        did: did,
+        pseudonym: did.length > 12 ? did.substring(did.length - 12) : did,
+        trustLevel: TrustLevel.discovered,
+        addedAt: now,
+        lastSeen: now,
+        blocked: true,
+      );
+      _contacts.add(contact);
+    } else {
+      contact.blocked = true;
+    }
+    await _persist(contact);
+  }
+
+  /// Unblocks a previously blocked contact.
+  Future<void> unblockContact(String did) async {
+    final contact = _findByDid(did);
+    if (contact == null) return;
+    contact.blocked = false;
+    await _persist(contact);
+  }
+
+  /// Returns true if [did] is blocked.
+  bool isBlocked(String did) =>
+      _contacts.any((c) => c.did == did && c.blocked);
+
+  /// Updates the private local note for a contact.
+  Future<void> updateNotes(String did, String? notes) async {
+    final contact = _findByDid(did);
+    if (contact == null) return;
+    contact.notes = notes;
+    await _persist(contact);
+  }
+
+  /// Updates the display name for a contact.
+  Future<void> updatePseudonym(String did, String pseudonym) async {
+    final contact = _findByDid(did);
+    if (contact == null) return;
+    contact.pseudonym = pseudonym;
+    await _persist(contact);
+  }
+
   /// Returns all contacts with the given [level].
   List<Contact> getContactsByTrustLevel(TrustLevel level) =>
-      _contacts.where((c) => c.trustLevel == level).toList();
+      contacts.where((c) => c.trustLevel == level).toList();
+
+  /// Looks up a contact by DID. Returns null if not known.
+  Contact? findByDid(String did) => _findByDid(did);
 
   /// Returns the profile fields of [myProfile] that a contact with [did]
   /// is allowed to see, based on their trust level.
@@ -82,6 +145,65 @@ class ContactService {
     return myProfile.visibleTo(level.allowedVisibility);
   }
 
+  /// Exports all non-deleted contacts as a JSON list.
+  String exportJson() {
+    final exportable = _contacts
+        .where((c) => !c.blocked)
+        .map((c) => c.toJson())
+        .toList();
+    return jsonEncode(exportable);
+  }
+
+  /// Imports contacts from a JSON list string.
+  ///
+  /// - Skips DIDs that are already known.
+  /// - If the imported entry has a higher trust level, it wins.
+  /// - Returns [ImportResult] with counts.
+  Future<ImportResult> importJson(String jsonStr) async {
+    int added = 0, updated = 0, skipped = 0;
+
+    final List<dynamic> list;
+    try {
+      list = jsonDecode(jsonStr) as List<dynamic>;
+    } catch (_) {
+      return ImportResult(added: 0, updated: 0, skipped: 0, error: 'Ungültiges JSON-Format.');
+    }
+
+    for (final raw in list) {
+      try {
+        final map = raw as Map<String, dynamic>;
+        final did = map['did'] as String? ?? '';
+        if (did.isEmpty) { skipped++; continue; }
+
+        final existing = _findByDid(did);
+        if (existing == null) {
+          final contact = Contact.fromJson(map);
+          contact.blocked = false; // never import blocked state
+          await _persist(contact);
+          _contacts.add(contact);
+          added++;
+        } else {
+          // Higher trust level wins.
+          final importedLevel = TrustLevel.values.firstWhere(
+            (e) => e.name == map['trustLevel'],
+            orElse: () => TrustLevel.discovered,
+          );
+          if (importedLevel.sortWeight > existing.trustLevel.sortWeight) {
+            existing.trustLevel = importedLevel;
+            await _persist(existing);
+            updated++;
+          } else {
+            skipped++;
+          }
+        }
+      } catch (e) {
+        debugPrint('[CONTACTS] Import error: $e');
+        skipped++;
+      }
+    }
+    return ImportResult(added: added, updated: updated, skipped: skipped);
+  }
+
   Contact? _findByDid(String did) {
     try {
       return _contacts.firstWhere((c) => c.did == did);
@@ -94,4 +216,18 @@ class ContactService {
     contact.lastSeen = DateTime.now();
     await PodDatabase.instance.upsertContact(contact.did, contact.toJson());
   }
+}
+
+class ImportResult {
+  final int added;
+  final int updated;
+  final int skipped;
+  final String? error;
+
+  const ImportResult({
+    required this.added,
+    required this.updated,
+    required this.skipped,
+    this.error,
+  });
 }

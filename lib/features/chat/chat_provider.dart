@@ -8,6 +8,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:image/image.dart' as img;
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../core/contacts/contact_service.dart';
 import '../../core/identity/bip39.dart';
 import '../../core/identity/identity_service.dart';
 import '../../core/storage/pod_database.dart';
@@ -247,6 +248,13 @@ class ChatProvider extends ChangeNotifier {
   // ── Incoming messages ──────────────────────────────────────────────────────
 
   void _onMessageReceived(NexusMessage msg) {
+    // Silent block: discard messages from blocked peers without any feedback.
+    if (!msg.isBroadcast &&
+        ContactService.instance.isBlocked(msg.fromDid)) {
+      debugPrint('[CHAT] Message from blocked peer dropped: ${msg.fromDid}');
+      return;
+    }
+
     final myDid = IdentityService.instance.currentIdentity?.did ?? '';
 
     final convId = msg.isBroadcast

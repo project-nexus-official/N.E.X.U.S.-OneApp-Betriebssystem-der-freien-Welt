@@ -1,10 +1,16 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/contacts/contact_service.dart';
 import '../../core/storage/pod_database.dart';
 import '../../core/storage/retention_service.dart';
 import '../../shared/theme/app_theme.dart';
 import '../chat/chat_provider.dart';
+import '../contacts/widgets/trust_badge.dart';
 import 'nostr_settings_screen.dart';
 
 /// Top-level settings hub.
@@ -35,6 +41,35 @@ class SettingsScreen extends StatelessWidget {
           const Divider(height: 1),
           _NachrichtenSection(chatProvider: context.read<ChatProvider>()),
           const Divider(height: 1),
+          _SectionHeader('Kontakte'),
+          ListTile(
+            leading: const Icon(Icons.block, color: Colors.orange),
+            title: const Text('Blockierte Kontakte'),
+            subtitle: Text(
+              '${ContactService.instance.blockedContacts.length} blockiert',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const _BlockedContactsScreen(),
+              ),
+            ),
+          ),
+          ListTile(
+            leading:
+                const Icon(Icons.upload_file, color: AppColors.gold),
+            title: const Text('Kontakte exportieren'),
+            subtitle: const Text('Als JSON in Dokumente speichern'),
+            onTap: () => _exportContacts(context),
+          ),
+          ListTile(
+            leading:
+                const Icon(Icons.download_outlined, color: AppColors.gold),
+            title: const Text('Kontakte importieren'),
+            subtitle: const Text('Kommt bald – benötigt Datei-Picker'),
+            enabled: false,
+          ),
+          const Divider(height: 1),
           _SectionHeader('Info'),
           ListTile(
             leading: const Icon(Icons.info_outline, color: AppColors.gold),
@@ -45,6 +80,33 @@ class SettingsScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _exportContacts(BuildContext context) async {
+    try {
+      final json = ContactService.instance.exportJson();
+      final dir = await getApplicationDocumentsDirectory();
+      final ts = DateTime.now()
+          .toIso8601String()
+          .replaceAll(':', '-')
+          .substring(0, 19);
+      final file = File('${dir.path}/nexus_contacts_$ts.json');
+      await file.writeAsString(json);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Exportiert: ${file.path}'),
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Export fehlgeschlagen: $e')),
+        );
+      }
+    }
   }
 
   void _showAbout(BuildContext context) {
@@ -309,6 +371,73 @@ class _SectionHeader extends StatelessWidget {
           letterSpacing: 1.5,
         ),
       ),
+    );
+  }
+}
+
+// ── Blocked contacts screen ───────────────────────────────────────────────────
+
+class _BlockedContactsScreen extends StatefulWidget {
+  const _BlockedContactsScreen();
+
+  @override
+  State<_BlockedContactsScreen> createState() => _BlockedContactsScreenState();
+}
+
+class _BlockedContactsScreenState extends State<_BlockedContactsScreen> {
+  void _reload() => setState(() {});
+
+  Future<void> _unblock(String did, String pseudonym) async {
+    await ContactService.instance.unblockContact(did);
+    _reload();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$pseudonym wurde entsperrt.')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final blocked = ContactService.instance.blockedContacts;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Blockierte Kontakte')),
+      body: blocked.isEmpty
+          ? const Center(
+              child: Text(
+                'Keine blockierten Kontakte.',
+                style: TextStyle(color: Colors.grey),
+              ),
+            )
+          : ListView.separated(
+              itemCount: blocked.length,
+              separatorBuilder: (_, __) => const Divider(
+                height: 1,
+                indent: 56,
+                color: AppColors.surfaceVariant,
+              ),
+              itemBuilder: (ctx, i) {
+                final c = blocked[i];
+                return ListTile(
+                  leading: const Icon(Icons.block, color: Colors.orange),
+                  title: Text(c.pseudonym),
+                  subtitle: Text(
+                    c.did.length > 20
+                        ? '${c.did.substring(0, 10)}…${c.did.substring(c.did.length - 8)}'
+                        : c.did,
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                  trailing: TextButton(
+                    onPressed: () => _unblock(c.did, c.pseudonym),
+                    child: const Text(
+                      'Entsperren',
+                      style: TextStyle(color: AppColors.gold),
+                    ),
+                  ),
+                );
+              },
+            ),
     );
   }
 }

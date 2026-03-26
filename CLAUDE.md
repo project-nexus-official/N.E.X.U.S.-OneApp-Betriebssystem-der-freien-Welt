@@ -21,8 +21,30 @@ Phase 1b: Governance (Liquid Democracy)
 Phase 1c: AETHER Wallet + Lokaler Marktplatz
 Phase 2: Care-System + Sphären-Plugins
 
+## Implementierter Feature-Stand (Phase 1a)
+
+### Abgeschlossen:
+- **BLE/LAN/Nostr Transport** – Bidirektionale Peer-Discovery und Messaging
+- **Nachrichtenpersistenz** – SQLite (pod_messages), verschlüsselt mit AES-256-GCM, Reload nach Neustart
+- **Chat UI** – ConversationsScreen (Postfach), ConversationScreen (Direkt-Chat), RadarScreen
+- **Nachrichtentypen** – Text, Bilder (JPEG, max 1024px, Thumbnail), Emoji-Picker
+- **Aufbewahrungseinstellungen** – Global und pro Konversation
+- **Kontaktverwaltung (komplett)**:
+  - `ContactsScreen` – Suche, Filter-Chips (Alle/Kontakte/Vertrauenspersonen/Bürgen), Trust-Badges
+  - `ContactDetailScreen` – Vertrauensstufe ändern, Notizen bearbeiten, Selective Disclosure
+  - Vertrauensstufen: Entdeckt → Kontakt → Vertrauensperson → Bürge (mit sortWeight)
+  - Blockier-System (stilles Blockieren, lokal, kein Feedback an Sender)
+  - Blockierte Peers aus Gesprächsliste + Radar gefiltert, Nachrichten in ChatProvider verworfen
+  - Kontakt-Export als JSON (path_provider → Dokumente)
+  - Blockierte Kontakte in Einstellungen verwaltbar
+- **Chat-Integration**:
+  - Trust-Badge in Gesprächsliste-Tiles und Chat-Header
+  - Tap auf Chat-Header → Kontakt-Detailansicht
+  - Unbekannte-Peer-Banner mit "Hinzufügen"-Button
+  - Radar zeigt bekannte Kontakte mit Trust-Badge und Pseudonym
+
 ## Aktueller Fokus
->>> PHASE 1a: Fundament + Identität <<<
+>>> PHASE 1a: Fundament + Identität (in Fertigstellung) <<<
 
 ## Code-Standards
 - Dart/Flutter: Effective Dart Style Guide

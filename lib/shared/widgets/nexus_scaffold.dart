@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
 import 'package:nexus_oneapp/core/identity/profile_service.dart';
+import 'package:nexus_oneapp/features/contacts/contacts_screen.dart';
 import 'package:nexus_oneapp/features/settings/settings_screen.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
 import 'package:nexus_oneapp/shared/widgets/identicon.dart';
@@ -209,6 +210,13 @@ class _DrawerContent extends StatelessWidget {
     );
   }
 
+  void _openContacts(BuildContext context) {
+    if (!isPermanent) Navigator.of(context).pop();
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(builder: (_) => const ContactsScreen()),
+    );
+  }
+
   void _showAbout(BuildContext context) {
     if (!isPermanent) Navigator.of(context).pop();
     showAboutDialog(
@@ -308,6 +316,12 @@ class _DrawerContent extends StatelessWidget {
             label: 'Profil',
             selected: currentIndex == 4,
             onTap: () => _go(context, 4),
+          ),
+          _DrawerNavItem(
+            icon: Icons.people_outline,
+            label: 'Kontakte',
+            selected: false,
+            onTap: () => _openContacts(context),
           ),
 
           const Divider(color: AppColors.surfaceVariant, height: 24),

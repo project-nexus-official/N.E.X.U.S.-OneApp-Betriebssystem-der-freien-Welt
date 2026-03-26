@@ -1,11 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/contacts/contact_service.dart';
 import '../../core/transport/message_transport.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/identicon.dart';
+import '../contacts/widgets/trust_badge.dart';
 import 'chat_provider.dart';
 import 'chat_screen.dart' show RadarScreen;
 import 'conversation.dart';
@@ -211,13 +214,23 @@ class _ConversationTile extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Expanded(
-            child: Text(
-              conv.peerPseudonym,
-              style: const TextStyle(
-                fontWeight: FontWeight.w600,
-                color: AppColors.onDark,
-              ),
-              overflow: TextOverflow.ellipsis,
+            child: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    conv.peerPseudonym,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.onDark,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (!conv.isBroadcast) ...[
+                  const SizedBox(width: 6),
+                  _TrustBadgeInline(peerDid: conv.peerDid),
+                ],
+              ],
             ),
           ),
           const SizedBox(width: 8),
@@ -379,6 +392,20 @@ class _EmptyState extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+// ── Inline trust badge (for conversation list) ────────────────────────────────
+
+class _TrustBadgeInline extends StatelessWidget {
+  const _TrustBadgeInline({required this.peerDid});
+  final String peerDid;
+
+  @override
+  Widget build(BuildContext context) {
+    final contact = ContactService.instance.findByDid(peerDid);
+    if (contact == null) return const SizedBox.shrink();
+    return TrustBadge(level: contact.trustLevel, small: true);
   }
 }
 

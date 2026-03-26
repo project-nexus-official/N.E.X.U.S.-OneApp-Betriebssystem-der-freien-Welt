@@ -6,12 +6,15 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/contacts/contact_service.dart';
 import '../../core/storage/retention_service.dart';
 import '../../core/transport/message_transport.dart';
 import '../../core/transport/nexus_message.dart';
 import '../../core/transport/nexus_peer.dart';
 import '../../core/identity/identity_service.dart';
 import '../../shared/theme/app_theme.dart';
+import '../contacts/contact_detail_screen.dart';
+import '../contacts/widgets/trust_badge.dart';
 import 'chat_provider.dart';
 import 'conversation_service.dart';
 
@@ -214,6 +217,16 @@ class _ConversationScreenState extends State<ConversationScreen> {
         .showSnackBar(SnackBar(content: Text(msg)));
   }
 
+  void _openContactDetail(BuildContext context) {
+    final contact = ContactService.instance.findByDid(widget.peerDid);
+    if (contact == null) return; // banner handles unknown peers
+    Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => ContactDetailScreen(did: widget.peerDid),
+      ),
+    );
+  }
+
   Future<void> _loadRetention() async {
     final period =
         await RetentionService.instance.getForConversation(_convId);
@@ -350,27 +363,38 @@ class _ConversationScreenState extends State<ConversationScreen> {
           },
           child: Scaffold(
             appBar: AppBar(
-              title: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    widget.isBroadcast
-                        ? '#mesh'
-                        : widget.peerPseudonym,
-                  ),
-                  if (widget.peer != null)
-                    Text(
-                      widget.peer!.transportType.name.toUpperCase(),
-                      style:
-                          const TextStyle(fontSize: 11, color: AppColors.gold),
+              title: GestureDetector(
+                onTap: widget.isBroadcast
+                    ? null
+                    : () => _openContactDetail(context),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          widget.isBroadcast ? '#mesh' : widget.peerPseudonym,
+                        ),
+                        if (!widget.isBroadcast) ...[
+                          const SizedBox(width: 8),
+                          _HeaderTrustBadge(peerDid: widget.peerDid),
+                        ],
+                      ],
                     ),
-                  if (widget.isBroadcast)
-                    const Text(
-                      'Broadcast-Kanal',
-                      style:
-                          TextStyle(fontSize: 11, color: AppColors.gold),
-                    ),
-                ],
+                    if (widget.peer != null)
+                      Text(
+                        widget.peer!.transportType.name.toUpperCase(),
+                        style: const TextStyle(
+                            fontSize: 11, color: AppColors.gold),
+                      ),
+                    if (widget.isBroadcast)
+                      const Text(
+                        'Broadcast-Kanal',
+                        style: TextStyle(fontSize: 11, color: AppColors.gold),
+                      ),
+                  ],
+                ),
               ),
               actions: [
                 if (widget.peer != null)
@@ -394,6 +418,13 @@ class _ConversationScreenState extends State<ConversationScreen> {
             ),
             body: Column(
               children: [
+                // Unknown-peer banner
+                if (!widget.isBroadcast)
+                  _UnknownPeerBanner(
+                    peerDid: widget.peerDid,
+                    peerPseudonym: widget.peerPseudonym,
+                    onAdded: () => setState(() {}),
+                  ),
                 // Message list
                 Expanded(
                   child: Stack(
@@ -859,6 +890,89 @@ class _InputBar extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ── Header trust badge ────────────────────────────────────────────────────────
+
+class _HeaderTrustBadge extends StatelessWidget {
+  const _HeaderTrustBadge({required this.peerDid});
+  final String peerDid;
+
+  @override
+  Widget build(BuildContext context) {
+    final contact = ContactService.instance.findByDid(peerDid);
+    if (contact == null) return const SizedBox.shrink();
+    return TrustBadge(level: contact.trustLevel, small: true);
+  }
+}
+
+// ── Unknown-peer banner ───────────────────────────────────────────────────────
+
+class _UnknownPeerBanner extends StatefulWidget {
+  const _UnknownPeerBanner({
+    required this.peerDid,
+    required this.peerPseudonym,
+    required this.onAdded,
+  });
+
+  final String peerDid;
+  final String peerPseudonym;
+  final VoidCallback onAdded;
+
+  @override
+  State<_UnknownPeerBanner> createState() => _UnknownPeerBannerState();
+}
+
+class _UnknownPeerBannerState extends State<_UnknownPeerBanner> {
+  bool _dismissed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final isKnown = ContactService.instance.findByDid(widget.peerDid) != null;
+    if (isKnown || _dismissed) return const SizedBox.shrink();
+
+    return Container(
+      color: AppColors.surfaceVariant,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        children: [
+          const Icon(Icons.person_add_outlined, size: 18, color: Colors.grey),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '${widget.peerPseudonym} ist noch kein Kontakt',
+              style: const TextStyle(color: Colors.grey, fontSize: 13),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              await ContactService.instance
+                  .addContact(widget.peerDid, widget.peerPseudonym);
+              if (mounted) {
+                setState(() {});
+                widget.onAdded();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                        '${widget.peerPseudonym} zu Kontakten hinzugefügt.'),
+                  ),
+                );
+              }
+            },
+            child: const Text('Hinzufügen',
+                style: TextStyle(color: AppColors.gold, fontSize: 12)),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, size: 16, color: Colors.grey),
+            onPressed: () => setState(() => _dismissed = true),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+          ),
+        ],
       ),
     );
   }

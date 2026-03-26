@@ -85,6 +85,9 @@ class ConversationService {
           final peerDid = Conversation.peerDidFrom(convId, myDid);
           if (peerDid == null) continue;
 
+          // Skip conversations with blocked peers.
+          if (ContactService.instance.isBlocked(peerDid)) continue;
+
           // Look up pseudonym from contacts, fall back to short DID.
           final contact = _findContact(peerDid);
           final pseudonym = contact?.pseudonym ??

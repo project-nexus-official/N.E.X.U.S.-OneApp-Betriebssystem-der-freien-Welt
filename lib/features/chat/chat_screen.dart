@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/contacts/contact.dart';
+import '../../core/contacts/contact_service.dart';
 import '../../core/transport/message_transport.dart';
 import '../../core/transport/nexus_peer.dart';
 import '../../shared/theme/app_theme.dart';
+import '../contacts/widgets/trust_badge.dart';
 import 'chat_provider.dart';
 import 'conversation_screen.dart';
 
@@ -423,6 +426,7 @@ class _ChatBody extends StatelessWidget {
 }
 
 /// Peer list split into local (BLE/LAN) and Nostr sections.
+/// Blocked peers are filtered out automatically.
 class _PeerListWithNostr extends StatelessWidget {
   const _PeerListWithNostr({required this.peers, required this.provider});
   final List<NexusPeer> peers;
@@ -430,12 +434,15 @@ class _PeerListWithNostr extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final local = peers
+    final cs = ContactService.instance;
+    final visible = peers.where((p) => !cs.isBlocked(p.did)).toList();
+
+    final local = visible
         .where((p) =>
             p.transportType == TransportType.lan ||
             p.transportType == TransportType.ble)
         .toList();
-    final nostrOnly = peers
+    final nostrOnly = visible
         .where((p) =>
             p.transportType == TransportType.nostr &&
             !local.any((l) => l.did == p.did))
@@ -507,15 +514,31 @@ class _PeerTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final contact = ContactService.instance.findByDid(peer.did);
+    final displayName = contact?.pseudonym ?? peer.pseudonym;
+
     return ListTile(
       leading: CircleAvatar(
         backgroundColor: AppColors.surfaceVariant,
         child: Text(
-          peer.pseudonym.isNotEmpty ? peer.pseudonym[0].toUpperCase() : '?',
+          displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
           style: const TextStyle(color: AppColors.gold),
         ),
       ),
-      title: Text(peer.pseudonym),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              displayName,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (contact != null) ...[
+            const SizedBox(width: 6),
+            TrustBadge(level: contact.trustLevel, small: true),
+          ],
+        ],
+      ),
       subtitle: _TransportBadges(transports: peer.availableTransports),
       trailing: _SignalIndicator(peer: peer),
       onTap: () => Navigator.of(context).push(
@@ -524,7 +547,7 @@ class _PeerTile extends StatelessWidget {
             value: provider,
             child: ConversationScreen(
               peerDid: peer.did,
-              peerPseudonym: peer.pseudonym,
+              peerPseudonym: displayName,
               peer: peer,
             ),
           ),

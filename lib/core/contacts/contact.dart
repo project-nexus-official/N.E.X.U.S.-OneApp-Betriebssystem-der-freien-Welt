@@ -20,6 +20,19 @@ extension TrustLevelX on TrustLevel {
     }
   }
 
+  String get description {
+    switch (this) {
+      case TrustLevel.discovered:
+        return 'Neu entdeckter Peer – nur öffentliche Infos sichtbar.';
+      case TrustLevel.contact:
+        return 'Du kennst diese Person – Kontakt-Felder freigegeben.';
+      case TrustLevel.trusted:
+        return 'Du vertraust dieser Person – erweiterte Felder sichtbar.';
+      case TrustLevel.guardian:
+        return 'Du bürgst für diese Person – Treuhänder im Notfall.';
+    }
+  }
+
   /// Returns the set of [VisibilityLevel]s this trust level grants access to.
   Set<VisibilityLevel> get allowedVisibility {
     switch (this) {
@@ -36,6 +49,20 @@ extension TrustLevelX on TrustLevel {
         };
     }
   }
+
+  /// Sort weight for contact list ordering (higher = listed first).
+  int get sortWeight {
+    switch (this) {
+      case TrustLevel.guardian:
+        return 3;
+      case TrustLevel.trusted:
+        return 2;
+      case TrustLevel.contact:
+        return 1;
+      case TrustLevel.discovered:
+        return 0;
+    }
+  }
 }
 
 /// A known peer in the NEXUS network.
@@ -47,6 +74,7 @@ class Contact {
   final DateTime addedAt;
   DateTime lastSeen;
   String? notes; // private local note, never transmitted
+  bool blocked;  // local-only, never transmitted
 
   Contact({
     required this.did,
@@ -56,6 +84,7 @@ class Contact {
     required this.addedAt,
     required this.lastSeen,
     this.notes,
+    this.blocked = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -66,6 +95,7 @@ class Contact {
         'addedAt': addedAt.toIso8601String(),
         'lastSeen': lastSeen.toIso8601String(),
         'notes': notes,
+        'blocked': blocked,
       };
 
   factory Contact.fromJson(Map<String, dynamic> json) => Contact(
@@ -79,6 +109,7 @@ class Contact {
         addedAt: _parseDate(json['addedAt']),
         lastSeen: _parseDate(json['lastSeen']),
         notes: json['notes'] as String?,
+        blocked: json['blocked'] as bool? ?? false,
       );
 
   static DateTime _parseDate(dynamic v) {
