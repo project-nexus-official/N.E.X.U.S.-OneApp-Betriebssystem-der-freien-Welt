@@ -42,6 +42,11 @@ Phase 2: Care-System + Sphären-Plugins
   - Tap auf Chat-Header → Kontakt-Detailansicht
   - Unbekannte-Peer-Banner mit "Hinzufügen"-Button
   - Radar zeigt bekannte Kontakte mit Trust-Badge und Pseudonym
+- **Kontakte Mobile-Navigation (3 Zugangspfade)**:
+  - Profil-Tab: "Meine Kontakte"-Karte mit Anzahl, direkt unter den Profildaten
+  - Entdecken-Hub: Aktive "Kontakte"-Kachel (goldener Rahmen, kein "Coming Soon")
+  - Chat-Tab FAB: Bottom Sheet mit QR-Code, Peers in der Nähe, Kontakte anzeigen
+  - Alle Pfade nutzen `rootNavigator: true` → keine Bottom-Nav sichtbar
 
 ## Aktueller Fokus
 >>> PHASE 1a: Fundament + Identität (in Fertigstellung) <<<

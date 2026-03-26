@@ -8,6 +8,7 @@ import '../../core/contacts/contact_service.dart';
 import '../../core/transport/message_transport.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/identicon.dart';
+import '../contacts/contacts_screen.dart';
 import '../contacts/widgets/trust_badge.dart';
 import 'chat_provider.dart';
 import 'chat_screen.dart' show RadarScreen;
@@ -92,6 +93,66 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     );
   }
 
+  void _openContacts() {
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(builder: (_) => const ContactsScreen()),
+    );
+  }
+
+  void _showNewChatMenu() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+              child: Text(
+                'Neue Konversation',
+                style: const TextStyle(
+                  color: AppColors.gold,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.qr_code_scanner, color: AppColors.gold),
+              title: const Text('QR-Code scannen'),
+              onTap: () {
+                Navigator.pop(ctx);
+                // TODO: QR scanner – Phase 1a
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.radar, color: AppColors.gold),
+              title: const Text('Peers in der Nähe'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _openRadar();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.people_outline, color: AppColors.gold),
+              title: const Text('Kontakte anzeigen'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _openContacts();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _deleteConversation(Conversation conv) async {
     await context.read<ChatProvider>().deleteConversation(conv.id);
     await _loadConversations();
@@ -121,11 +182,11 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                   onDelete: _deleteConversation,
                 ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _openRadar,
+        onPressed: _showNewChatMenu,
         backgroundColor: AppColors.gold,
         foregroundColor: AppColors.deepBlue,
-        tooltip: 'Peers entdecken',
-        child: const Icon(Icons.radar),
+        tooltip: 'Neue Konversation',
+        child: const Icon(Icons.add),
       ),
     );
   }

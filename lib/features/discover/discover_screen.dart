@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
+import '../contacts/contacts_screen.dart';
 import '../settings/settings_screen.dart';
 
 /// A single entry in the Entdecken grid.
@@ -23,6 +24,12 @@ class _TileItem {
 }
 
 const _mainTiles = <_TileItem>[
+  _TileItem(
+    icon: Icons.people_outline,
+    iconColor: AppColors.gold,
+    label: 'Kontakte',
+    route: '/contacts',
+  ),
   _TileItem(
     icon: Icons.shopping_cart,
     iconColor: Color(0xFFFF9800),
@@ -102,6 +109,12 @@ class DiscoverScreen extends StatelessWidget {
       // approach used by ConversationScreen and EditProfileScreen.
       Navigator.of(context, rootNavigator: true).push(
         MaterialPageRoute<void>(builder: (_) => const SettingsScreen()),
+      );
+      return;
+    }
+    if (tile.route == '/contacts') {
+      Navigator.of(context, rootNavigator: true).push(
+        MaterialPageRoute<void>(builder: (_) => const ContactsScreen()),
       );
       return;
     }

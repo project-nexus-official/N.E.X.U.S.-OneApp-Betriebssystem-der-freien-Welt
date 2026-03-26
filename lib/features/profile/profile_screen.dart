@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:nexus_oneapp/core/contacts/contact_service.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
 import 'package:nexus_oneapp/core/identity/profile.dart';
 import 'package:nexus_oneapp/core/identity/profile_service.dart';
@@ -10,6 +11,7 @@ import 'package:nexus_oneapp/core/storage/pod_database.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
 import 'package:nexus_oneapp/shared/widgets/identicon.dart';
 
+import '../contacts/contacts_screen.dart';
 import 'edit_profile_screen.dart';
 
 /// Profile tab – shows the user's identity and extended profile data.
@@ -144,6 +146,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (e) {
       _snack('Export fehlgeschlagen: $e');
     }
+  }
+
+  void _openContacts() {
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(builder: (_) => const ContactsScreen()),
+    );
   }
 
   Future<void> _openEditProfile() async {
@@ -357,6 +365,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ],
           const SizedBox(height: 24),
 
+          // ── Contacts shortcut ───────────────────────────────────────
+          _contactsCard(),
+          const SizedBox(height: 24),
+
           // ── Actions ─────────────────────────────────────────────────
           _actionButton(
             icon: Icons.key_outlined,
@@ -563,6 +575,60 @@ class _ProfileScreenState extends State<ProfileScreen> {
           fontSize: 13,
           fontWeight: FontWeight.w600,
           letterSpacing: 0.8,
+        ),
+      ),
+    );
+  }
+
+  Widget _contactsCard() {
+    final count = ContactService.instance.contacts.length;
+    return GestureDetector(
+      onTap: _openContacts,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.gold.withValues(alpha: 0.5)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppColors.gold.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.people_outline,
+                  color: AppColors.gold, size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Meine Kontakte',
+                    style: TextStyle(
+                      color: AppColors.onDark,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
+                    ),
+                  ),
+                  Text(
+                    '$count Kontakt${count == 1 ? '' : 'e'}',
+                    style: TextStyle(
+                      color: AppColors.onDark.withValues(alpha: 0.6),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: AppColors.gold),
+          ],
         ),
       ),
     );
