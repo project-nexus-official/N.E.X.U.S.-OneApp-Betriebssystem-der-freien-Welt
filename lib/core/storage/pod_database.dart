@@ -29,7 +29,12 @@ class PodDatabase {
   Future<void> open(Uint8List encKey) async {
     _encKey = encKey;
     final path = p.join(await getDatabasesPath(), 'nexus_pod.db');
-    _db = await openDatabase(path, version: 1, onCreate: _onCreate);
+    _db = await openDatabase(
+      path,
+      version: 2,
+      onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
+    );
     // Write schema version to metadata
     await _db!.insert(
       'pod_meta',
@@ -73,11 +78,12 @@ class PodDatabase {
     // Contacts: known peers identified by DID
     await db.execute('''
       CREATE TABLE pod_contacts (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        peer_did   TEXT NOT NULL UNIQUE,
-        enc        TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
+        id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+        peer_did               TEXT NOT NULL UNIQUE,
+        enc                    TEXT NOT NULL,
+        created_at             INTEGER NOT NULL,
+        updated_at             INTEGER NOT NULL,
+        encryption_public_key  TEXT
       )
     ''');
 
@@ -89,7 +95,8 @@ class PodDatabase {
         sender_did      TEXT NOT NULL,
         enc             TEXT NOT NULL,
         ts              INTEGER NOT NULL,
-        status          TEXT NOT NULL DEFAULT 'pending'
+        status          TEXT NOT NULL DEFAULT 'pending',
+        encrypted       INTEGER NOT NULL DEFAULT 0
       )
     ''');
 
@@ -126,6 +133,19 @@ class PodDatabase {
         value TEXT NOT NULL
       )
     ''');
+  }
+
+  static Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // Add encryption_public_key column to contacts (unencrypted, for quick lookup)
+      await db.execute(
+        'ALTER TABLE pod_contacts ADD COLUMN encryption_public_key TEXT',
+      );
+      // Add encrypted flag to messages
+      await db.execute(
+        'ALTER TABLE pod_messages ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0',
+      );
+    }
   }
 
   // ── Identity namespace ────────────────────────────────────────────────────

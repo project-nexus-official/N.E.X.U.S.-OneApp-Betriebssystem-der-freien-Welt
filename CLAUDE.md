@@ -47,6 +47,16 @@ Phase 2: Care-System + Sphären-Plugins
   - Entdecken-Hub: Aktive "Kontakte"-Kachel (goldener Rahmen, kein "Coming Soon")
   - Chat-Tab FAB: Bottom Sheet mit QR-Code, Peers in der Nähe, Kontakte anzeigen
   - Alle Pfade nutzen `rootNavigator: true` → keine Bottom-Nav sichtbar
+- **E2E-Verschlüsselung (komplett)**:
+  - X25519-Schlüssel aus Ed25519-Seed abgeleitet (HKDF-SHA256)
+  - AES-256-GCM Nachrichtenverschlüsselung mit HKDF-Schlüssel
+  - Schlüsselaustausch über Nostr Presence + Nachrichten-Metadata
+  - UI-Indikatoren: Schloss-Icon in Nachrichten und Gesprächsliste
+  - "Ende-zu-Ende verschlüsselt" Banner in Chat-Header
+  - Schlüssel-Verifizierung: QR-Code + 8×4-Hex-Fingerprint (Signal-Style)
+  - Schlüsselwechsel-Warnung im Chat
+  - Fallback: unverschlüsselt wenn Peer keinen Key hat (mit Warnung)
+  - Broadcasts bleiben unverschlüsselt (öffentlich by design)
 
 ## Aktueller Fokus
 >>> PHASE 1a: Fundament + Identität (in Fertigstellung) <<<

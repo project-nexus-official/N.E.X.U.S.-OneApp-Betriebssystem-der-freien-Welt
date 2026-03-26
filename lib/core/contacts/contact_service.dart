@@ -125,6 +125,28 @@ class ContactService {
     await _persist(contact);
   }
 
+  /// Sets (or updates) the X25519 encryption public key for a peer.
+  /// If the key changes, saves the previous key for key-change warning display.
+  Future<void> setEncryptionKey(String did, String encKeyHex) async {
+    final contact = findByDid(did);
+    if (contact == null) return;
+    if (contact.encryptionPublicKey == encKeyHex) return; // no change
+    if (contact.encryptionPublicKey != null &&
+        contact.encryptionPublicKey != encKeyHex) {
+      contact.previousEncryptionPublicKey = contact.encryptionPublicKey;
+    }
+    contact.encryptionPublicKey = encKeyHex;
+    await _persist(contact);
+  }
+
+  /// Clears the key-change warning for [did] after user acknowledges it.
+  Future<void> acknowledgeKeyChange(String did) async {
+    final contact = findByDid(did);
+    if (contact == null) return;
+    contact.previousEncryptionPublicKey = null;
+    await _persist(contact);
+  }
+
   /// Returns true if [did] is muted (notifications silenced).
   bool isMuted(String did) =>
       _contacts.any((c) => c.did == did && c.muted);

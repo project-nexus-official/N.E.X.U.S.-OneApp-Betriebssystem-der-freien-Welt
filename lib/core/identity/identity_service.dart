@@ -106,6 +106,18 @@ class IdentityService {
     return Ed25519().newKeyPairFromSeed(privateKeyBytes);
   }
 
+  /// Returns the raw 32-byte Ed25519 private key bytes for X25519 derivation.
+  /// Returns null if no identity has been created.
+  Future<Uint8List?> getEd25519PrivateBytes() async {
+    final mnemonic = await loadSeedPhrase();
+    if (mnemonic == null) return null;
+    final seed64 = Bip39.mnemonicToSeed(mnemonic);
+    final slip10 = pkg_crypto.Hmac(pkg_crypto.sha512, utf8.encode('ed25519 seed'))
+        .convert(seed64)
+        .bytes;
+    return Uint8List.fromList(slip10.sublist(0, 32));
+  }
+
   /// Reads the pod encryption key from secure storage.
   Future<Uint8List> getPodEncryptionKey() async {
     final hex = await _storage.read(key: _keyEncKey);

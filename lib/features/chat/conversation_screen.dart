@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/contacts/contact_service.dart';
+import '../../core/crypto/encryption_keys.dart';
 import '../../core/storage/retention_service.dart';
 import '../../core/transport/message_transport.dart';
 import '../../core/transport/nexus_message.dart';
@@ -435,6 +436,14 @@ class _ConversationScreenState extends State<ConversationScreen> {
             ),
             body: Column(
               children: [
+                // E2E encryption banner
+                if (!widget.isBroadcast) _E2EBanner(peerDid: widget.peerDid),
+                // Key change warning
+                if (!widget.isBroadcast)
+                  _KeyChangeBanner(
+                    peerDid: widget.peerDid,
+                    onAcknowledge: () => setState(() {}),
+                  ),
                 // Unknown-peer banner
                 if (!widget.isBroadcast)
                   _UnknownPeerBanner(
@@ -688,6 +697,14 @@ class _TextContent extends StatelessWidget {
                   color: isMe
                       ? AppColors.deepBlue.withValues(alpha: 0.6)
                       : Colors.greenAccent,
+                ),
+              ],
+              if (message.metadata?['encrypted'] == true) ...[
+                const SizedBox(width: 4),
+                Icon(
+                  Icons.lock,
+                  size: 10,
+                  color: isMe ? AppColors.deepBlue.withValues(alpha: 0.6) : AppColors.gold,
                 ),
               ],
             ],
@@ -988,6 +1005,81 @@ class _UnknownPeerBannerState extends State<_UnknownPeerBanner> {
             onPressed: () => setState(() => _dismissed = true),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── E2E banner ────────────────────────────────────────────────────────────────
+
+class _E2EBanner extends StatelessWidget {
+  const _E2EBanner({required this.peerDid});
+  final String peerDid;
+
+  @override
+  Widget build(BuildContext context) {
+    final contact = ContactService.instance.findByDid(peerDid);
+    final isEncrypted = contact?.encryptionPublicKey != null &&
+        EncryptionKeys.instance.isInitialized;
+
+    if (!isEncrypted) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      color: AppColors.surfaceVariant,
+      child: const Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.lock, size: 12, color: AppColors.gold),
+          SizedBox(width: 6),
+          Text(
+            'Ende-zu-Ende verschlüsselt',
+            style: TextStyle(color: AppColors.gold, fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Key change warning ────────────────────────────────────────────────────────
+
+class _KeyChangeBanner extends StatelessWidget {
+  const _KeyChangeBanner({
+    required this.peerDid,
+    required this.onAcknowledge,
+  });
+  final String peerDid;
+  final VoidCallback onAcknowledge;
+
+  @override
+  Widget build(BuildContext context) {
+    final contact = ContactService.instance.findByDid(peerDid);
+    if (contact?.previousEncryptionPublicKey == null) {
+      return const SizedBox.shrink();
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      color: Colors.orange.withValues(alpha: 0.15),
+      child: Row(
+        children: [
+          const Icon(Icons.warning_amber, color: Colors.orange, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Der Sicherheitsschlüssel von ${contact!.pseudonym} hat sich '
+              'geändert. Verifiziere den Kontakt.',
+              style: const TextStyle(color: Colors.orange, fontSize: 12),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              await ContactService.instance.acknowledgeKeyChange(peerDid);
+              onAcknowledge();
+            },
+            child: const Text('OK',
+                style: TextStyle(color: Colors.orange, fontSize: 12)),
           ),
         ],
       ),

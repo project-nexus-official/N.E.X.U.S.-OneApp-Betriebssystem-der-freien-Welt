@@ -76,6 +76,8 @@ class Contact {
   String? notes; // private local note, never transmitted
   bool blocked;  // local-only, never transmitted
   bool muted;    // local-only, silences notifications without blocking
+  String? encryptionPublicKey; // X25519 pubkey hex (32 bytes = 64 hex chars)
+  String? previousEncryptionPublicKey; // for key-change warning
 
   Contact({
     required this.did,
@@ -87,6 +89,8 @@ class Contact {
     this.notes,
     this.blocked = false,
     this.muted = false,
+    this.encryptionPublicKey,
+    this.previousEncryptionPublicKey,
   });
 
   Map<String, dynamic> toJson() => {
@@ -99,6 +103,8 @@ class Contact {
         'notes': notes,
         'blocked': blocked,
         'muted': muted,
+        'encryptionPublicKey': encryptionPublicKey,
+        'previousEncryptionPublicKey': previousEncryptionPublicKey,
       };
 
   factory Contact.fromJson(Map<String, dynamic> json) => Contact(
@@ -114,6 +120,8 @@ class Contact {
         notes: json['notes'] as String?,
         blocked: json['blocked'] as bool? ?? false,
         muted: json['muted'] as bool? ?? false,
+        encryptionPublicKey: json['encryptionPublicKey'] as String?,
+        previousEncryptionPublicKey: json['previousEncryptionPublicKey'] as String?,
       );
 
   static DateTime _parseDate(dynamic v) {

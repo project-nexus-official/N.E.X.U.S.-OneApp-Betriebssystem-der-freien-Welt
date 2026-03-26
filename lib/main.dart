@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:nexus_oneapp/core/contacts/contact_service.dart';
+import 'package:nexus_oneapp/core/crypto/encryption_keys.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
 import 'package:nexus_oneapp/core/identity/profile_service.dart';
 import 'package:nexus_oneapp/features/chat/conversation_service.dart';
@@ -54,6 +55,15 @@ Future<void> initServicesAfterIdentity() async {
       },
     );
     await BackgroundServiceManager.instance.init();
+    // Initialize X25519 encryption keys
+    try {
+      final ed25519Bytes = await IdentityService.instance.getEd25519PrivateBytes();
+      if (ed25519Bytes != null) {
+        await EncryptionKeys.instance.initFromEd25519Private(ed25519Bytes);
+      }
+    } catch (e) {
+      debugPrint('[CRYPTO] Encryption key init failed at startup: $e');
+    }
   } catch (e) {
     debugPrint('[NEXUS] Storage init error: $e');
   }

@@ -10,6 +10,8 @@ import 'package:image/image.dart' as img;
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/contacts/contact_service.dart';
+import '../../core/crypto/encryption_keys.dart';
+import '../../core/crypto/message_encryption.dart';
 import '../../core/identity/bip39.dart';
 import '../../core/identity/identity_service.dart';
 import '../../core/storage/pod_database.dart';
@@ -147,7 +149,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       _manager.registerTransport(_nostrTransport!);
 
       // Subscribe to events before starting
-      _msgSub = _manager.onMessageReceived.listen(_onMessageReceived);
+      _msgSub = _manager.onMessageReceived.listen((msg) => _onMessageReceived(msg));
       _peersSub = _manager.onPeersChanged.listen((_) => notifyListeners());
 
       await _manager.start();
@@ -156,6 +158,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
 
       // Derive Nostr keys from seed and start Nostr if internet is available.
       await _initNostrKeys(identity);
+      await _initEncryptionKeys();
       await _startNostrIfConnected();
       _watchConnectivity();
     } catch (e) {
@@ -173,6 +176,20 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       final seed64 = Bip39.mnemonicToSeed(mnemonic);
       await _nostrTransport?.initKeys(seed64);
     } catch (_) {}
+  }
+
+  Future<void> _initEncryptionKeys() async {
+    try {
+      final ed25519Bytes = await IdentityService.instance.getEd25519PrivateBytes();
+      if (ed25519Bytes == null) return;
+      await EncryptionKeys.instance.initFromEd25519Private(ed25519Bytes);
+      final pubHex = EncryptionKeys.instance.publicKeyHex;
+      if (pubHex != null) {
+        _nostrTransport?.setEncryptionPublicKey(pubHex);
+      }
+    } catch (e) {
+      debugPrint('[CRYPTO] Encryption key init failed: $e');
+    }
   }
 
   Future<void> _startNostrIfConnected() async {
@@ -276,7 +293,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   // ── Incoming messages ──────────────────────────────────────────────────────
 
-  void _onMessageReceived(NexusMessage msg) {
+  Future<void> _onMessageReceived(NexusMessage msg) async {
     // Silent block: discard messages from blocked peers without any feedback.
     if (!msg.isBroadcast &&
         ContactService.instance.isBlocked(msg.fromDid)) {
@@ -284,21 +301,75 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
 
+    // ── Key exchange: learn sender's encryption key ──────────────────────────
+    final encKeyFromMsg = msg.metadata?['enc_key'] as String?;
+    if (encKeyFromMsg != null && !msg.isBroadcast) {
+      ContactService.instance.setEncryptionKey(msg.fromDid, encKeyFromMsg);
+    }
+
+    // ── Decrypt if encrypted ─────────────────────────────────────────────────
+    NexusMessage processedMsg = msg;
+    if (msg.metadata?['encrypted'] == true && !msg.isBroadcast) {
+      final senderEncKeyHex =
+          encKeyFromMsg ?? ContactService.instance.findByDid(msg.fromDid)?.encryptionPublicKey;
+      if (senderEncKeyHex != null) {
+        final plaintext = await MessageEncryption.decrypt(
+          msg.body,
+          recipientKeyPair: EncryptionKeys.instance.keyPair,
+          senderPublicKeyBytes: EncryptionKeys.hexToBytes(senderEncKeyHex),
+        );
+        if (plaintext != null) {
+          // Rebuild message with decrypted body
+          processedMsg = NexusMessage(
+            id: msg.id,
+            fromDid: msg.fromDid,
+            toDid: msg.toDid,
+            type: msg.type,
+            channel: msg.channel,
+            body: plaintext,
+            timestamp: msg.timestamp,
+            ttlHours: msg.ttlHours,
+            hopCount: msg.hopCount,
+            signature: msg.signature,
+            metadata: {
+              ...?msg.metadata,
+              'encrypted': true, // preserve flag for UI lock icon
+            },
+          );
+        } else {
+          // Decryption failed: show placeholder
+          processedMsg = NexusMessage(
+            id: msg.id,
+            fromDid: msg.fromDid,
+            toDid: msg.toDid,
+            type: msg.type,
+            channel: msg.channel,
+            body: '[Nachricht konnte nicht entschlüsselt werden]',
+            timestamp: msg.timestamp,
+            ttlHours: msg.ttlHours,
+            hopCount: msg.hopCount,
+            signature: msg.signature,
+            metadata: msg.metadata,
+          );
+        }
+      }
+    }
+
     final myDid = IdentityService.instance.currentIdentity?.did ?? '';
 
-    final convId = msg.isBroadcast
+    final convId = processedMsg.isBroadcast
         ? NexusMessage.broadcastDid
-        : _conversationId(msg.fromDid, myDid);
+        : _conversationId(processedMsg.fromDid, myDid);
 
-    debugPrint('[CHAT] Message received: convId=$convId  from=${msg.fromDid}');
+    debugPrint('[CHAT] Message received: convId=$convId  from=${processedMsg.fromDid}');
 
     _conversationCache.putIfAbsent(convId, () => []);
-    _conversationCache[convId]!.add(msg);
+    _conversationCache[convId]!.add(processedMsg);
 
     // Persist first, then notify so the DB query in notifyUpdate() finds the
     // new message (avoids a race condition where the query runs before the
     // INSERT completes).
-    _persistMessage(convId, msg).then((_) {
+    _persistMessage(convId, processedMsg).then((_) {
       debugPrint('[CHAT] Persisted → notifying ConversationService');
       ConversationService.instance.notifyUpdate();
     });
@@ -306,38 +377,38 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     // ── Notifications ────────────────────────────────────────────────────────
     // Don't notify if this exact conversation is open in the UI.
     if (_activeConversationId != convId) {
-      final contact = ContactService.instance.findByDid(msg.fromDid);
-      final muted = !msg.isBroadcast && (contact?.muted ?? false);
+      final contact = ContactService.instance.findByDid(processedMsg.fromDid);
+      final muted = !processedMsg.isBroadcast && (contact?.muted ?? false);
 
       if (!muted) {
         final senderName = contact?.pseudonym ??
-            (msg.fromDid.length > 12
-                ? msg.fromDid.substring(msg.fromDid.length - 12)
-                : msg.fromDid);
-        final preview = msg.type == NexusMessageType.image
+            (processedMsg.fromDid.length > 12
+                ? processedMsg.fromDid.substring(processedMsg.fromDid.length - 12)
+                : processedMsg.fromDid);
+        final preview = processedMsg.type == NexusMessageType.image
             ? '\u{1F4F7} Foto'
-            : (msg.body.length > 100
-                ? '${msg.body.substring(0, 100)}…'
-                : msg.body);
+            : (processedMsg.body.length > 100
+                ? '${processedMsg.body.substring(0, 100)}…'
+                : processedMsg.body);
 
         if (_appInForeground) {
           // In-app banner
           InAppNotificationController.instance.show(InAppBannerData(
-            senderName: msg.isBroadcast ? '#mesh' : senderName,
+            senderName: processedMsg.isBroadcast ? '#mesh' : senderName,
             preview: preview,
             conversationId: convId,
-            isBroadcast: msg.isBroadcast,
+            isBroadcast: processedMsg.isBroadcast,
           ));
         } else {
           // System notification
-          if (msg.isBroadcast) {
+          if (processedMsg.isBroadcast) {
             NotificationService.instance.showBroadcastNotification(
               senderName: senderName,
               messagePreview: preview,
             );
           } else {
             NotificationService.instance.showMessageNotification(
-              senderDid: msg.fromDid,
+              senderDid: processedMsg.fromDid,
               senderName: senderName,
               messagePreview: preview,
               conversationId: convId,
@@ -368,11 +439,35 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// Sends a direct text message to [recipientDid].
   Future<void> sendMessage(String recipientDid, String text) async {
     final myDid = IdentityService.instance.currentIdentity?.did ?? 'unknown';
+    final contact = ContactService.instance.findByDid(recipientDid);
+    final recipientEncKey = contact?.encryptionPublicKey;
+
+    String body = text;
+    Map<String, dynamic>? extraMeta;
+
+    if (recipientEncKey != null) {
+      final encryptedBody = await MessageEncryption.encrypt(
+        text,
+        senderKeyPair: EncryptionKeys.instance.keyPair,
+        recipientPublicKeyBytes: EncryptionKeys.hexToBytes(recipientEncKey),
+      );
+      if (encryptedBody != null) {
+        body = encryptedBody;
+        extraMeta = {
+          'encrypted': true,
+          'enc_key': EncryptionKeys.instance.publicKeyHex,
+        };
+      }
+    } else if (EncryptionKeys.instance.publicKeyHex != null) {
+      // Include our enc key in metadata so recipient can encrypt future messages
+      extraMeta = {'enc_key': EncryptionKeys.instance.publicKeyHex};
+    }
 
     final msg = NexusMessage.create(
       fromDid: myDid,
       toDid: recipientDid,
-      body: text,
+      body: body,
+      metadata: extraMeta,
     );
 
     await _manager.sendMessage(msg, recipientDid: recipientDid);
@@ -396,6 +491,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       toDid: NexusMessage.broadcastDid,
       body: text,
       channel: '#mesh',
+      metadata: EncryptionKeys.instance.publicKeyHex != null
+          ? {'enc_key': EncryptionKeys.instance.publicKeyHex}
+          : null,
     );
 
     await _manager.sendMessage(msg);
@@ -433,6 +531,8 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
         'width': width,
         'height': height,
         'thumbnail': base64Thumb,
+        if (EncryptionKeys.instance.publicKeyHex != null)
+          'enc_key': EncryptionKeys.instance.publicKeyHex,
       },
     );
 

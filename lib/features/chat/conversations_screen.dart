@@ -290,6 +290,7 @@ class _ConversationTile extends StatelessWidget {
                 if (!conv.isBroadcast) ...[
                   const SizedBox(width: 6),
                   _TrustBadgeInline(peerDid: conv.peerDid),
+                  _EncryptionDotInline(peerDid: conv.peerDid),
                 ],
               ],
             ),
@@ -467,6 +468,23 @@ class _TrustBadgeInline extends StatelessWidget {
     final contact = ContactService.instance.findByDid(peerDid);
     if (contact == null) return const SizedBox.shrink();
     return TrustBadge(level: contact.trustLevel, small: true);
+  }
+}
+
+// ── Inline encryption dot (for conversation list) ─────────────────────────────
+
+class _EncryptionDotInline extends StatelessWidget {
+  const _EncryptionDotInline({required this.peerDid});
+  final String peerDid;
+
+  @override
+  Widget build(BuildContext context) {
+    final contact = ContactService.instance.findByDid(peerDid);
+    if (contact?.encryptionPublicKey == null) return const SizedBox.shrink();
+    return const Padding(
+      padding: EdgeInsets.only(left: 4),
+      child: Icon(Icons.lock, size: 10, color: AppColors.gold),
+    );
   }
 }
 

@@ -9,6 +9,7 @@ import 'package:nexus_oneapp/core/identity/profile.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
 import 'package:nexus_oneapp/shared/widgets/identicon.dart';
 
+import 'screens/key_verification_screen.dart';
 import 'widgets/trust_badge.dart';
 
 /// Full-screen detail view for a single contact.
@@ -527,6 +528,48 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
                   ],
                 ),
               ),
+            ],
+          ),
+
+          const SizedBox(height: 8),
+
+          // ── Encryption section ─────────────────────────────────────────
+          _SectionHeader('VERSCHLÜSSELUNG'),
+          _InfoCard(
+            children: [
+              if (_contact.encryptionPublicKey != null)
+                ListTile(
+                  leading: const Icon(Icons.lock, color: AppColors.gold, size: 20),
+                  title: const Text('Ende-zu-Ende verschlüsselt'),
+                  subtitle: const Text(
+                    'Nachrichten mit diesem Kontakt sind verschlüsselt.',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  trailing: TextButton(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) =>
+                            KeyVerificationScreen(peerDid: _contact.did),
+                      ),
+                    ),
+                    child: const Text(
+                      'Verifizieren',
+                      style: TextStyle(color: AppColors.gold, fontSize: 12),
+                    ),
+                  ),
+                )
+              else
+                const ListTile(
+                  leading: Icon(Icons.lock_open, color: Colors.grey, size: 20),
+                  title: Text(
+                    'Nicht verschlüsselt',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                  subtitle: Text(
+                    'Peer unterstützt (noch) keine Verschlüsselung.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ),
             ],
           ),
 

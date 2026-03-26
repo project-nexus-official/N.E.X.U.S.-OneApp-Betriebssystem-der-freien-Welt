@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:cryptography/cryptography.dart' show AesCbc, MacAlgorithm,
     SecretKey, SecretBox, Mac;
 
+import '../../../core/contacts/contact_service.dart';
 import '../message_transport.dart';
 import '../nexus_message.dart';
 import '../nexus_peer.dart';
@@ -42,6 +43,7 @@ class NostrTransport implements MessageTransport {
   final Duration peerTimeout;
 
   NostrKeys? _keys;
+  String? _encryptionPublicKeyHex;
 
   TransportState _state = TransportState.idle;
 
@@ -93,6 +95,11 @@ class NostrTransport implements MessageTransport {
 
   /// Adds a custom relay URL.
   void addRelay(String url) => _relayManager.addRelay(url);
+
+  /// Sets the X25519 encryption public key to broadcast in presence events.
+  void setEncryptionPublicKey(String hexKey) {
+    _encryptionPublicKeyHex = hexKey;
+  }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -255,6 +262,7 @@ class NostrTransport implements MessageTransport {
       content: jsonEncode({
         'did': localDid,
         'pseudonym': localPseudonym,
+        if (_encryptionPublicKeyHex != null) 'enc_key': _encryptionPublicKeyHex,
       }),
       tags: tags,
     );
@@ -408,6 +416,12 @@ class NostrTransport implements MessageTransport {
           _shortDid(event.pubkey);
 
       if (did == null || did.isEmpty) return;
+
+      final encKey = data['enc_key'] as String?;
+      if (encKey != null) {
+        // Store in ContactService so ChatProvider can encrypt to this peer
+        ContactService.instance.setEncryptionKey(did, encKey);
+      }
 
       // Store DID ↔ Nostr pubkey mapping so we can send DMs
       _didToNostrPubkey[did] = event.pubkey;
