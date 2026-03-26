@@ -66,6 +66,14 @@ Phase 2: Care-System + Sphären-Plugins
   - Toast wenn Originalnachricht nicht mehr verfügbar
   - Reply-Daten in metadata (reply_to_id/sender/preview/image), alle Transports
   - Verschlüsselte Antworten zeigen Klartext im Zitat
+- **Nostr Catch-Up (verpasste Nachrichten, komplett)**:
+  - Letzter Nachrichten-Timestamp in SharedPreferences gespeichert
+  - Beim App-Start: Nostr-Subscriptions starten ab diesem Timestamp (minus 60s Puffer)
+  - Default: letzte 24 Stunden falls kein gespeicherter Timestamp
+  - Duplikat-Erkennung via `message_id` Spalte in `pod_messages` (DB v3)
+  - `insertMessage()` prüft vor jedem Insert ob ID bereits existiert → silent skip
+  - Presence-Subscription bleibt immer bei "letzte 5 Minuten" (keine Catch-Up nötig)
+  - DMs und Broadcasts beide mit Catch-Up
 
 ## Aktueller Fokus
 >>> PHASE 1a: Fundament + Identität (in Fertigstellung) <<<

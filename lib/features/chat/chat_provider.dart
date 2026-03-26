@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:geolocator/geolocator.dart';
@@ -56,6 +57,8 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
 
   // ── State ──────────────────────────────────────────────────────────────────
+
+  static const String _nostrTimestampKey = 'last_nostr_timestamp_seconds';
 
   bool _initialized = false;
   bool _permissionsGranted = false;
@@ -156,7 +159,10 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       _running = true;
       _error = null;
 
-      // Derive Nostr keys from seed and start Nostr if internet is available.
+      // Restore timestamp BEFORE initNostrKeys so that the very first
+      // _setupSubscriptions() call already uses the correct since value.
+      // (initNostrKeys → initKeys → _setupSubscriptions inside NostrTransport)
+      await _restoreNostrTimestamp();
       await _initNostrKeys(identity);
       await _initEncryptionKeys();
       await _startNostrIfConnected();
@@ -189,6 +195,45 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       }
     } catch (e) {
       debugPrint('[CRYPTO] Encryption key init failed: $e');
+    }
+  }
+
+  /// Loads the last message timestamp from SharedPreferences and passes it to
+  /// the Nostr transport so subscriptions start from the right point.
+  /// Must be called BEFORE [_initNostrKeys] so subscriptions are correct from
+  /// the very first [_setupSubscriptions] call.
+  Future<void> _restoreNostrTimestamp() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final ts = prefs.getInt(_nostrTimestampKey);
+      final nowSec = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
+      if (ts != null) {
+        _nostrTransport?.setLastMessageTimestamp(ts);
+        final age = nowSec - ts;
+        debugPrint('[SYNC] Last seen timestamp: $ts  '
+            '(${age}s ago = ${(age / 3600).toStringAsFixed(1)}h)');
+        debugPrint('[SYNC] Subscribing with since: ${ts - 60}  (buffer 60s)');
+      } else {
+        debugPrint('[SYNC] No saved timestamp – defaulting to since=${nowSec - 86400} '
+            '(last 24 h)');
+      }
+    } catch (e) {
+      debugPrint('[SYNC] Failed to restore timestamp: $e');
+    }
+  }
+
+  /// Saves [timestamp] as the new high-water mark for Nostr message fetch.
+  Future<void> _saveNostrTimestamp(DateTime timestamp) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final epochSec = timestamp.millisecondsSinceEpoch ~/ 1000;
+      final saved = prefs.getInt(_nostrTimestampKey) ?? 0;
+      if (epochSec > saved) {
+        await prefs.setInt(_nostrTimestampKey, epochSec);
+        debugPrint('[SYNC] Saved new high-water timestamp: $epochSec');
+      }
+    } catch (e) {
+      debugPrint('[SYNC] Failed to save timestamp: $e');
     }
   }
 
@@ -301,6 +346,10 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
 
+    // Track the latest message timestamp so Nostr can catch up on missed
+    // messages after the next app restart.
+    unawaited(_saveNostrTimestamp(msg.timestamp));
+
     // ── Key exchange: learn sender's encryption key ──────────────────────────
     final encKeyFromMsg = msg.metadata?['enc_key'] as String?;
     if (encKeyFromMsg != null && !msg.isBroadcast) {
@@ -364,7 +413,12 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     debugPrint('[CHAT] Message received: convId=$convId  from=${processedMsg.fromDid}');
 
     _conversationCache.putIfAbsent(convId, () => []);
-    _conversationCache[convId]!.add(processedMsg);
+    final cache = _conversationCache[convId]!;
+    if (cache.any((m) => m.id == processedMsg.id)) {
+      debugPrint('[CHAT] Duplicate message dropped (already in cache): ${processedMsg.id}');
+      return;
+    }
+    cache.add(processedMsg);
 
     // Persist first, then notify so the DB query in notifyUpdate() finds the
     // new message (avoids a race condition where the query runs before the

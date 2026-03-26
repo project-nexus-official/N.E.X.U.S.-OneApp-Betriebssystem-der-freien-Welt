@@ -40,7 +40,9 @@ void main() {
             sender_did      TEXT NOT NULL,
             enc             TEXT NOT NULL,
             ts              INTEGER NOT NULL,
-            status          TEXT NOT NULL DEFAULT 'pending'
+            status          TEXT NOT NULL DEFAULT 'pending',
+            encrypted       INTEGER NOT NULL DEFAULT 0,
+            message_id      TEXT
           )
         ''');
         await db.execute('''
@@ -123,6 +125,57 @@ void main() {
       final msgs = await pod.listMessages('conv-1');
       expect(msgs.length, 1);
       expect(msgs.first['text'], 'Hallo Welt');
+    });
+
+    test('insertMessage: duplicate message_id is silently skipped', () async {
+      final pod = await openTestDb();
+      const msgId = 'msg-abc-123';
+      await pod.insertMessage(
+        conversationId: 'conv-dedup-test',
+        senderDid: 'did:key:zAlice',
+        data: {'id': msgId, 'body': 'erste Nachricht'},
+      );
+      // Insert same ID again (simulates re-delivery from Nostr relay)
+      await pod.insertMessage(
+        conversationId: 'conv-dedup-test',
+        senderDid: 'did:key:zAlice',
+        data: {'id': msgId, 'body': 'Duplikat'},
+      );
+      final msgs = await pod.listMessages('conv-dedup-test');
+      expect(msgs.length, 1, reason: 'Duplicate must not be stored twice');
+      expect(msgs.first['body'], 'erste Nachricht');
+    });
+
+    test('insertMessage: different IDs are both stored', () async {
+      final pod = await openTestDb();
+      await pod.insertMessage(
+        conversationId: 'conv-two-ids',
+        senderDid: 'did:key:zAlice',
+        data: {'id': 'id-1', 'body': 'erste'},
+      );
+      await pod.insertMessage(
+        conversationId: 'conv-two-ids',
+        senderDid: 'did:key:zAlice',
+        data: {'id': 'id-2', 'body': 'zweite'},
+      );
+      final msgs = await pod.listMessages('conv-two-ids');
+      expect(msgs.length, 2);
+    });
+
+    test('insertMessage: without id field always inserts (legacy data)', () async {
+      final pod = await openTestDb();
+      await pod.insertMessage(
+        conversationId: 'conv-legacy-test',
+        senderDid: 'did:key:zAlice',
+        data: {'text': 'no-id-1'},
+      );
+      await pod.insertMessage(
+        conversationId: 'conv-legacy-test',
+        senderDid: 'did:key:zAlice',
+        data: {'text': 'no-id-2'},
+      );
+      final msgs = await pod.listMessages('conv-legacy-test');
+      expect(msgs.length, 2, reason: 'Rows without message_id bypass dedup check');
     });
 
     test('recovery_shares table exists and is empty initially', () async {

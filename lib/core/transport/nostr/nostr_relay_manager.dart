@@ -250,7 +250,11 @@ class NostrRelayManager {
     print('[NOSTR] $url – resubscribing ${_subscriptions.length} filters');
     for (final entry in _subscriptions.entries) {
       try {
-        print('[NOSTR]   REQ ${entry.key.substring(0, 8)} kinds=${entry.value['kinds']}');
+        final since = entry.value['since'];
+        print('[NOSTR]   REQ ${entry.key.substring(0, 8)} '
+            'kinds=${entry.value['kinds']} since=$since');
+        print('[SYNC] Relay connected: ${_shortUrl(url)}  '
+            'sending REQ ${entry.key.substring(0, 8)} since=$since');
         channel.sink.add(jsonEncode(['REQ', entry.key, entry.value]));
       } catch (_) {}
     }
@@ -276,10 +280,13 @@ class NostrRelayManager {
           print('[NOSTR] ← EVENT kind=${event.kind} '
               'id=${event.id.substring(0, 8)} '
               'from=${event.pubkey.substring(0, 8)} '
+              'created_at=${event.createdAt} '
               '(relay: ${_shortUrl(url)})');
 
           // Relay-level deduplication
-          if (_seenEventIds.contains(event.id)) return;
+          final isNew = !_seenEventIds.contains(event.id);
+          print('[SYNC] Event is new: $isNew  id=${event.id.substring(0, 8)}');
+          if (!isNew) return;
           if (_seenEventIds.length > 5000) _seenEventIds.clear();
           _seenEventIds.add(event.id);
 

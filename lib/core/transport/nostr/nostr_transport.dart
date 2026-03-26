@@ -45,6 +45,11 @@ class NostrTransport implements MessageTransport {
   NostrKeys? _keys;
   String? _encryptionPublicKeyHex;
 
+  /// Unix timestamp (seconds) of the last received message.
+  /// Used as the Nostr subscription `since` filter on startup so that messages
+  /// sent while the app was offline are fetched on the next connection.
+  int? _lastMessageTimestampSeconds;
+
   TransportState _state = TransportState.idle;
 
   final _msgController = StreamController<NexusMessage>.broadcast();
@@ -99,6 +104,16 @@ class NostrTransport implements MessageTransport {
   /// Sets the X25519 encryption public key to broadcast in presence events.
   void setEncryptionPublicKey(String hexKey) {
     _encryptionPublicKeyHex = hexKey;
+  }
+
+  /// Persists the timestamp of the last received message so that the next
+  /// [_setupSubscriptions] call fetches only events newer than this point.
+  /// Call this whenever a message is received (from any transport).
+  void setLastMessageTimestamp(int epochSeconds) {
+    if (_lastMessageTimestampSeconds == null ||
+        epochSeconds > _lastMessageTimestampSeconds!) {
+      _lastMessageTimestampSeconds = epochSeconds;
+    }
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -301,7 +316,14 @@ class NostrTransport implements MessageTransport {
   void _setupSubscriptions() {
     if (_keys == null) return;
     final myPubkey = _keys!.publicKeyHex;
-    final since = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
+    final nowSeconds = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
+
+    // Use the timestamp of the last received message (minus 60 s relay-latency
+    // buffer) so missed messages are fetched on startup.  Fall back to the
+    // last 24 hours when no prior timestamp is available.
+    final msgSince = _lastMessageTimestampSeconds != null
+        ? _lastMessageTimestampSeconds! - 60
+        : nowSeconds - 86400;
 
     // Close stale subscriptions before recreating to avoid accumulating
     // orphaned REQ IDs in the relay manager.
@@ -312,15 +334,19 @@ class NostrTransport implements MessageTransport {
     print('[NOSTR] Setting up subscriptions for pubkey: '
         '${myPubkey.substring(0, 8)}…${myPubkey.substring(myPubkey.length - 4)}');
 
-    // DMs addressed to us (last hour)
+    final humanSince = DateTime.fromMillisecondsSinceEpoch(msgSince * 1000).toUtc();
+    print('[SYNC] DM filter: {"kinds":[4],"#p":["${myPubkey.substring(0, 8)}…"],'
+        '"since":$msgSince}  ← ${humanSince.toIso8601String()}');
+
+    // DMs addressed to us – since last known message (or last 24 h)
     _dmSubId = _relayManager.subscribe({
       'kinds': [NostrKind.encryptedDm],
       '#p': [myPubkey],
-      'since': since - 3600,
+      'since': msgSince,
     });
     print('[NOSTR] DM sub: $_dmSubId  (#p: ${myPubkey.substring(0, 8)}…)');
 
-    // Mesh broadcasts (last hour).
+    // Mesh broadcasts – same since window.
     // Always subscribe to 'nexus-mesh' tag.  If we have a geohash we also
     // add it so geo-filtered senders reach us – but the base tag alone is
     // sufficient to receive all broadcasts regardless of sender location.
@@ -328,12 +354,12 @@ class NostrTransport implements MessageTransport {
     if (currentGeohash != null) {
       meshTagFilter.add('nexus-geo-$currentGeohash');
     }
-    final meshFilters = <String, dynamic>{
+    print('[SYNC] Broadcast filter: {"kinds":[1],"#t":$meshTagFilter,"since":$msgSince}');
+    _meshSubId = _relayManager.subscribe({
       'kinds': [NostrKind.textNote],
       '#t': meshTagFilter,
-      'since': since - 3600,
-    };
-    _meshSubId = _relayManager.subscribe(meshFilters);
+      'since': msgSince,
+    });
     print('[NOSTR] Mesh sub: $_meshSubId  (#t: $meshTagFilter)');
 
     // Presence announcements – last 5 minutes for initial peer discovery,
@@ -341,7 +367,7 @@ class NostrTransport implements MessageTransport {
     _presenceSubId = _relayManager.subscribe({
       'kinds': [NostrKind.presence],
       '#t': ['nexus-presence'],
-      'since': since - 300,
+      'since': nowSeconds - 300,
     });
     print('[NOSTR] Presence sub: $_presenceSubId');
   }
@@ -366,6 +392,8 @@ class NostrTransport implements MessageTransport {
 
     print('[NOSTR] DM received from pubkey: ${event.pubkey.substring(0, 8)}…, '
         'event: ${event.id.substring(0, 8)}…  decrypting…');
+    print('[SYNC] Received event: ${event.id.substring(0, 8)} '
+        'kind=${event.kind} created_at=${event.createdAt}');
 
     try {
       final senderPubBytes = Uint8List.fromList(_hexToBytes(event.pubkey));
@@ -374,6 +402,7 @@ class NostrTransport implements MessageTransport {
       final message = NexusMessage.fromJson(msgJson);
 
       print('[NOSTR] DM decrypted OK: ${message.fromDid} → ${message.toDid}');
+      print('[SYNC] Stored message: ${message.id}');
       _learnPeer(event.pubkey, message.fromDid, message.metadata);
       _msgController.add(message);
     } catch (e) {
@@ -390,12 +419,16 @@ class NostrTransport implements MessageTransport {
 
     print('[NOSTR] Broadcast received from ${event.pubkey.substring(0, 8)}… '
         'id=${event.id.substring(0, 8)} tags=${event.tagValues('t')}');
+    print('[SYNC] Received event: ${event.id.substring(0, 8)} '
+        'kind=${event.kind} created_at=${event.createdAt}');
 
     try {
       final msgJson = jsonDecode(event.content) as Map<String, dynamic>;
       final message = NexusMessage.fromJson(msgJson);
-      print('[NOSTR] Broadcast parsed OK: from=${message.fromDid.substring(0, 12)}… '
+      final didLen = message.fromDid.length;
+      print('[NOSTR] Broadcast parsed OK: from=${message.fromDid.substring(0, didLen.clamp(0, 12))}… '
           'body="${message.body.length > 40 ? message.body.substring(0, 40) : message.body}"');
+      print('[SYNC] Stored message: ${message.id}');
       _learnPeer(event.pubkey, message.fromDid, message.metadata);
       _msgController.add(message);
     } catch (e) {

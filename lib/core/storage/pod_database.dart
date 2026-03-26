@@ -31,7 +31,7 @@ class PodDatabase {
     final path = p.join(await getDatabasesPath(), 'nexus_pod.db');
     _db = await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -96,7 +96,8 @@ class PodDatabase {
         enc             TEXT NOT NULL,
         ts              INTEGER NOT NULL,
         status          TEXT NOT NULL DEFAULT 'pending',
-        encrypted       INTEGER NOT NULL DEFAULT 0
+        encrypted       INTEGER NOT NULL DEFAULT 0,
+        message_id      TEXT
       )
     ''');
 
@@ -144,6 +145,12 @@ class PodDatabase {
       // Add encrypted flag to messages
       await db.execute(
         'ALTER TABLE pod_messages ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0',
+      );
+    }
+    if (oldVersion < 3) {
+      // Add message_id column for deduplication (catches missed messages on restart)
+      await db.execute(
+        'ALTER TABLE pod_messages ADD COLUMN message_id TEXT',
       );
     }
   }
@@ -206,6 +213,18 @@ class PodDatabase {
     required String senderDid,
     required Map<String, dynamic> data,
   }) async {
+    // Deduplicate: skip if this message ID already exists in the DB.
+    // This prevents duplicate storage when missed Nostr messages are re-delivered
+    // on reconnect and a copy was already received via LAN/BLE.
+    final msgId = data['id'] as String?;
+    if (msgId != null) {
+      final rows = await _database.rawQuery(
+        'SELECT 1 FROM pod_messages WHERE message_id = ? LIMIT 1',
+        [msgId],
+      );
+      if (rows.isNotEmpty) return; // duplicate – skip silently
+    }
+
     final enc = await PodEncryption.encrypt(jsonEncode(data), _key);
     await _database.insert('pod_messages', {
       'conversation_id': conversationId,
@@ -213,6 +232,7 @@ class PodDatabase {
       'enc': enc,
       'ts': DateTime.now().millisecondsSinceEpoch,
       'status': 'pending',
+      if (msgId != null) 'message_id': msgId,
     });
   }
 
