@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/contacts/contact_service.dart';
@@ -128,7 +129,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
               title: const Text('QR-Code scannen'),
               onTap: () {
                 Navigator.pop(ctx);
-                // TODO: QR scanner – Phase 1a
+                context.push('/qr-scanner');
               },
             ),
             ListTile(

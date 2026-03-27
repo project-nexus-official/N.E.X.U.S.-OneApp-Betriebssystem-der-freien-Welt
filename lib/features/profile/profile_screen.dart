@@ -2,8 +2,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:nexus_oneapp/core/contacts/contact_service.dart';
+import 'package:nexus_oneapp/core/crypto/encryption_keys.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
 import 'package:nexus_oneapp/core/identity/profile.dart';
 import 'package:nexus_oneapp/core/identity/profile_service.dart';
@@ -11,7 +14,9 @@ import 'package:nexus_oneapp/core/storage/pod_database.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
 import 'package:nexus_oneapp/shared/widgets/identicon.dart';
 
+import '../chat/chat_provider.dart';
 import '../contacts/contacts_screen.dart';
+import '../contacts/qr_contact_payload.dart';
 import 'edit_profile_screen.dart';
 
 /// Profile tab – shows the user's identity and extended profile data.
@@ -26,6 +31,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _identityService = IdentityService.instance;
 
   UserProfile? get _profile => ProfileService.instance.currentProfile;
+
+  // ── QR data builder ───────────────────────────────────────────────────────
+
+  /// Builds the JSON payload for the own QR code.
+  String _buildQrData(BuildContext context, dynamic identity, UserProfile? profile) {
+    final pseudonym = profile?.pseudonym.value ?? identity.pseudonym as String;
+    final x25519Key = EncryptionKeys.instance.publicKeyHex;
+    final nostrKey = context.read<ChatProvider>().nostrTransport?.keys?.publicKeyHex;
+    final payload = QrContactPayload(
+      did: identity.did as String,
+      pseudonym: pseudonym,
+      publicKey: x25519Key,
+      nostrPubkey: nostrKey,
+    );
+    return payload.toJsonString();
+  }
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
@@ -315,19 +336,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
           // ── QR code ─────────────────────────────────────────────────
           _infoCard(
             label: 'QR-Code zum Hinzufügen',
-            child: Center(
-              child: QrImageView(
-                data: identity.did,
-                version: QrVersions.auto,
-                size: 180,
-                backgroundColor: Colors.white,
-                eyeStyle: const QrEyeStyle(
-                    eyeShape: QrEyeShape.square,
-                    color: Color(0xFF000000)),
-                dataModuleStyle: const QrDataModuleStyle(
-                    dataModuleShape: QrDataModuleShape.square,
-                    color: Color(0xFF000000)),
-              ),
+            child: Column(
+              children: [
+                Center(
+                  child: QrImageView(
+                    data: _buildQrData(context, identity, profile),
+                    version: QrVersions.auto,
+                    size: 180,
+                    backgroundColor: Colors.white,
+                    eyeStyle: const QrEyeStyle(
+                        eyeShape: QrEyeShape.square,
+                        color: Color(0xFF000000)),
+                    dataModuleStyle: const QrDataModuleStyle(
+                        dataModuleShape: QrDataModuleShape.square,
+                        color: Color(0xFF000000)),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () => context.push('/qr-scanner'),
+                    icon: const Icon(Icons.qr_code_scanner),
+                    label: const Text('Kontakt scannen'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.gold,
+                      side: const BorderSide(color: AppColors.gold),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 16),

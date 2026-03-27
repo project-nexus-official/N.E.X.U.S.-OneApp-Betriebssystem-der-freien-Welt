@@ -95,6 +95,14 @@ class NostrTransport implements MessageTransport {
   /// Current geohash (set by [ChatProvider] after location is obtained).
   String? currentGeohash;
 
+  /// Registers a DID → Nostr pubkey mapping learned from a QR code scan.
+  ///
+  /// This allows sending DMs to a contact even before their first presence
+  /// event is received (e.g. immediately after adding them via QR).
+  void registerDidMapping(String did, String nostrPubkeyHex) {
+    _didToNostrPubkey[did] = nostrPubkeyHex;
+  }
+
   /// List of relay statuses (URL, state, latency).
   List<RelayStatus> get relayStatuses => _relayManager.statuses;
 

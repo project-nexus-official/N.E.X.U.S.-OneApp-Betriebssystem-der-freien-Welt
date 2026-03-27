@@ -100,6 +100,24 @@ Phase 2: Care-System + Sphären-Plugins
   - Aktueller Treffer: stärkeres Gold-Highlight, andere Treffer: dezentes Gold-Highlight
   - Inline-Highlighting in Chat-Bubble: Suchbegriff im Nachrichtentext hervorgehoben
   - 21 Unit-Tests in `message_search_test.dart`
+- **QR-Code Kontakt-Scanner (komplett)**:
+  - Eigener QR-Code im Profil enthält jetzt vollständiges JSON: `{type, did, pseudonym, publicKey (X25519), nostrPubkey}`
+  - Neuer `QrScannerScreen`: Vollbild-Kameraansicht mit goldenem Scan-Rahmen (abgerundete Ecken)
+  - Scanner ist erreichbar über: Profil-Screen ("Kontakt scannen" Button), Chat-FAB ("QR-Code scannen"), Kontakte-FAB ("QR-Code scannen")
+  - Nach Scan: Bottom Sheet mit Identicon, Pseudonym, DID, Buttons "Als Kontakt hinzufügen" / "Nachricht senden" / "Abbrechen"
+  - Kontakt wird direkt auf TrustLevel.contact gesetzt (Face-to-Face = volle Vertrauensstufe)
+  - X25519 Public Key und Nostr Public Key werden beim Hinzufügen gespeichert → E2E sofort möglich
+  - Duplikat-Erkennung: zeigt "Bereits in Kontakten" mit aktueller Stufe + "Zum Kontakt"-Button
+  - Windows/Linux Fallback: Kein Kamera-Scanner → manuelles Eingabefeld für QR-JSON oder bare DID
+  - `NostrTransport.registerDidMapping()`: Registriert DID↔Nostr-Pubkey direkt nach Scan → DMs sofort sendbar
+  - `Contact.nostrPubkey` neues Feld (in DB als JSON-Blob, kein Schema-Update nötig)
+  - `ContactService.addContactFromQr()`: Neu-Kontakt oder Upgrade bestehenden mit Keys
+  - `ContactService.setNostrPubkey()`: Setzt Nostr-Pubkey für bekannten Kontakt
+  - Route: `/qr-scanner` (außerhalb ShellRoute, kein Bottom-Nav)
+  - Paket: `mobile_scanner: ^6.0.0` (Android, iOS, macOS; Windows Fallback)
+  - Android: Kamera-Berechtigung in AndroidManifest eingetragen
+  - Tests: 24 Tests in `qr_scanner_test.dart`
+  - `QrContactPayload` (pure model in `lib/features/contacts/qr_contact_payload.dart`): `tryParse()` validiert type, did:key:-Prefix, Pseudonym; `toJsonString()` generiert das QR-Format
 - **Nostr Catch-Up (verpasste Nachrichten, komplett)**:
   - Letzter Nachrichten-Timestamp in SharedPreferences gespeichert
   - Beim App-Start: Nostr-Subscriptions starten ab diesem Timestamp (minus 60s Puffer)

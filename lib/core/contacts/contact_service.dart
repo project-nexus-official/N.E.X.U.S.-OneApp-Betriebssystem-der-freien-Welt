@@ -55,6 +55,61 @@ class ContactService {
     return contact;
   }
 
+  /// Adds (or updates) a contact from a QR code scan.
+  ///
+  /// Sets trust level to [TrustLevel.contact], stores the X25519 encryption
+  /// key and Nostr public key so E2E messaging is possible immediately.
+  /// If the DID is already known the trust level is upgraded if needed and
+  /// the keys are updated; the pseudonym is refreshed from the QR data.
+  Future<Contact> addContactFromQr({
+    required String did,
+    required String pseudonym,
+    String? encryptionPublicKey,
+    String? nostrPubkey,
+  }) async {
+    var contact = _findByDid(did);
+    if (contact == null) {
+      final now = DateTime.now();
+      contact = Contact(
+        did: did,
+        pseudonym: pseudonym,
+        trustLevel: TrustLevel.contact,
+        addedAt: now,
+        lastSeen: now,
+        encryptionPublicKey: encryptionPublicKey,
+        nostrPubkey: nostrPubkey,
+      );
+      await _persist(contact);
+      _contacts.add(contact);
+    } else {
+      // Upgrade trust level if currently lower than "contact".
+      if (contact.trustLevel.sortWeight < TrustLevel.contact.sortWeight) {
+        contact.trustLevel = TrustLevel.contact;
+      }
+      contact.pseudonym = pseudonym;
+      if (encryptionPublicKey != null && encryptionPublicKey.isNotEmpty) {
+        if (contact.encryptionPublicKey != null &&
+            contact.encryptionPublicKey != encryptionPublicKey) {
+          contact.previousEncryptionPublicKey = contact.encryptionPublicKey;
+        }
+        contact.encryptionPublicKey = encryptionPublicKey;
+      }
+      if (nostrPubkey != null && nostrPubkey.isNotEmpty) {
+        contact.nostrPubkey = nostrPubkey;
+      }
+      await _persist(contact);
+    }
+    return contact;
+  }
+
+  /// Sets the Nostr public key for a known contact.
+  Future<void> setNostrPubkey(String did, String nostrPubkey) async {
+    final contact = _findByDid(did);
+    if (contact == null) return;
+    contact.nostrPubkey = nostrPubkey;
+    await _persist(contact);
+  }
+
   /// Upgrades a contact from [TrustLevel.discovered] to [TrustLevel.contact]
   /// (mutual confirmation).
   Future<void> acceptContact(String did) =>

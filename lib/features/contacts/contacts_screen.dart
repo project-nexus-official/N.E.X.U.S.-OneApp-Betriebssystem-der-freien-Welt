@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:nexus_oneapp/core/contacts/contact.dart';
 import 'package:nexus_oneapp/core/contacts/contact_service.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
@@ -102,9 +103,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
               subtitle: const Text('Identität eines Kontakts scannen'),
               onTap: () {
                 Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('QR-Scanner – Kommt bald')),
-                );
+                context.push('/qr-scanner');
               },
             ),
             ListTile(

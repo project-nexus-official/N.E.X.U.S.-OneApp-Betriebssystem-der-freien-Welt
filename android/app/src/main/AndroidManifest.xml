@@ -13,6 +13,11 @@
     <!-- Voice messages: microphone -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
 
+    <!-- QR code scanner: camera -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
+
     <!-- LAN transport permissions -->
     <!-- INTERNET is needed for TCP/UDP socket operations on Android -->
     <uses-permission android:name="android.permission.INTERNET" />

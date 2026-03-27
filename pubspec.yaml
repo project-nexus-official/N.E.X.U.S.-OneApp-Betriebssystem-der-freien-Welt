@@ -65,6 +65,9 @@ dependencies:
   record: ^5.1.2
   audioplayers: ^6.1.0
 
+  # QR code scanner (Android, iOS, macOS; manual fallback on Windows/Linux)
+  mobile_scanner: ^6.0.0
+
   # Push notifications (local, no FCM)
   flutter_local_notifications: ^18.0.1
   # Background service for Nostr keepalive (Android)

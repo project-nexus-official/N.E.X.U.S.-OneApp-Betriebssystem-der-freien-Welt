@@ -78,6 +78,7 @@ class Contact {
   bool muted;    // local-only, silences notifications without blocking
   String? encryptionPublicKey; // X25519 pubkey hex (32 bytes = 64 hex chars)
   String? previousEncryptionPublicKey; // for key-change warning
+  String? nostrPubkey; // Nostr public key hex (32 bytes = 64 hex chars)
 
   Contact({
     required this.did,
@@ -91,6 +92,7 @@ class Contact {
     this.muted = false,
     this.encryptionPublicKey,
     this.previousEncryptionPublicKey,
+    this.nostrPubkey,
   });
 
   Map<String, dynamic> toJson() => {
@@ -105,6 +107,7 @@ class Contact {
         'muted': muted,
         'encryptionPublicKey': encryptionPublicKey,
         'previousEncryptionPublicKey': previousEncryptionPublicKey,
+        'nostrPubkey': nostrPubkey,
       };
 
   factory Contact.fromJson(Map<String, dynamic> json) => Contact(
@@ -122,6 +125,7 @@ class Contact {
         muted: json['muted'] as bool? ?? false,
         encryptionPublicKey: json['encryptionPublicKey'] as String?,
         previousEncryptionPublicKey: json['previousEncryptionPublicKey'] as String?,
+        nostrPubkey: json['nostrPubkey'] as String?,
       );
 
   static DateTime _parseDate(dynamic v) {

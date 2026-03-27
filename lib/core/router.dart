@@ -2,6 +2,7 @@ import 'package:go_router/go_router.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
 import 'package:nexus_oneapp/features/chat/conversations_screen.dart';
 import 'package:nexus_oneapp/features/contacts/contacts_screen.dart';
+import 'package:nexus_oneapp/features/contacts/qr_scanner_screen.dart';
 import 'package:nexus_oneapp/features/discover/discover_screen.dart';
 import 'package:nexus_oneapp/features/governance/governance_screen.dart';
 import 'package:nexus_oneapp/features/onboarding/onboarding_screen.dart';
@@ -47,6 +48,11 @@ final router = GoRouter(
     GoRoute(
       path: '/contacts',
       builder: (context, state) => const ContactsScreen(),
+    ),
+    // QR Scanner – outside ShellRoute (full-screen, no bottom nav)
+    GoRoute(
+      path: '/qr-scanner',
+      builder: (context, state) => const QrScannerScreen(),
     ),
     // Main app shell with bottom navigation
     ShellRoute(
