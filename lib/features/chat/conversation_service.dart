@@ -205,6 +205,7 @@ class ConversationService {
     if (msg == null) return '…';
     final type = msg['type'] as String? ?? 'text';
     if (type == 'image') return '📷 Foto';
+    if (type == 'voice') return '🎤 Sprachnachricht';
     final body = msg['body'] as String? ?? '';
     return body.length > 60 ? body.substring(0, 60) : body;
   }

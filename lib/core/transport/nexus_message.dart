@@ -4,7 +4,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 /// Message types in the NEXUS mesh protocol.
-enum NexusMessageType { text, channel, system, image }
+enum NexusMessageType { text, channel, system, image, voice }
 
 /// A NEXUS mesh protocol message.
 ///

@@ -61,6 +61,10 @@ dependencies:
   # Retention settings persistence
   shared_preferences: ^2.3.5
 
+  # Voice messages – recording + playback
+  record: ^5.1.2
+  audioplayers: ^6.1.0
+
   # Push notifications (local, no FCM)
   flutter_local_notifications: ^18.0.1
   # Background service for Nostr keepalive (Android)

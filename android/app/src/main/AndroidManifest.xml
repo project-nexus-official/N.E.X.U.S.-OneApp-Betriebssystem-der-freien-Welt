@@ -10,6 +10,9 @@
     <!-- BLE is optional so the app installs on devices without it (tablets, Desktop) -->
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 
+    <!-- Voice messages: microphone -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+
     <!-- LAN transport permissions -->
     <!-- INTERNET is needed for TCP/UDP socket operations on Android -->
     <uses-permission android:name="android.permission.INTERNET" />

@@ -66,6 +66,27 @@ Phase 2: Care-System + Sphären-Plugins
   - Toast wenn Originalnachricht nicht mehr verfügbar
   - Reply-Daten in metadata (reply_to_id/sender/preview/image), alle Transports
   - Verschlüsselte Antworten zeigen Klartext im Zitat
+- **Sprachnachrichten (komplett)**:
+  - Mikrofon-Button erscheint wenn Eingabefeld leer, Senden-Pfeil wenn Text vorhanden (wie WhatsApp)
+  - Gedrückt halten auf Mikrofon → Aufnahme startet (AAC 16kHz 32kbps mono auf Android, WAV auf Desktop)
+  - Pulsierender roter Punkt + Zeitanzeige während Aufnahme
+  - Nach links wischen (>80px) → Aufnahme abbrechen
+  - Loslassen → Sprachnachricht wird gesendet (max. 5 Minuten)
+  - Haptisches Feedback bei Aufnahmestart/-abbruch
+  - Mikrofon-Berechtigung wird beim ersten Mal angefragt
+  - BLE-Only Verbindungen: Sprachnachrichten deaktiviert mit Toast-Hinweis
+  - Sprachnachrichten-Bubble: Play/Pause-Button, 28-Balken-Wellenform (deterministisch aus Nachrichten-ID), Dauer, Geschwindigkeitswechsel 1×/1.5×/2×
+  - Fortschrittsanzeige während Wiedergabe (goldene Füllung der Balken)
+  - Nur eine Sprachnachricht gleichzeitig abspielbar (`VoicePlayer` Singleton)
+  - E2E-Verschlüsselung: Audio-Base64 wird mit X25519/AES-256-GCM verschlüsselt
+  - Empfangene Sprachnachrichten: Base64-Dekodierung → Temp-Datei → Wiedergabe
+  - Eigene Aufnahmen: Wiedergabe direkt aus lokalem Pfad (in metadata gespeichert)
+  - Antworten auf Sprachnachrichten: Mikrofon-Icon + "Sprachnachricht" im Zitat-Block
+  - Konversationsliste: "🎤 Sprachnachricht" als Vorschau
+  - Benachrichtigungen: "🎤 Sprachnachricht" als Preview
+  - Suche: Sprachnachrichten von In-Chat-Textsuche ausgeschlossen; in Global-Suche als "🎤 Sprachnachricht" angezeigt
+  - 32 Unit-Tests in `voice_message_test.dart`
+  - Pakete: `record: ^5.1.2`, `audioplayers: ^6.1.0`
 - **Nachrichtensuche (komplett)**:
   - Globale Suche (`MessageSearchScreen`) erreichbar über Lupen-Icon in Konversationsliste-AppBar
   - Sucht in allen Konversationen: Entschlüsselung in Dart + case-insensitiver Filter auf Klartext-Body

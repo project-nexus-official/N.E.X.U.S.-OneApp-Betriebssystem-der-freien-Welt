@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math' show min;
+import 'dart:math' show Random, min;
 
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:flutter/material.dart';
@@ -22,6 +22,8 @@ import '../contacts/contact_detail_screen.dart';
 import '../contacts/widgets/trust_badge.dart';
 import 'chat_provider.dart';
 import 'conversation_service.dart';
+import 'voice_player.dart';
+import 'voice_recorder.dart';
 
 /// Direkt-Chat-Bildschirm mit einem einzelnen Peer oder dem #mesh Kanal.
 class ConversationScreen extends StatefulWidget {
@@ -259,6 +261,30 @@ class _ConversationScreenState extends State<ConversationScreen> {
     }
   }
 
+  Future<void> _sendVoice(String filePath, int durationMs) async {
+    final reply = _replyToMessage;
+    final replyName = _replyToSenderName;
+    if (mounted) setState(() { _replyToMessage = null; _replyToSenderName = null; });
+
+    final provider = context.read<ChatProvider>();
+    try {
+      if (widget.isBroadcast) {
+        await provider.sendVoiceBroadcast(
+          filePath, durationMs,
+          replyTo: reply, replyToSenderName: replyName,
+        );
+      } else {
+        await provider.sendVoice(
+          widget.peerDid, filePath, durationMs,
+          replyTo: reply, replyToSenderName: replyName,
+        );
+      }
+      await _refreshMessages();
+    } catch (e) {
+      _showError('Senden fehlgeschlagen: $e');
+    }
+  }
+
   Future<void> _refreshMessages() async {
     final provider = context.read<ChatProvider>();
     final msgs = await provider.getMessages(_convId);
@@ -400,6 +426,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
     final ids = _messages
         .where((m) =>
             m.type != NexusMessageType.image &&
+            m.type != NexusMessageType.voice &&
             m.body.toLowerCase().contains(lower))
         .map((m) => m.id)
         .toList();
@@ -797,6 +824,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
                   onAttach: _pickAndSendImage,
                   showEmojiIcon: !_showEmojiPicker,
                   attachEnabled: !_isBleBleOnly,
+                  onSendVoice: _sendVoice,
+                  voiceEnabled: !_isBleBleOnly,
                 ),
                 // Emoji picker panel
                 if (_showEmojiPicker)
@@ -1110,12 +1139,16 @@ class _MessageBubble extends StatelessWidget {
                           '',
                   isImage:
                       message.metadata!['reply_to_image'] as bool? ?? false,
+                  isVoice:
+                      message.metadata!['reply_to_voice'] as bool? ?? false,
                   isMe: isMe,
                   onTap: onTapQuote,
                 ),
               // ── Message content ───────────────────────────────────────────
               if (message.type == NexusMessageType.image)
                 _ImageContent(message: message)
+              else if (message.type == NexusMessageType.voice)
+                _VoiceContent(message: message, isMe: isMe)
               else
                 _TextContent(
                   message: message,
@@ -1293,6 +1326,193 @@ class _BrokenImage extends StatelessWidget {
   }
 }
 
+// ── Voice message content ─────────────────────────────────────────────────────
+
+class _VoiceContent extends StatelessWidget {
+  const _VoiceContent({required this.message, required this.isMe});
+
+  final NexusMessage message;
+  final bool isMe;
+
+  static String _fmt(Duration d) {
+    final m = d.inMinutes.toString();
+    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final durationMs =
+        (message.metadata?['duration_ms'] as num?)?.toInt() ?? 0;
+
+    return ListenableBuilder(
+      listenable: VoicePlayer.instance,
+      builder: (context, _) {
+        final player = VoicePlayer.instance;
+        final isActive = player.isActiveMessage(message.id);
+        final isPlaying = player.isPlayingMessage(message.id);
+        final position = isActive ? player.position : Duration.zero;
+        final total = isActive && player.total.inMilliseconds > 0
+            ? player.total
+            : Duration(milliseconds: durationMs);
+        final speed = isActive ? player.speed : 1.0;
+        final progress = total.inMilliseconds > 0
+            ? (position.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0)
+            : 0.0;
+
+        final fgColor = isMe ? AppColors.deepBlue : AppColors.onDark;
+        final accentColor = isMe ? AppColors.deepBlue : AppColors.gold;
+        final muteColor = isMe
+            ? AppColors.deepBlue.withValues(alpha: 0.35)
+            : Colors.grey.shade600;
+
+        return Padding(
+          padding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Play / Pause button
+                  GestureDetector(
+                    onTap: () =>
+                        player.togglePlayPause(message),
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: accentColor.withValues(alpha: 0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        isPlaying ? Icons.pause : Icons.play_arrow,
+                        color: accentColor,
+                        size: 24,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  // Waveform bars
+                  SizedBox(
+                    width: 120,
+                    child: _WaveformBars(
+                      messageId: message.id,
+                      progress: progress,
+                      activeColor: accentColor,
+                      inactiveColor: muteColor,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              // Time + speed + lock icon row
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(width: 50), // align with waveform
+                  Text(
+                    isActive && isPlaying
+                        ? _fmt(position)
+                        : _fmt(Duration(milliseconds: durationMs)),
+                    style: TextStyle(fontSize: 11, color: fgColor.withValues(alpha: 0.7)),
+                  ),
+                  if (isActive) ...[
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: player.cycleSpeed,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 5, vertical: 1),
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                              color: accentColor.withValues(alpha: 0.5),
+                              width: 0.8),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          speed == speed.truncate()
+                              ? '${speed.toInt()}×'
+                              : '${speed}×',
+                          style: TextStyle(
+                              fontSize: 10,
+                              color: accentColor),
+                        ),
+                      ),
+                    ),
+                  ],
+                  if (message.metadata?['encrypted'] == true) ...[
+                    const SizedBox(width: 6),
+                    Icon(Icons.lock,
+                        size: 10,
+                        color: fgColor.withValues(alpha: 0.6)),
+                  ],
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ── Waveform bars ─────────────────────────────────────────────────────────────
+
+class _WaveformBars extends StatelessWidget {
+  const _WaveformBars({
+    required this.messageId,
+    required this.progress,
+    required this.activeColor,
+    required this.inactiveColor,
+  });
+
+  final String messageId;
+  final double progress;
+  final Color activeColor;
+  final Color inactiveColor;
+
+  static const _barCount = 28;
+
+  List<double> _heights() {
+    // Deterministic pseudo-random heights derived from message ID.
+    final seed = messageId.codeUnits
+        .fold<int>(0, (acc, b) => acc ^ (b * 2654435761) & 0x7fffffff);
+    final rng = Random(seed);
+    return List.generate(
+        _barCount, (_) => 0.15 + rng.nextDouble() * 0.85);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final heights = _heights();
+    return SizedBox(
+      height: 28,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: List.generate(_barCount, (i) {
+          final filled = progress > 0 && (i / _barCount) <= progress;
+          return Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 0.8),
+              child: FractionallySizedBox(
+                heightFactor: heights[i],
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: filled ? activeColor : inactiveColor,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+}
+
 // ── Fullscreen image viewer ───────────────────────────────────────────────────
 
 class _FullscreenImageScreen extends StatelessWidget {
@@ -1322,7 +1542,7 @@ class _FullscreenImageScreen extends StatelessWidget {
 
 // ── Input bar ─────────────────────────────────────────────────────────────────
 
-class _InputBar extends StatelessWidget {
+class _InputBar extends StatefulWidget {
   const _InputBar({
     required this.ctrl,
     required this.focus,
@@ -1331,6 +1551,8 @@ class _InputBar extends StatelessWidget {
     required this.onAttach,
     required this.showEmojiIcon,
     required this.attachEnabled,
+    required this.onSendVoice,
+    required this.voiceEnabled,
   });
 
   final TextEditingController ctrl;
@@ -1340,6 +1562,143 @@ class _InputBar extends StatelessWidget {
   final VoidCallback onAttach;
   final bool showEmojiIcon;
   final bool attachEnabled;
+  final Future<void> Function(String filePath, int durationMs) onSendVoice;
+  final bool voiceEnabled;
+
+  @override
+  State<_InputBar> createState() => _InputBarState();
+}
+
+class _InputBarState extends State<_InputBar> with TickerProviderStateMixin {
+  final _recorder = VoiceRecorder();
+
+  bool _isRecording = false;
+  Duration _recordDuration = Duration.zero;
+  double _dragOffset = 0;
+  Timer? _durationTimer;
+
+  late final AnimationController _pulseCtrl;
+  late final Animation<double> _pulseAnim;
+
+  bool get _hasText => widget.ctrl.text.isNotEmpty;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.ctrl.addListener(_onTextChanged);
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    );
+    _pulseAnim = Tween<double>(begin: 0.4, end: 1.0).animate(
+      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void didUpdateWidget(_InputBar old) {
+    super.didUpdateWidget(old);
+    if (old.ctrl != widget.ctrl) {
+      old.ctrl.removeListener(_onTextChanged);
+      widget.ctrl.addListener(_onTextChanged);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.ctrl.removeListener(_onTextChanged);
+    _pulseCtrl.dispose();
+    _durationTimer?.cancel();
+    _recorder.dispose();
+    super.dispose();
+  }
+
+  void _onTextChanged() => setState(() {});
+
+  // ── Recording lifecycle ──────────────────────────────────────────────────
+
+  Future<void> _startRecording() async {
+    if (!widget.voiceEnabled) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Sprachnachrichten nur über LAN/Internet verfügbar'),
+        ),
+      );
+      return;
+    }
+
+    final hasPerm = await _recorder.hasPermission();
+    if (!hasPerm) {
+      final granted = await _recorder.requestPermission();
+      if (!granted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Mikrofon-Berechtigung benötigt')),
+          );
+        }
+        return;
+      }
+    }
+
+    final path = await _recorder.start();
+    if (path == null) return;
+
+    HapticFeedback.lightImpact();
+
+    setState(() {
+      _isRecording = true;
+      _recordDuration = Duration.zero;
+      _dragOffset = 0;
+    });
+
+    _pulseCtrl.repeat(reverse: true);
+
+    _durationTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() => _recordDuration += const Duration(seconds: 1));
+      // Auto-send after 5 minutes
+      if (_recordDuration.inSeconds >= 300) _stopAndSend();
+    });
+  }
+
+  Future<void> _stopAndSend() async {
+    _durationTimer?.cancel();
+    _pulseCtrl.stop();
+
+    final path = await _recorder.stop();
+    final durationMs = _recordDuration.inMilliseconds;
+
+    setState(() {
+      _isRecording = false;
+      _dragOffset = 0;
+    });
+
+    if (path != null && durationMs > 0) {
+      await widget.onSendVoice(path, durationMs);
+    }
+  }
+
+  Future<void> _cancelRecording() async {
+    if (!_isRecording) return;
+    _durationTimer?.cancel();
+    _pulseCtrl.stop();
+    await _recorder.cancel();
+    if (mounted) {
+      setState(() {
+        _isRecording = false;
+        _dragOffset = 0;
+      });
+    }
+    HapticFeedback.lightImpact();
+  }
+
+  // ── UI ───────────────────────────────────────────────────────────────────
+
+  static String _formatDuration(Duration d) {
+    final m = d.inMinutes.toString();
+    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1349,71 +1708,168 @@ class _InputBar extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         child: Row(
           children: [
-            // Emoji toggle button
-            IconButton(
-              onPressed: onEmojiToggle,
-              icon: Icon(
-                showEmojiIcon ? Icons.emoji_emotions_outlined : Icons.keyboard,
-              ),
-              color: AppColors.gold,
-              iconSize: 22,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 36),
-            ),
-            // Text field
+            // Left section: recording indicator OR (emoji + text field)
             Expanded(
-              child: TextField(
-                controller: ctrl,
-                focusNode: focus,
-                textCapitalization: TextCapitalization.sentences,
-                onTap: () {
-                  // Dismiss emoji picker when user taps the text field
-                  if (!showEmojiIcon) {
-                    // showEmojiIcon == false means picker is open
-                    // We do nothing here; user manages via toggle button
+              child: _isRecording
+                  ? _buildRecordingRow()
+                  : Row(
+                      children: [
+                        IconButton(
+                          onPressed: widget.onEmojiToggle,
+                          icon: Icon(widget.showEmojiIcon
+                              ? Icons.emoji_emotions_outlined
+                              : Icons.keyboard),
+                          color: AppColors.gold,
+                          iconSize: 22,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 36),
+                        ),
+                        Expanded(
+                          child: TextField(
+                            controller: widget.ctrl,
+                            focusNode: widget.focus,
+                            textCapitalization: TextCapitalization.sentences,
+                            decoration: InputDecoration(
+                              hintText: 'Nachricht schreiben…',
+                              hintStyle:
+                                  const TextStyle(color: Colors.grey),
+                              filled: true,
+                              fillColor: AppColors.surfaceVariant,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(24),
+                                borderSide: BorderSide.none,
+                              ),
+                              contentPadding:
+                                  const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 10,
+                              ),
+                            ),
+                            onSubmitted: (_) => widget.onSend(),
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+            // Attachment button (hidden while recording)
+            if (!_isRecording) ...[
+              IconButton(
+                onPressed: widget.attachEnabled ? widget.onAttach : null,
+                icon: const Icon(Icons.attach_file),
+                color:
+                    widget.attachEnabled ? AppColors.gold : Colors.grey,
+                iconSize: 22,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 36),
+                tooltip: widget.attachEnabled
+                    ? 'Bild senden'
+                    : 'Nur über LAN/Internet verfügbar',
+              ),
+              const SizedBox(width: 4),
+            ],
+            // Right button: send (has text) OR mic (no text / recording)
+            if (_hasText && !_isRecording)
+              IconButton(
+                onPressed: widget.onSend,
+                icon: const Icon(Icons.send_rounded),
+                color: AppColors.gold,
+                style: IconButton.styleFrom(
+                  backgroundColor: AppColors.surfaceVariant,
+                ),
+              )
+            else
+              GestureDetector(
+                onLongPressStart: (_) => _startRecording(),
+                onLongPressMoveUpdate: (d) {
+                  setState(() => _dragOffset = d.offsetFromOrigin.dx);
+                },
+                onLongPressEnd: (_) {
+                  if (_isRecording) {
+                    if (_dragOffset < -80) {
+                      _cancelRecording();
+                    } else {
+                      _stopAndSend();
+                    }
                   }
                 },
-                decoration: InputDecoration(
-                  hintText: 'Nachricht schreiben…',
-                  hintStyle: const TextStyle(color: Colors.grey),
-                  filled: true,
-                  fillColor: AppColors.surfaceVariant,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide.none,
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
+                onLongPressCancel: _cancelRecording,
+                child: AnimatedBuilder(
+                  animation: _pulseAnim,
+                  builder: (context, _) {
+                    return Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: _isRecording
+                            ? Colors.redAccent.withValues(alpha: 0.15)
+                            : AppColors.surfaceVariant,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.mic,
+                        color: _isRecording
+                            ? Colors.redAccent
+                                .withValues(alpha: _pulseAnim.value)
+                            : AppColors.gold,
+                        size: 22,
+                      ),
+                    );
+                  },
                 ),
-                onSubmitted: (_) => onSend(),
               ),
-            ),
-            // Attachment button
-            IconButton(
-              onPressed: attachEnabled ? onAttach : null,
-              icon: const Icon(Icons.attach_file),
-              color: attachEnabled ? AppColors.gold : Colors.grey,
-              iconSize: 22,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 36),
-              tooltip: attachEnabled
-                  ? 'Bild senden'
-                  : 'Nur über LAN/Internet verfügbar',
-            ),
-            const SizedBox(width: 4),
-            // Send button
-            IconButton(
-              onPressed: onSend,
-              icon: const Icon(Icons.send_rounded),
-              color: AppColors.gold,
-              style: IconButton.styleFrom(
-                backgroundColor: AppColors.surfaceVariant,
-              ),
-            ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildRecordingRow() {
+    final isCancel = _dragOffset < -80;
+    return Container(
+      height: 44,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceVariant,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Row(
+        children: [
+          // Pulsing red dot
+          AnimatedBuilder(
+            animation: _pulseAnim,
+            builder: (context, _) => Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color:
+                    Colors.redAccent.withValues(alpha: _pulseAnim.value),
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            _formatDuration(_recordDuration),
+            style: const TextStyle(
+              color: Colors.redAccent,
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Text(
+              isCancel
+                  ? '← Abbrechen'
+                  : '← Wischen zum Abbrechen',
+              style: TextStyle(
+                color: isCancel ? Colors.redAccent : Colors.grey,
+                fontSize: 13,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1429,12 +1885,14 @@ class _ReplyQuoteBlock extends StatelessWidget {
     required this.isImage,
     required this.isMe,
     required this.onTap,
+    this.isVoice = false,
   });
 
   final String replyToId;
   final String senderName;
   final String preview;
   final bool isImage;
+  final bool isVoice;
   final bool isMe;
   final void Function(String) onTap;
 
@@ -1457,13 +1915,17 @@ class _ReplyQuoteBlock extends StatelessWidget {
             // Gold accent line
             Container(
               width: 3,
-              height: isImage ? 44 : 36,
+              height: (isImage || isVoice) ? 44 : 36,
               decoration: BoxDecoration(
                 color: AppColors.gold,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
             const SizedBox(width: 8),
+            if (isVoice) ...[
+              const Icon(Icons.mic, color: AppColors.gold, size: 22),
+              const SizedBox(width: 8),
+            ],
             if (isImage) ...[
               Container(
                 width: 36,
@@ -1526,9 +1988,12 @@ class _ReplyBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isImage = message.type == NexusMessageType.image;
+    final isVoice = message.type == NexusMessageType.voice;
     final preview = isImage
         ? 'Foto'
-        : message.body.substring(0, min(message.body.length, 80));
+        : isVoice
+            ? 'Sprachnachricht'
+            : message.body.substring(0, min(message.body.length, 80));
 
     return Container(
       color: AppColors.surfaceVariant,
@@ -1542,7 +2007,11 @@ class _ReplyBanner extends StatelessWidget {
             color: AppColors.gold,
           ),
           const SizedBox(width: 10),
-          // Thumbnail if image
+          // Thumbnail if image or mic icon if voice
+          if (isVoice) ...[
+            const Icon(Icons.mic, color: AppColors.gold, size: 20),
+            const SizedBox(width: 8),
+          ],
           if (isImage) ...[
             Container(
               width: 36,

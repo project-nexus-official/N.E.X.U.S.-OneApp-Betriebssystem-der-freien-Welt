@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -439,11 +440,13 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
             (processedMsg.fromDid.length > 12
                 ? processedMsg.fromDid.substring(processedMsg.fromDid.length - 12)
                 : processedMsg.fromDid);
-        final preview = processedMsg.type == NexusMessageType.image
-            ? '\u{1F4F7} Foto'
-            : (processedMsg.body.length > 100
-                ? '${processedMsg.body.substring(0, 100)}…'
-                : processedMsg.body);
+        final preview = switch (processedMsg.type) {
+          NexusMessageType.image => '\u{1F4F7} Foto',
+          NexusMessageType.voice => '\u{1F3A4} Sprachnachricht',
+          _ => processedMsg.body.length > 100
+              ? '${processedMsg.body.substring(0, 100)}…'
+              : processedMsg.body,
+        };
 
         if (_appInForeground) {
           // In-app banner
@@ -510,12 +513,17 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     Map<String, dynamic>? replyMeta;
     if (replyTo != null) {
       final isImg = replyTo.type == NexusMessageType.image;
+      final isVoice = replyTo.type == NexusMessageType.voice;
       replyMeta = {
         'reply_to_id': replyTo.id,
         'reply_to_sender': replyToSenderName ?? replyTo.fromDid,
-        'reply_to_preview':
-            isImg ? 'Foto' : replyTo.body.substring(0, replyTo.body.length.clamp(0, 100)),
+        'reply_to_preview': isImg
+            ? 'Foto'
+            : isVoice
+                ? 'Sprachnachricht'
+                : replyTo.body.substring(0, replyTo.body.length.clamp(0, 100)),
         if (isImg) 'reply_to_image': true,
+        if (isVoice) 'reply_to_voice': true,
       };
     }
 
@@ -590,12 +598,17 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     Map<String, dynamic>? replyMeta;
     if (replyTo != null) {
       final isImg = replyTo.type == NexusMessageType.image;
+      final isVoice = replyTo.type == NexusMessageType.voice;
       replyMeta = {
         'reply_to_id': replyTo.id,
         'reply_to_sender': replyToSenderName ?? replyTo.fromDid,
-        'reply_to_preview':
-            isImg ? 'Foto' : replyTo.body.substring(0, replyTo.body.length.clamp(0, 100)),
+        'reply_to_preview': isImg
+            ? 'Foto'
+            : isVoice
+                ? 'Sprachnachricht'
+                : replyTo.body.substring(0, replyTo.body.length.clamp(0, 100)),
         if (isImg) 'reply_to_image': true,
+        if (isVoice) 'reply_to_voice': true,
       };
     }
 
@@ -666,6 +679,152 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     _conversationCache.putIfAbsent(convId, () => []);
     _conversationCache[convId]!.add(msg);
     await _persistMessage(convId, msg);
+    ConversationService.instance.notifyUpdate();
+
+    notifyListeners();
+  }
+
+  /// Sends a voice message to [recipientDid].
+  ///
+  /// [filePath] – local path to the recorded audio file.
+  /// [durationMs] – recording length in milliseconds (shown in the bubble).
+  ///
+  /// The audio file is read as bytes, base64-encoded, and encrypted with the
+  /// same X25519/AES-256-GCM scheme used for text messages when a key is known.
+  Future<void> sendVoice(
+    String recipientDid,
+    String filePath,
+    int durationMs, {
+    NexusMessage? replyTo,
+    String? replyToSenderName,
+  }) async {
+    final myDid = IdentityService.instance.currentIdentity?.did ?? 'unknown';
+    final contact = ContactService.instance.findByDid(recipientDid);
+    final recipientEncKey = contact?.encryptionPublicKey;
+    final myEncKeyHex = EncryptionKeys.instance.publicKeyHex;
+
+    final file = File(filePath);
+    if (!file.existsSync()) return;
+    final Uint8List audioBytes = await file.readAsBytes();
+    final audioBase64 = base64Encode(audioBytes);
+
+    Map<String, dynamic>? replyMeta;
+    if (replyTo != null) {
+      final isImg = replyTo.type == NexusMessageType.image;
+      final isVoice = replyTo.type == NexusMessageType.voice;
+      replyMeta = {
+        'reply_to_id': replyTo.id,
+        'reply_to_sender': replyToSenderName ?? replyTo.fromDid,
+        'reply_to_preview': isImg ? 'Foto' : isVoice ? 'Sprachnachricht' : replyTo.body.substring(0, replyTo.body.length.clamp(0, 100)),
+        if (isImg) 'reply_to_image': true,
+        if (isVoice) 'reply_to_voice': true,
+      };
+    }
+
+    final baseMeta = <String, dynamic>{
+      'duration_ms': durationMs,
+      'audio_local_path': filePath,
+      if (myEncKeyHex != null) 'enc_key': myEncKeyHex,
+      if (recipientEncKey != null) 'encrypted': true,
+      ...?replyMeta,
+    };
+
+    final localMsg = NexusMessage.create(
+      fromDid: myDid,
+      toDid: recipientDid,
+      type: NexusMessageType.voice,
+      body: audioBase64,
+      metadata: baseMeta,
+    );
+
+    NexusMessage transportMsg = localMsg;
+    if (recipientEncKey != null) {
+      final encryptedBody = await MessageEncryption.encrypt(
+        audioBase64,
+        senderKeyPair: EncryptionKeys.instance.keyPair,
+        recipientPublicKeyBytes: EncryptionKeys.hexToBytes(recipientEncKey),
+      );
+      if (encryptedBody != null) {
+        transportMsg = NexusMessage(
+          id: localMsg.id,
+          fromDid: localMsg.fromDid,
+          toDid: localMsg.toDid,
+          type: NexusMessageType.voice,
+          body: encryptedBody,
+          timestamp: localMsg.timestamp,
+          ttlHours: localMsg.ttlHours,
+          hopCount: localMsg.hopCount,
+          metadata: {
+            'duration_ms': durationMs,
+            if (myEncKeyHex != null) 'enc_key': myEncKeyHex,
+            'encrypted': true,
+            ...?replyMeta,
+          },
+        );
+      }
+    }
+
+    await _manager.sendMessage(transportMsg, recipientDid: recipientDid);
+
+    final convId = _conversationId(recipientDid, myDid);
+    _conversationCache.putIfAbsent(convId, () => []);
+    _conversationCache[convId]!.add(localMsg);
+    await _persistMessage(convId, localMsg);
+    ConversationService.instance.notifyUpdate();
+
+    notifyListeners();
+  }
+
+  /// Sends a voice broadcast to the #mesh channel (no E2E encryption).
+  Future<void> sendVoiceBroadcast(
+    String filePath,
+    int durationMs, {
+    NexusMessage? replyTo,
+    String? replyToSenderName,
+  }) async {
+    final myDid = IdentityService.instance.currentIdentity?.did ?? 'unknown';
+
+    final file = File(filePath);
+    if (!file.existsSync()) return;
+    final Uint8List audioBytes = await file.readAsBytes();
+    final audioBase64 = base64Encode(audioBytes);
+
+    Map<String, dynamic>? replyMeta;
+    if (replyTo != null) {
+      final isVoice = replyTo.type == NexusMessageType.voice;
+      replyMeta = {
+        'reply_to_id': replyTo.id,
+        'reply_to_sender': replyToSenderName ?? replyTo.fromDid,
+        'reply_to_preview': replyTo.type == NexusMessageType.image
+            ? 'Foto'
+            : isVoice
+                ? 'Sprachnachricht'
+                : replyTo.body.substring(0, replyTo.body.length.clamp(0, 100)),
+        if (replyTo.type == NexusMessageType.image) 'reply_to_image': true,
+        if (isVoice) 'reply_to_voice': true,
+      };
+    }
+
+    final msg = NexusMessage.create(
+      fromDid: myDid,
+      toDid: NexusMessage.broadcastDid,
+      type: NexusMessageType.voice,
+      body: audioBase64,
+      channel: '#mesh',
+      metadata: {
+        'duration_ms': durationMs,
+        'audio_local_path': filePath,
+        if (EncryptionKeys.instance.publicKeyHex != null)
+          'enc_key': EncryptionKeys.instance.publicKeyHex!,
+        ...?replyMeta,
+      },
+    );
+
+    await _manager.sendMessage(msg);
+
+    _conversationCache.putIfAbsent(NexusMessage.broadcastDid, () => []);
+    _conversationCache[NexusMessage.broadcastDid]!.add(msg);
+    await _persistMessage(NexusMessage.broadcastDid, msg);
     ConversationService.instance.notifyUpdate();
 
     notifyListeners();

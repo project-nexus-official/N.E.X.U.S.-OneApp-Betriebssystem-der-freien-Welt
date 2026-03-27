@@ -268,7 +268,9 @@ class _SearchResultTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final body = result['body'] as String? ?? '';
+    final type = result['type'] as String? ?? 'text';
+    final isVoice = type == 'voice';
+    final body = isVoice ? '🎤 Sprachnachricht' : (result['body'] as String? ?? '');
     final tsMs = result['ts'] as int? ?? 0;
     final dt = DateTime.fromMillisecondsSinceEpoch(tsMs).toLocal();
     final timeStr = _formatDateTime(dt);
