@@ -313,6 +313,51 @@ class PodDatabase {
     );
   }
 
+  /// Searches across all stored messages by decrypting each row and
+  /// checking if [query] appears in the plaintext body (case-insensitive).
+  ///
+  /// Image messages are skipped. Returns up to [limit] results starting at
+  /// [offset], ordered newest-first.
+  Future<List<Map<String, dynamic>>> searchMessages(
+    String query, {
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    if (query.isEmpty) return [];
+
+    final rows = await _database.query(
+      'pod_messages',
+      orderBy: 'ts DESC',
+    );
+
+    final results = <Map<String, dynamic>>[];
+    final lower = query.toLowerCase();
+    int skipped = 0;
+
+    for (final row in rows) {
+      try {
+        final plain = await PodEncryption.decrypt(row['enc'] as String, _key);
+        final data = jsonDecode(plain) as Map<String, dynamic>;
+        if (data['type'] == 'image') continue;
+        final body = (data['body'] as String? ?? '').toLowerCase();
+        if (!body.contains(lower)) continue;
+        if (skipped < offset) {
+          skipped++;
+          continue;
+        }
+        results.add({
+          'conversation_id': row['conversation_id'],
+          'sender_did': row['sender_did'],
+          'ts': row['ts'],
+          ...data,
+        });
+        if (results.length >= limit) break;
+      } catch (_) {}
+    }
+
+    return results;
+  }
+
   /// Returns the total number of stored messages.
   Future<int> getTotalMessageCount() async {
     final rows = await _database.rawQuery('SELECT COUNT(*) AS cnt FROM pod_messages');

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' show min;
 
@@ -16,6 +17,7 @@ import '../../core/transport/nexus_peer.dart';
 import '../../core/identity/identity_service.dart';
 import '../../services/notification_service.dart';
 import '../../shared/theme/app_theme.dart';
+import '../../shared/widgets/highlighted_text.dart';
 import '../contacts/contact_detail_screen.dart';
 import '../contacts/widgets/trust_badge.dart';
 import 'chat_provider.dart';
@@ -29,6 +31,7 @@ class ConversationScreen extends StatefulWidget {
     required this.peerPseudonym,
     this.isBroadcast = false,
     this.peer,
+    this.scrollToMessageId,
   });
 
   final String peerDid;
@@ -39,6 +42,10 @@ class ConversationScreen extends StatefulWidget {
 
   /// Currently-online peer, if available (used for transport info).
   final NexusPeer? peer;
+
+  /// When set (e.g. from global search), scroll to and highlight this message
+  /// after loading the conversation.
+  final String? scrollToMessageId;
 
   @override
   State<ConversationScreen> createState() => _ConversationScreenState();
@@ -63,6 +70,17 @@ class _ConversationScreenState extends State<ConversationScreen> {
   // ── Highlight state (for scroll-to-original) ────────────────────────────────
   final ValueNotifier<String?> _highlightedId = ValueNotifier(null);
   final Map<String, GlobalKey> _messageKeys = {};
+
+  // ── In-conversation search state ─────────────────────────────────────────────
+  bool _searchMode = false;
+  final _searchCtrl = TextEditingController();
+  Timer? _searchDebounce;
+  List<String> _searchMatchIds = []; // message IDs that match current query
+  int _searchCursor = 0;             // index into _searchMatchIds (current match)
+  /// Notifier holding the active set of search matches + current match ID.
+  /// Used by _MessageList to highlight without rebuilding the whole list.
+  final ValueNotifier<_SearchHighlight> _searchHighlight =
+      ValueNotifier(const _SearchHighlight());
 
   // Stored reference to ChatProvider so we can safely call it in dispose().
   ChatProvider? _chatProvider;
@@ -108,6 +126,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
     _scrollCtrl.dispose();
     _textFocus.dispose();
     _highlightedId.dispose();
+    _searchCtrl.dispose();
+    _searchDebounce?.cancel();
+    _searchHighlight.dispose();
     super.dispose();
   }
 
@@ -127,8 +148,34 @@ class _ConversationScreenState extends State<ConversationScreen> {
         _messages = List.from(msgs);
         _loading = false;
       });
-      _scrollToBottom();
+      if (widget.scrollToMessageId != null) {
+        _scrollToMessageFromExternal(widget.scrollToMessageId!);
+      } else {
+        _scrollToBottom();
+      }
     }
+  }
+
+  /// Scrolls to and highlights a message that was selected from global search.
+  /// Uses a two-step approach: first jump to approximate position so
+  /// ListView.builder renders the item, then use ensureVisible.
+  void _scrollToMessageFromExternal(String messageId) {
+    final idx = _messages.indexWhere((m) => m.id == messageId);
+    if (idx == -1) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollCtrl.hasClients) return;
+      // Jump to approximate scroll position so the item is rendered.
+      final total = _scrollCtrl.position.maxScrollExtent;
+      if (_messages.isNotEmpty) {
+        final approx = (idx / _messages.length * total).clamp(0.0, total);
+        _scrollCtrl.jumpTo(approx);
+      }
+      // Then ensure visible + gold flash.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToMessage(messageId);
+      });
+    });
   }
 
   void _scrollToBottom() {
@@ -311,6 +358,110 @@ class _ConversationScreenState extends State<ConversationScreen> {
     );
   }
 
+  // ── In-conversation search ─────────────────────────────────────────────────
+
+  void _startSearch() {
+    setState(() {
+      _searchMode = true;
+      _searchMatchIds = [];
+      _searchCursor = 0;
+    });
+    _searchHighlight.value = const _SearchHighlight();
+  }
+
+  void _stopSearch() {
+    setState(() {
+      _searchMode = false;
+      _searchMatchIds = [];
+      _searchCursor = 0;
+    });
+    _searchCtrl.clear();
+    _searchDebounce?.cancel();
+    _searchHighlight.value = const _SearchHighlight();
+  }
+
+  void _onSearchChanged(String value) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+      _runSearch(value.trim());
+    });
+  }
+
+  void _runSearch(String query) {
+    if (query.isEmpty) {
+      setState(() {
+        _searchMatchIds = [];
+        _searchCursor = 0;
+      });
+      _searchHighlight.value = const _SearchHighlight();
+      return;
+    }
+    final lower = query.toLowerCase();
+    final ids = _messages
+        .where((m) =>
+            m.type != NexusMessageType.image &&
+            m.body.toLowerCase().contains(lower))
+        .map((m) => m.id)
+        .toList();
+    // Start at the newest match (last in list).
+    final cursor = ids.isEmpty ? 0 : ids.length - 1;
+    setState(() {
+      _searchMatchIds = ids;
+      _searchCursor = cursor;
+    });
+    _updateSearchHighlight(ids, cursor);
+    if (ids.isNotEmpty) _scrollToSearchMatch(cursor);
+  }
+
+  void _updateSearchHighlight(List<String> ids, int cursor) {
+    _searchHighlight.value = _SearchHighlight(
+      matchIds: ids.toSet(),
+      currentId: ids.isEmpty ? null : ids[cursor],
+    );
+  }
+
+  void _nextMatch() {
+    if (_searchMatchIds.isEmpty) return;
+    final next = (_searchCursor + 1) % _searchMatchIds.length;
+    setState(() => _searchCursor = next);
+    _updateSearchHighlight(_searchMatchIds, next);
+    _scrollToSearchMatch(next);
+  }
+
+  void _prevMatch() {
+    if (_searchMatchIds.isEmpty) return;
+    final prev = (_searchCursor - 1 + _searchMatchIds.length) % _searchMatchIds.length;
+    setState(() => _searchCursor = prev);
+    _updateSearchHighlight(_searchMatchIds, prev);
+    _scrollToSearchMatch(prev);
+  }
+
+  void _scrollToSearchMatch(int cursor) {
+    if (_searchMatchIds.isEmpty) return;
+    final msgId = _searchMatchIds[cursor];
+    final idx = _messages.indexWhere((m) => m.id == msgId);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollCtrl.hasClients) return;
+      if (idx != -1 && _messages.isNotEmpty) {
+        final total = _scrollCtrl.position.maxScrollExtent;
+        final approx = (idx / _messages.length * total).clamp(0.0, total);
+        _scrollCtrl.jumpTo(approx);
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final key = _messageKeys[msgId];
+        if (key?.currentContext != null) {
+          Scrollable.ensureVisible(
+            key!.currentContext!,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            alignment: 0.5,
+          );
+        }
+      });
+    });
+  }
+
   Future<void> _loadRetention() async {
     final period =
         await RetentionService.instance.getForConversation(_convId);
@@ -456,66 +607,125 @@ class _ConversationScreenState extends State<ConversationScreen> {
         });
 
         return PopScope(
-          canPop: !_showEmojiPicker,
+          canPop: !_showEmojiPicker && !_searchMode,
           onPopInvokedWithResult: (didPop, _) {
-            if (!didPop && _showEmojiPicker) {
-              setState(() => _showEmojiPicker = false);
+            if (!didPop) {
+              if (_showEmojiPicker) {
+                setState(() => _showEmojiPicker = false);
+              } else if (_searchMode) {
+                _stopSearch();
+              }
             }
           },
           child: Scaffold(
             appBar: AppBar(
-              title: GestureDetector(
-                onTap: widget.isBroadcast
-                    ? null
-                    : () => _openContactDetail(context),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          widget.isBroadcast ? '#mesh' : widget.peerPseudonym,
-                        ),
-                        if (!widget.isBroadcast) ...[
-                          const SizedBox(width: 8),
-                          _HeaderTrustBadge(peerDid: widget.peerDid),
+              automaticallyImplyLeading: !_searchMode,
+              leading: _searchMode
+                  ? IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: _stopSearch,
+                    )
+                  : null,
+              title: _searchMode
+                  ? TextField(
+                      controller: _searchCtrl,
+                      autofocus: true,
+                      onChanged: _onSearchChanged,
+                      style: const TextStyle(color: AppColors.onDark),
+                      decoration: const InputDecoration(
+                        hintText: 'Im Chat suchen…',
+                        hintStyle: TextStyle(color: Colors.grey),
+                        border: InputBorder.none,
+                      ),
+                    )
+                  : GestureDetector(
+                      onTap: widget.isBroadcast
+                          ? null
+                          : () => _openContactDetail(context),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  widget.isBroadcast
+                                      ? '#mesh'
+                                      : widget.peerPseudonym,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (!widget.isBroadcast) ...[
+                                const SizedBox(width: 8),
+                                _HeaderTrustBadge(peerDid: widget.peerDid),
+                              ],
+                            ],
+                          ),
+                          if (widget.peer != null)
+                            Text(
+                              widget.peer!.transportType.name.toUpperCase(),
+                              style: const TextStyle(
+                                  fontSize: 11, color: AppColors.gold),
+                            ),
+                          if (widget.isBroadcast)
+                            const Text(
+                              'Broadcast-Kanal',
+                              style:
+                                  TextStyle(fontSize: 11, color: AppColors.gold),
+                            ),
                         ],
+                      ),
+                    ),
+              actions: _searchMode
+                  ? [
+                      if (_searchMatchIds.isNotEmpty) ...[
+                        Center(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: Text(
+                              '${_searchCursor + 1}/${_searchMatchIds.length}',
+                              style: const TextStyle(
+                                  color: Colors.grey, fontSize: 13),
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.keyboard_arrow_up),
+                          tooltip: 'Vorheriger Treffer',
+                          onPressed: _prevMatch,
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.keyboard_arrow_down),
+                          tooltip: 'Nächster Treffer',
+                          onPressed: _nextMatch,
+                        ),
                       ],
-                    ),
-                    if (widget.peer != null)
-                      Text(
-                        widget.peer!.transportType.name.toUpperCase(),
-                        style: const TextStyle(
-                            fontSize: 11, color: AppColors.gold),
+                    ]
+                  : [
+                      IconButton(
+                        icon: const Icon(Icons.search),
+                        tooltip: 'Im Chat suchen',
+                        onPressed: _startSearch,
                       ),
-                    if (widget.isBroadcast)
-                      const Text(
-                        'Broadcast-Kanal',
-                        style: TextStyle(fontSize: 11, color: AppColors.gold),
+                      if (widget.peer != null)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: _ConnectionIndicator(peer: widget.peer!),
+                        ),
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert),
+                        onSelected: (value) {
+                          if (value == 'retention') _showRetentionSheet();
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                            value: 'retention',
+                            child: Text('Aufbewahrung'),
+                          ),
+                        ],
                       ),
-                  ],
-                ),
-              ),
-              actions: [
-                if (widget.peer != null)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 4),
-                    child: _ConnectionIndicator(peer: widget.peer!),
-                  ),
-                PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_vert),
-                  onSelected: (value) {
-                    if (value == 'retention') _showRetentionSheet();
-                  },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(
-                      value: 'retention',
-                      child: Text('Aufbewahrung'),
-                    ),
-                  ],
-                ),
-              ],
+                    ],
             ),
             body: Column(
               children: [
@@ -550,6 +760,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
                               onTapQuote: _scrollToMessage,
                               highlightedId: _highlightedId,
                               messageKeys: _messageKeys,
+                              searchHighlight: _searchHighlight,
+                              searchQuery: _searchCtrl.text.trim(),
                             ),
                       // Scroll-to-bottom FAB
                       if (_showScrollDown)
@@ -645,6 +857,8 @@ class _MessageList extends StatelessWidget {
     required this.onTapQuote,
     required this.highlightedId,
     required this.messageKeys,
+    required this.searchHighlight,
+    required this.searchQuery,
   });
 
   final List<NexusMessage> messages;
@@ -655,6 +869,8 @@ class _MessageList extends StatelessWidget {
   final void Function(String) onTapQuote;
   final ValueNotifier<String?> highlightedId;
   final Map<String, GlobalKey> messageKeys;
+  final ValueNotifier<_SearchHighlight> searchHighlight;
+  final String searchQuery;
 
   @override
   Widget build(BuildContext context) {
@@ -679,26 +895,37 @@ class _MessageList extends StatelessWidget {
         final isMe = msg.fromDid == myDid;
         // Assign a stable GlobalKey for scroll-to support
         messageKeys.putIfAbsent(msg.id, () => GlobalKey());
-        return ValueListenableBuilder<String?>(
-          valueListenable: highlightedId,
-          builder: (context, hlId, child) {
+        final bubble = _SwipeableMessageBubble(
+          key: messageKeys[msg.id],
+          message: msg,
+          isMe: isMe,
+          showSender: isBroadcast && !isMe,
+          onLongPress: () => onLongPress(msg),
+          onSwipeReply: () => onSwipeReply(msg),
+          onTapQuote: onTapQuote,
+          highlightQuery: searchQuery,
+        );
+        return ListenableBuilder(
+          listenable: Listenable.merge([highlightedId, searchHighlight]),
+          builder: (context, _) {
+            final hlId = highlightedId.value;
+            final sh = searchHighlight.value;
+            final Color bg;
+            if (hlId == msg.id) {
+              bg = AppColors.gold.withValues(alpha: 0.18);
+            } else if (sh.currentId == msg.id) {
+              bg = AppColors.gold.withValues(alpha: 0.22);
+            } else if (sh.matchIds.contains(msg.id)) {
+              bg = AppColors.gold.withValues(alpha: 0.08);
+            } else {
+              bg = Colors.transparent;
+            }
             return AnimatedContainer(
-              duration: Duration(milliseconds: hlId == msg.id ? 0 : 600),
-              color: hlId == msg.id
-                  ? AppColors.gold.withValues(alpha: 0.18)
-                  : Colors.transparent,
-              child: child,
+              duration: const Duration(milliseconds: 400),
+              color: bg,
+              child: bubble,
             );
           },
-          child: _SwipeableMessageBubble(
-            key: messageKeys[msg.id],
-            message: msg,
-            isMe: isMe,
-            showSender: isBroadcast && !isMe,
-            onLongPress: () => onLongPress(msg),
-            onSwipeReply: () => onSwipeReply(msg),
-            onTapQuote: onTapQuote,
-          ),
         );
       },
     );
@@ -716,6 +943,7 @@ class _SwipeableMessageBubble extends StatefulWidget {
     required this.onLongPress,
     required this.onSwipeReply,
     required this.onTapQuote,
+    this.highlightQuery = '',
   });
 
   final NexusMessage message;
@@ -724,6 +952,7 @@ class _SwipeableMessageBubble extends StatefulWidget {
   final VoidCallback onLongPress;
   final VoidCallback onSwipeReply;
   final void Function(String) onTapQuote;
+  final String highlightQuery;
 
   @override
   State<_SwipeableMessageBubble> createState() =>
@@ -804,6 +1033,7 @@ class _SwipeableMessageBubbleState extends State<_SwipeableMessageBubble>
           showSender: widget.showSender,
           onLongPress: widget.onLongPress,
           onTapQuote: widget.onTapQuote,
+          highlightQuery: widget.highlightQuery,
         ),
       ),
     );
@@ -819,6 +1049,7 @@ class _MessageBubble extends StatelessWidget {
     required this.showSender,
     required this.onLongPress,
     required this.onTapQuote,
+    this.highlightQuery = '',
   });
 
   final NexusMessage message;
@@ -826,6 +1057,7 @@ class _MessageBubble extends StatelessWidget {
   final bool showSender; // show sender name above bubble in broadcast channel
   final VoidCallback onLongPress;
   final void Function(String) onTapQuote;
+  final String highlightQuery;
 
   @override
   Widget build(BuildContext context) {
@@ -885,7 +1117,11 @@ class _MessageBubble extends StatelessWidget {
               if (message.type == NexusMessageType.image)
                 _ImageContent(message: message)
               else
-                _TextContent(message: message, isMe: isMe),
+                _TextContent(
+                  message: message,
+                  isMe: isMe,
+                  highlightQuery: highlightQuery,
+                ),
             ],
           ),
         ),
@@ -901,26 +1137,35 @@ class _MessageBubble extends StatelessWidget {
 }
 
 class _TextContent extends StatelessWidget {
-  const _TextContent({required this.message, required this.isMe});
+  const _TextContent({
+    required this.message,
+    required this.isMe,
+    this.highlightQuery = '',
+  });
   final NexusMessage message;
   final bool isMe;
+  final String highlightQuery;
 
   @override
   Widget build(BuildContext context) {
     final time = _formatTime(message.timestamp.toLocal());
+    final textStyle = TextStyle(
+      color: isMe ? AppColors.deepBlue : AppColors.onDark,
+      fontSize: 15,
+    );
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       child: Column(
         crossAxisAlignment:
             isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
-          Text(
-            message.body,
-            style: TextStyle(
-              color: isMe ? AppColors.deepBlue : AppColors.onDark,
-              fontSize: 15,
-            ),
-          ),
+          highlightQuery.isNotEmpty
+              ? HighlightedText(
+                  text: message.body,
+                  query: highlightQuery,
+                  style: textStyle,
+                )
+              : Text(message.body, style: textStyle),
           const SizedBox(height: 2),
           Row(
             mainAxisSize: MainAxisSize.min,
@@ -1550,4 +1795,13 @@ class _ConnectionIndicator extends StatelessWidget {
       ],
     );
   }
+}
+
+// ── Search highlight state ────────────────────────────────────────────────────
+
+/// Immutable snapshot of which messages are search matches and which is active.
+class _SearchHighlight {
+  const _SearchHighlight({this.matchIds = const {}, this.currentId});
+  final Set<String> matchIds;
+  final String? currentId;
 }

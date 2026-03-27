@@ -66,6 +66,19 @@ Phase 2: Care-System + Sphären-Plugins
   - Toast wenn Originalnachricht nicht mehr verfügbar
   - Reply-Daten in metadata (reply_to_id/sender/preview/image), alle Transports
   - Verschlüsselte Antworten zeigen Klartext im Zitat
+- **Nachrichtensuche (komplett)**:
+  - Globale Suche (`MessageSearchScreen`) erreichbar über Lupen-Icon in Konversationsliste-AppBar
+  - Sucht in allen Konversationen: Entschlüsselung in Dart + case-insensitiver Filter auf Klartext-Body
+  - Suchergebnisse zeigen: Absender-Pseudonym (fett), hervorgehobener Suchbegriff (gold), Datum/Uhrzeit, Konversationsname
+  - Tipp auf Ergebnis → öffnet Konversation und scrollt zur gefundenen Nachricht (Goldflash)
+  - Paginierung: initial 50 Ergebnisse, "Mehr laden"-Button
+  - Debounce: 300ms nach letzter Tastatureingabe
+  - `HighlightedText` Widget: hebt Suchbegriff in Text mit goldenem Hintergrund hervor
+  - In-Chat-Suche (`ConversationScreen`): Lupen-Icon in AppBar → AppBar wird zum Suchfeld
+  - Navigation: Pfeile ↑/↓ zwischen Treffern, "X/N" Zähler
+  - Aktueller Treffer: stärkeres Gold-Highlight, andere Treffer: dezentes Gold-Highlight
+  - Inline-Highlighting in Chat-Bubble: Suchbegriff im Nachrichtentext hervorgehoben
+  - 21 Unit-Tests in `message_search_test.dart`
 - **Nostr Catch-Up (verpasste Nachrichten, komplett)**:
   - Letzter Nachrichten-Timestamp in SharedPreferences gespeichert
   - Beim App-Start: Nostr-Subscriptions starten ab diesem Timestamp (minus 60s Puffer)

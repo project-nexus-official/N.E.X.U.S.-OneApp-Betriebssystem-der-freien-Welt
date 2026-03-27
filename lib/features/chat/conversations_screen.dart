@@ -15,6 +15,7 @@ import 'chat_screen.dart' show RadarScreen;
 import 'conversation.dart';
 import 'conversation_screen.dart';
 import 'conversation_service.dart';
+import 'message_search_screen.dart';
 
 /// Chat-Tab: Postfach mit allen Konversationen (wie WhatsApp/Telegram).
 ///
@@ -164,6 +165,18 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
       appBar: AppBar(
         title: const Text('Nachrichten'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            tooltip: 'Suchen',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => ChangeNotifierProvider.value(
+                  value: context.read<ChatProvider>(),
+                  child: const MessageSearchScreen(),
+                ),
+              ),
+            ),
+          ),
           Consumer<ChatProvider>(
             builder: (context, provider, child) => _MeshDot(
               running: provider.running,
