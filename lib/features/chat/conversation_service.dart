@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 import '../../core/contacts/contact.dart';
 import '../../core/contacts/contact_service.dart';
 import '../../core/identity/identity_service.dart';
@@ -132,7 +134,8 @@ class ConversationService {
   }
 
   /// Ensures the #mesh broadcast conversation always appears even before any
-  /// broadcast message has been received.
+  /// broadcast message has been received, and that all joined group channels
+  /// appear even if they have no messages yet.
   Future<List<Conversation>> getConversationsWithMesh() async {
     final conversations = await getConversations();
 
@@ -150,6 +153,25 @@ class ConversationService {
           isPinned: true,
         ),
       );
+    }
+
+    // Inject joined channels that have no messages yet (not in pod_messages).
+    final existingGroupIds =
+        conversations.where((c) => c.isGroup).map((c) => c.id).toSet();
+    final joined = GroupChannelService.instance.joinedChannels;
+    debugPrint('[CHANNELS] Loaded ${joined.length} joined channels from DB');
+    for (final ch in joined) {
+      if (!existingGroupIds.contains(ch.name)) {
+        conversations.add(Conversation(
+          id: ch.name,
+          peerDid: ch.name,
+          peerPseudonym: ch.name,
+          lastMessage:
+              ch.description.isNotEmpty ? ch.description : 'Kanal beigetreten',
+          lastMessageTime: ch.joinedAt ??
+              DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+        ));
+      }
     }
 
     return conversations;

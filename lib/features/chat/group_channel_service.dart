@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 import '../../core/storage/pod_database.dart';
 import 'group_channel.dart';
 
@@ -41,6 +43,7 @@ class GroupChannelService {
       _joined
         ..clear()
         ..addAll(rows.map(GroupChannel.fromJson));
+      debugPrint('[CHANNELS] Loaded ${_joined.length} joined channels from DB');
     } catch (_) {
       // DB not yet open (e.g. during onboarding).
     }

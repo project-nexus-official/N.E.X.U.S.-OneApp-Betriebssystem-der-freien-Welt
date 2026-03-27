@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../shared/theme/app_theme.dart';
+import 'channel_conversation_screen.dart';
 import 'chat_provider.dart';
 import 'group_channel.dart';
 import 'group_channel_service.dart';
@@ -52,6 +53,20 @@ class _JoinChannelScreenState extends State<JoinChannelScreen> {
         .toList();
   }
 
+  void _openChannel(GroupChannel channel) {
+    // Prefer the up-to-date object from the service (has joinedAt set).
+    final live =
+        GroupChannelService.instance.findByName(channel.name) ?? channel;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ChangeNotifierProvider.value(
+          value: context.read<ChatProvider>(),
+          child: ChannelConversationScreen(channel: live),
+        ),
+      ),
+    );
+  }
+
   Future<void> _join(GroupChannel channel) async {
     await GroupChannelService.instance.joinChannel(channel);
 
@@ -71,6 +86,8 @@ class _JoinChannelScreenState extends State<JoinChannelScreen> {
           backgroundColor: AppColors.gold,
         ),
       );
+      // Auto-open the channel chat after joining.
+      _openChannel(channel);
     }
   }
 
@@ -167,6 +184,7 @@ class _JoinChannelScreenState extends State<JoinChannelScreen> {
                   final joined =
                       GroupChannelService.instance.isJoined(ch.name);
                   return ListTile(
+                    onTap: joined ? () => _openChannel(ch) : null,
                     leading: CircleAvatar(
                       backgroundColor: AppColors.surfaceVariant,
                       child: Text(
