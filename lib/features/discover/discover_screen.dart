@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
+import 'package:provider/provider.dart';
+import '../chat/chat_provider.dart';
+import '../chat/join_channel_screen.dart';
 import '../contacts/contacts_screen.dart';
 import '../settings/settings_screen.dart';
 
@@ -29,6 +32,12 @@ const _mainTiles = <_TileItem>[
     iconColor: AppColors.gold,
     label: 'Kontakte',
     route: '/contacts',
+  ),
+  _TileItem(
+    icon: Icons.tag,
+    iconColor: AppColors.gold,
+    label: 'Kanäle',
+    route: '/join-channels',
   ),
   _TileItem(
     icon: Icons.shopping_cart,
@@ -115,6 +124,18 @@ class DiscoverScreen extends StatelessWidget {
     if (tile.route == '/contacts') {
       Navigator.of(context, rootNavigator: true).push(
         MaterialPageRoute<void>(builder: (_) => const ContactsScreen()),
+      );
+      return;
+    }
+    if (tile.route == '/join-channels') {
+      final chatProvider = context.read<ChatProvider>();
+      Navigator.of(context, rootNavigator: true).push(
+        MaterialPageRoute<void>(
+          builder: (_) => ChangeNotifierProvider.value(
+            value: chatProvider,
+            child: const JoinChannelScreen(),
+          ),
+        ),
       );
       return;
     }

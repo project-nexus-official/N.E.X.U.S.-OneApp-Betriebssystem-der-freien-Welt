@@ -167,6 +167,18 @@ Phase 2: Care-System + Sphären-Plugins
   - Auto-Join: `#nexus-global` beim ersten Start via `ensureDefaults()`
   - Tests: 17 Tests in `test/features/chat/group_channel_test.dart`
 
+- **ConversationsScreen – Segmented Tabs (komplett)**:
+  - `TabController(length: 2)` mit `SingleTickerProviderStateMixin`
+  - Tab 0 "Chats": #mesh angepinnt + alle DM-Konversationen (`!conv.isGroup`)
+  - Tab 1 "Kanäle": alle beigetretenen Gruppenkanäle (`conv.isGroup`), #nexus-global immer oben angepinnt
+  - Sortierung Kanäle-Tab: #nexus-global first → dann nach `lastMessageTime` desc
+  - Ungelesen-Badge im Kanäle-Tab: Summe aller `unreadCount` über Kanal-Konversationen
+  - Kontextabhängiger FAB: Chats-Tab → "Neue Konversation" (QR, Radar, Kontakte); Kanäle-Tab → "Kanal erstellen" + "Kanäle entdecken"
+  - Leerzustände: `_EmptyChatsState` (mit Radar-Button), `_EmptyChannelsState` (mit "Kanäle entdecken"-Button)
+  - Swipe zwischen Tabs via `TabBarView`; Tab-Tap mit `TabBar` (gold indicator)
+  - Kanal-Discovery auch im Entdecken-Hub: neue "Kanäle"-Kachel (gold, aktiv) → navigiert zu `JoinChannelScreen` via `rootNavigator: true`
+  - Tests: 19 Tests in `test/features/chat/conversations_tabs_test.dart`
+
 ## Aktueller Fokus
 >>> PHASE 1a: Fundament + Identität (in Fertigstellung) <<<
 

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -22,12 +21,13 @@ import 'group_channel_service.dart';
 import 'join_channel_screen.dart';
 import 'message_search_screen.dart';
 
-/// Chat-Tab: Postfach mit allen Konversationen (wie WhatsApp/Telegram).
+/// Chat-Tab: Postfach mit Chats und Kanälen in separaten Tabs.
 ///
-/// - #mesh Broadcast-Kanal ist immer angepinnt ganz oben.
-/// - Direkt-Konversationen sortiert nach letzter Nachricht (neueste oben).
-/// - FAB (unten rechts) öffnet den Radar/Peer-Discovery-Screen.
-/// - Swipe nach links → Konversation löschen.
+/// Tab 0 – "Chats": #mesh angepinnt + alle DM-Konversationen.
+/// Tab 1 – "Kanäle": alle beigetretenen Gruppenkanäle.
+///
+/// Swipe und Tab-Tap wechseln zwischen den Tabs.
+/// FAB zeigt kontextabhängige Aktionen je nach aktivem Tab.
 class ConversationsScreen extends StatefulWidget {
   const ConversationsScreen({super.key});
 
@@ -35,15 +35,20 @@ class ConversationsScreen extends StatefulWidget {
   State<ConversationsScreen> createState() => _ConversationsScreenState();
 }
 
-class _ConversationsScreenState extends State<ConversationsScreen> {
+class _ConversationsScreenState extends State<ConversationsScreen>
+    with SingleTickerProviderStateMixin {
   List<Conversation> _conversations = [];
   bool _loading = true;
   StreamSubscription<List<Conversation>>? _sub;
 
+  late final TabController _tabController;
+
   @override
   void initState() {
     super.initState();
-    // Initialise transport (safe to call multiple times).
+    _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() => setState(() {})); // rebuild FAB on tab change
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<ChatProvider>().initialize();
     });
@@ -55,13 +60,13 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
 
   @override
   void dispose() {
+    _tabController.dispose();
     _sub?.cancel();
     super.dispose();
   }
 
   Future<void> _loadConversations() async {
-    final convs =
-        await ConversationService.instance.getConversationsWithMesh();
+    final convs = await ConversationService.instance.getConversationsWithMesh();
     if (mounted) {
       setState(() {
         _conversations = convs;
@@ -70,8 +75,31 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     }
   }
 
+  // ── Filtered views ──────────────────────────────────────────────────────────
+
+  /// Conversations shown in the "Chats" tab: #mesh + DMs (no group channels).
+  List<Conversation> get _chatConversations =>
+      _conversations.where((c) => !c.isGroup).toList();
+
+  /// Conversations shown in the "Kanäle" tab: group channels only,
+  /// #nexus-global pinned first, then by lastMessageTime desc.
+  List<Conversation> get _channelConversations {
+    final channels = _conversations.where((c) => c.isGroup).toList();
+    channels.sort((a, b) {
+      if (a.id == '#nexus-global') return -1;
+      if (b.id == '#nexus-global') return 1;
+      return b.lastMessageTime.compareTo(a.lastMessageTime);
+    });
+    return channels;
+  }
+
+  /// Total unread count across all channel conversations (for tab badge).
+  int get _channelUnreadCount =>
+      _channelConversations.fold(0, (sum, c) => sum + c.unreadCount);
+
+  // ── Navigation ──────────────────────────────────────────────────────────────
+
   void _openConversation(Conversation conv) {
-    // Mark as read immediately
     ConversationService.instance.markAsRead(conv.id);
 
     if (conv.isGroup) {
@@ -119,7 +147,36 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     );
   }
 
-  void _showNewChatMenu() {
+  void _createChannel() {
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ChangeNotifierProvider.value(
+          value: context.read<ChatProvider>(),
+          child: const CreateChannelScreen(),
+        ),
+      ),
+    ).then((_) => _loadConversations());
+  }
+
+  void _joinChannel() {
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ChangeNotifierProvider.value(
+          value: context.read<ChatProvider>(),
+          child: const JoinChannelScreen(),
+        ),
+      ),
+    ).then((_) => _loadConversations());
+  }
+
+  Future<void> _deleteConversation(Conversation conv) async {
+    await context.read<ChatProvider>().deleteConversation(conv.id);
+    await _loadConversations();
+  }
+
+  // ── FAB menus ───────────────────────────────────────────────────────────────
+
+  void _showChatsMenu() {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.surface,
@@ -166,9 +223,27 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                 _openContacts();
               },
             ),
-            const Divider(height: 1, indent: 16, color: AppColors.surfaceVariant),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showChannelsMenu() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
               child: Text(
                 'Kanäle',
                 style: const TextStyle(
@@ -187,8 +262,8 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.search, color: AppColors.gold),
-              title: const Text('Kanal beitreten'),
+              leading: const Icon(Icons.explore, color: AppColors.gold),
+              title: const Text('Kanäle entdecken'),
               onTap: () {
                 Navigator.pop(ctx);
                 _joinChannel();
@@ -201,35 +276,12 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     );
   }
 
-  void _createChannel() {
-    Navigator.of(context, rootNavigator: true).push(
-      MaterialPageRoute<void>(
-        builder: (_) => ChangeNotifierProvider.value(
-          value: context.read<ChatProvider>(),
-          child: const CreateChannelScreen(),
-        ),
-      ),
-    ).then((_) => _loadConversations());
-  }
-
-  void _joinChannel() {
-    Navigator.of(context, rootNavigator: true).push(
-      MaterialPageRoute<void>(
-        builder: (_) => ChangeNotifierProvider.value(
-          value: context.read<ChatProvider>(),
-          child: const JoinChannelScreen(),
-        ),
-      ),
-    ).then((_) => _loadConversations());
-  }
-
-  Future<void> _deleteConversation(Conversation conv) async {
-    await context.read<ChatProvider>().deleteConversation(conv.id);
-    await _loadConversations();
-  }
+  // ── Build ───────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
+    final isChannelsTab = _tabController.index == 1;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Nachrichten'),
@@ -253,39 +305,82 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
             ),
           ),
         ],
+        bottom: TabBar(
+          controller: _tabController,
+          indicatorColor: AppColors.gold,
+          indicatorWeight: 2.5,
+          labelColor: AppColors.gold,
+          unselectedLabelColor: Colors.grey,
+          labelStyle: const TextStyle(fontWeight: FontWeight.w600),
+          tabs: [
+            const Tab(text: 'Chats'),
+            Tab(
+              child: _channelUnreadCount > 0
+                  ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Kanäle'),
+                        const SizedBox(width: 6),
+                        _UnreadBadge(count: _channelUnreadCount),
+                      ],
+                    )
+                  : const Text('Kanäle'),
+            ),
+          ],
+        ),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _conversations.isEmpty
-              ? _EmptyState(onDiscover: _openRadar)
-              : _ConversationList(
-                  conversations: _conversations,
-                  onTap: _openConversation,
-                  onDelete: _deleteConversation,
-                ),
+          : TabBarView(
+              controller: _tabController,
+              children: [
+                // ── Chats tab ─────────────────────────────────────────────
+                _chatConversations.isEmpty
+                    ? _EmptyChatsState(onDiscover: _openRadar)
+                    : _ConversationList(
+                        conversations: _chatConversations,
+                        onTap: _openConversation,
+                        onDelete: _deleteConversation,
+                      ),
+
+                // ── Kanäle tab ────────────────────────────────────────────
+                _channelConversations.isEmpty
+                    ? _EmptyChannelsState(onDiscover: _joinChannel)
+                    : _ConversationList(
+                        conversations: _channelConversations,
+                        onTap: _openConversation,
+                        onDelete: _deleteConversation,
+                        pinnedId: '#nexus-global',
+                      ),
+              ],
+            ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _showNewChatMenu,
+        onPressed: isChannelsTab ? _showChannelsMenu : _showChatsMenu,
         backgroundColor: AppColors.gold,
         foregroundColor: AppColors.deepBlue,
-        tooltip: 'Neue Konversation',
+        tooltip: isChannelsTab ? 'Kanal-Aktionen' : 'Neue Konversation',
         child: const Icon(Icons.add),
       ),
     );
   }
 }
 
-// ── Conversation list ─────────────────────────────────────────────────────────
+// ── Conversation list ──────────────────────────────────────────────────────────
 
 class _ConversationList extends StatelessWidget {
   const _ConversationList({
     required this.conversations,
     required this.onTap,
     required this.onDelete,
+    this.pinnedId,
   });
 
   final List<Conversation> conversations;
   final void Function(Conversation) onTap;
   final Future<void> Function(Conversation) onDelete;
+
+  /// ID of a conversation that should show a pin indicator (always first).
+  final String? pinnedId;
 
   @override
   Widget build(BuildContext context) {
@@ -295,6 +390,7 @@ class _ConversationList extends StatelessWidget {
           const Divider(height: 1, indent: 72, color: AppColors.surfaceVariant),
       itemBuilder: (context, i) {
         final conv = conversations[i];
+        final isPinned = pinnedId != null && conv.id == pinnedId;
         return Dismissible(
           key: ValueKey(conv.id),
           direction: DismissDirection.endToStart,
@@ -335,23 +431,34 @@ class _ConversationList extends StatelessWidget {
                 false;
           },
           onDismissed: (_) => onDelete(conv),
-          child: _ConversationTile(conv: conv, onTap: () => onTap(conv)),
+          child: _ConversationTile(
+            conv: conv,
+            isPinned: isPinned,
+            onTap: () => onTap(conv),
+          ),
         );
       },
     );
   }
 }
 
+// ── Conversation tile ──────────────────────────────────────────────────────────
+
 class _ConversationTile extends StatelessWidget {
-  const _ConversationTile({required this.conv, required this.onTap});
+  const _ConversationTile({
+    required this.conv,
+    required this.onTap,
+    this.isPinned = false,
+  });
+
   final Conversation conv;
   final VoidCallback onTap;
+  final bool isPinned;
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       leading: _Avatar(conv: conv),
       title: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -359,6 +466,12 @@ class _ConversationTile extends StatelessWidget {
           Expanded(
             child: Row(
               children: [
+                if (isPinned)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: Icon(Icons.push_pin,
+                        size: 12, color: AppColors.gold.withAlpha(180)),
+                  ),
                 Flexible(
                   child: Text(
                     conv.peerPseudonym,
@@ -390,9 +503,7 @@ class _ConversationTile extends StatelessWidget {
                 _formatTime(conv.lastMessageTime),
                 style: TextStyle(
                   fontSize: 11,
-                  color: conv.unreadCount > 0
-                      ? AppColors.gold
-                      : Colors.grey,
+                  color: conv.unreadCount > 0 ? AppColors.gold : Colors.grey,
                 ),
               ),
             ],
@@ -407,9 +518,7 @@ class _ConversationTile extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: conv.unreadCount > 0
-                    ? AppColors.onDark
-                    : Colors.grey,
+                color: conv.unreadCount > 0 ? AppColors.onDark : Colors.grey,
                 fontSize: 13,
               ),
             ),
@@ -417,8 +526,7 @@ class _ConversationTile extends StatelessWidget {
           if (conv.unreadCount > 0)
             Container(
               margin: const EdgeInsets.only(left: 6),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: const BoxDecoration(
                 color: AppColors.gold,
                 borderRadius: BorderRadius.all(Radius.circular(10)),
@@ -444,9 +552,8 @@ class _ConversationTile extends StatelessWidget {
     if (local.year == now.year &&
         local.month == now.month &&
         local.day == now.day) {
-      final h = local.hour.toString().padLeft(2, '0');
-      final m = local.minute.toString().padLeft(2, '0');
-      return '$h:$m';
+      return '${local.hour.toString().padLeft(2, '0')}:'
+          '${local.minute.toString().padLeft(2, '0')}';
     }
     if (now.difference(local).inDays < 7) {
       const days = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
@@ -457,6 +564,8 @@ class _ConversationTile extends StatelessWidget {
   }
 }
 
+// ── Avatar ─────────────────────────────────────────────────────────────────────
+
 class _Avatar extends StatelessWidget {
   const _Avatar({required this.conv});
   final Conversation conv;
@@ -464,40 +573,64 @@ class _Avatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (conv.isBroadcast) {
-      return Container(
-        width: 48,
-        height: 48,
-        decoration: const BoxDecoration(
-          color: AppColors.surfaceVariant,
-          shape: BoxShape.circle,
-        ),
-        child: const Icon(Icons.hub, color: AppColors.gold, size: 26),
-      );
+      return _CircleIcon(icon: Icons.hub);
     }
-
     if (conv.isGroup) {
-      return Container(
-        width: 48,
-        height: 48,
-        decoration: const BoxDecoration(
-          color: AppColors.surfaceVariant,
-          shape: BoxShape.circle,
-        ),
-        child: const Icon(Icons.tag, color: AppColors.gold, size: 26),
-      );
+      return _CircleIcon(icon: Icons.tag);
     }
-
     if (conv.peerProfileImage != null) {
       // TODO: load from local file path when profile image caching is added.
     }
-
-    // Deterministic identicon from the peer DID bytes
     final didBytes = conv.peerDid.codeUnits;
-    return ClipOval(
-      child: Identicon(bytes: didBytes, size: 48),
+    return ClipOval(child: Identicon(bytes: didBytes, size: 48));
+  }
+}
+
+class _CircleIcon extends StatelessWidget {
+  const _CircleIcon({required this.icon});
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: const BoxDecoration(
+        color: AppColors.surfaceVariant,
+        shape: BoxShape.circle,
+      ),
+      child: Icon(icon, color: AppColors.gold, size: 26),
     );
   }
 }
+
+// ── Unread badge (for tab bar) ─────────────────────────────────────────────────
+
+class _UnreadBadge extends StatelessWidget {
+  const _UnreadBadge({required this.count});
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: const BoxDecoration(
+        color: AppColors.gold,
+        borderRadius: BorderRadius.all(Radius.circular(8)),
+      ),
+      child: Text(
+        count > 99 ? '99+' : '$count',
+        style: const TextStyle(
+          color: AppColors.deepBlue,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+}
+
+// ── Transport icon ─────────────────────────────────────────────────────────────
 
 class _TransportIcon extends StatelessWidget {
   const _TransportIcon({required this.type});
@@ -510,16 +643,15 @@ class _TransportIcon extends StatelessWidget {
         const Icon(Icons.bluetooth, size: 12, color: Colors.lightBlueAccent),
       TransportType.lan =>
         const Icon(Icons.wifi, size: 12, color: Colors.greenAccent),
-      _ =>
-        const Icon(Icons.cloud_queue, size: 12, color: Colors.grey),
+      _ => const Icon(Icons.cloud_queue, size: 12, color: Colors.grey),
     };
   }
 }
 
-// ── Empty state ───────────────────────────────────────────────────────────────
+// ── Empty states ───────────────────────────────────────────────────────────────
 
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.onDiscover});
+class _EmptyChatsState extends StatelessWidget {
+  const _EmptyChatsState({required this.onDiscover});
   final VoidCallback onDiscover;
 
   @override
@@ -530,8 +662,7 @@ class _EmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.chat_bubble_outline,
-                size: 64, color: Colors.grey),
+            const Icon(Icons.chat_bubble_outline, size: 64, color: Colors.grey),
             const SizedBox(height: 16),
             const Text(
               'Noch keine Nachrichten.\nFinde Peers in der Nähe!',
@@ -551,7 +682,49 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-// ── Inline trust badge (for conversation list) ────────────────────────────────
+class _EmptyChannelsState extends StatelessWidget {
+  const _EmptyChannelsState({required this.onDiscover});
+  final VoidCallback onDiscover;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.tag, size: 64, color: Colors.grey),
+            const SizedBox(height: 16),
+            const Text(
+              'Noch keinem Kanal beigetreten.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey, fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Entdecke öffentliche Kanäle oder\nerstelle deinen eigenen.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey, fontSize: 13),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: onDiscover,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.gold,
+                foregroundColor: AppColors.deepBlue,
+              ),
+              icon: const Icon(Icons.explore),
+              label: const Text('Kanäle entdecken'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Inline trust badge ─────────────────────────────────────────────────────────
 
 class _TrustBadgeInline extends StatelessWidget {
   const _TrustBadgeInline({required this.peerDid});
@@ -565,7 +738,7 @@ class _TrustBadgeInline extends StatelessWidget {
   }
 }
 
-// ── Inline encryption dot (for conversation list) ─────────────────────────────
+// ── Inline encryption dot ──────────────────────────────────────────────────────
 
 class _EncryptionDotInline extends StatelessWidget {
   const _EncryptionDotInline({required this.peerDid});
@@ -582,7 +755,7 @@ class _EncryptionDotInline extends StatelessWidget {
   }
 }
 
-// ── Mesh status dot ───────────────────────────────────────────────────────────
+// ── Mesh status dot ────────────────────────────────────────────────────────────
 
 class _MeshDot extends StatelessWidget {
   const _MeshDot({required this.running, required this.hasPeers});
