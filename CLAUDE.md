@@ -151,6 +151,22 @@ Phase 2: Care-System + Sphären-Plugins
     - Limitation: Öffentliche Nostr-Relays (Größenlimit ~32–128 KB) speichern große Voice-Events ggf. nicht → Catch-Up über Relay nur für kurze Nachrichten zuverlässig; Live-Weiterleitung funktioniert immer
     - Tests: 15 Tests in `voice_catchup_test.dart`, 2 neue Großpayload-Tests in `encryption_test.dart`
 
+- **Benannte Gruppenkanäle (komplett)**:
+  - `GroupChannel` Modell: id, name (#teneriffa), description, createdBy, nostrTag, joinedAt
+  - `GroupChannelService` Singleton: `load()`, `createChannel()`, `joinChannel()`, `leaveChannel()`, `isJoined()`, `findByName()`, `allDiscovered`, `addDiscoveredFromNostr()`, `ensureDefaults()`
+  - DB v4-Migration: `group_channels` Tabelle (verschlüsselt wie andere Tabellen)
+  - `PodDatabase`: `upsertChannel()`, `listChannels()`, `deleteChannel()`
+  - `NostrKind.channelCreate = 40`, `NostrKind.channelMessage = 42` (NIP-28)
+  - `NostrTransport`: `subscribeToChannel()`, `unsubscribeFromChannel()`, `publishChannelCreate()`, Kind-40 Discovery-Subscription, `_handleChannelCreateEvent()`, `_handleChannelMessageEvent()`, `onChannelAnnounced` Stream
+  - `_sendBroadcast()` nutzt Kind-42 für non-mesh Kanäle, Kind-1 für #mesh
+  - `ChatProvider`: `sendToChannel()`, `_initChannels()`, Channel-Routing in `_onMessageReceived()`, `_channelAnnouncedSub`
+  - `Conversation.isGroup` getter (id starts with '#'), `peerDidFrom()` handles '#'-IDs
+  - `ConversationService`: Group-Channel-Zweig in `getConversations()`
+  - UI: `ChannelConversationScreen`, `CreateChannelScreen`, `JoinChannelScreen`
+  - `ConversationsScreen`: FAB "Kanal erstellen" + "Kanal beitreten", `#`-Icon für Kanal-Tiles
+  - Auto-Join: `#nexus-global` beim ersten Start via `ensureDefaults()`
+  - Tests: 17 Tests in `test/features/chat/group_channel_test.dart`
+
 ## Aktueller Fokus
 >>> PHASE 1a: Fundament + Identität (in Fertigstellung) <<<
 

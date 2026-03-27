@@ -28,9 +28,10 @@ import '../../core/transport/nostr/nostr_transport.dart';
 import '../../core/transport/transport_manager.dart';
 import '../../services/background_service.dart';
 import '../../services/notification_service.dart';
-import '../../services/notification_settings_service.dart';
 import '../../shared/widgets/notification_banner.dart';
 import 'conversation_service.dart';
+import 'group_channel.dart';
+import 'group_channel_service.dart';
 
 /// ViewModel for the chat feature.
 ///
@@ -92,6 +93,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   // Subscriptions
   StreamSubscription<NexusMessage>? _msgSub;
   StreamSubscription<List<NexusPeer>>? _peersSub;
+  StreamSubscription<Map<String, dynamic>>? _channelAnnouncedSub;
 
   // ── Initialization ─────────────────────────────────────────────────────────
 
@@ -169,12 +171,65 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       await _initEncryptionKeys();
       await _startNostrIfConnected();
       _watchConnectivity();
+      await _initChannels(identity.did);
     } catch (e) {
       _error = 'Fehler beim Starten: $e';
       _running = false;
     }
 
     notifyListeners();
+  }
+
+  Future<void> _initChannels(String myDid) async {
+    try {
+      await GroupChannelService.instance.load();
+      await GroupChannelService.instance.ensureDefaults(myDid);
+
+      // Subscribe Nostr to each joined channel.
+      for (final ch in GroupChannelService.instance.joinedChannels) {
+        _nostrTransport?.subscribeToChannel(ch.nostrTag);
+      }
+
+      // Listen for newly discovered channels via Kind-40.
+      _channelAnnouncedSub?.cancel();
+      if (_nostrTransport != null) {
+        _channelAnnouncedSub =
+            _nostrTransport!.onChannelAnnounced.listen(_onChannelAnnounced);
+      }
+
+      // Re-subscribe when channel list changes (join/leave).
+      GroupChannelService.instance.joinedStream.listen((channels) {
+        for (final ch in channels) {
+          _nostrTransport?.subscribeToChannel(ch.nostrTag);
+        }
+      });
+    } catch (e) {
+      debugPrint('[CHAT] Channel init failed: $e');
+    }
+  }
+
+  void _onChannelAnnounced(Map<String, dynamic> data) {
+    try {
+      final name = data['name'] as String?;
+      final nostrTag = data['nostrTag'] as String?;
+      if (name == null || nostrTag == null) return;
+      final channel = GroupChannel(
+        id: data['id'] as String? ?? nostrTag,
+        name: GroupChannel.normaliseName(name),
+        description: (data['description'] as String?) ?? '',
+        createdBy: (data['createdBy'] as String?) ?? '',
+        createdAt: data['_created_at'] != null
+            ? DateTime.fromMillisecondsSinceEpoch(
+                (data['_created_at'] as int) * 1000,
+                isUtc: true,
+              )
+            : DateTime.now().toUtc(),
+        nostrTag: nostrTag,
+      );
+      GroupChannelService.instance.addDiscoveredFromNostr(channel);
+    } catch (e) {
+      debugPrint('[CHAT] Channel announced parse error: $e');
+    }
   }
 
   Future<void> _initNostrKeys(dynamic identity) async {
@@ -408,9 +463,21 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     final myDid = IdentityService.instance.currentIdentity?.did ?? '';
 
-    final convId = processedMsg.isBroadcast
-        ? NexusMessage.broadcastDid
-        : _conversationId(processedMsg.fromDid, myDid);
+    // Determine conversation ID:
+    //   - broadcast / #mesh → NexusMessage.broadcastDid ("broadcast")
+    //   - named group channel (channel != '#mesh' and starts with '#') → channel name
+    //   - DM → sorted DID pair
+    final String convId;
+    if (processedMsg.isBroadcast) {
+      final ch = processedMsg.channel;
+      if (ch != null && ch != '#mesh' && ch.startsWith('#')) {
+        convId = ch; // e.g. "#teneriffa"
+      } else {
+        convId = NexusMessage.broadcastDid;
+      }
+    } else {
+      convId = _conversationId(processedMsg.fromDid, myDid);
+    }
 
     debugPrint('[CHAT] Message received: convId=$convId  from=${processedMsg.fromDid}');
 
@@ -689,6 +756,29 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     _conversationCache.putIfAbsent(NexusMessage.broadcastDid, () => []);
     _conversationCache[NexusMessage.broadcastDid]!.add(msg);
     await _persistMessage(NexusMessage.broadcastDid, msg);
+    ConversationService.instance.notifyUpdate();
+
+    notifyListeners();
+  }
+
+  /// Sends a text message to a named group channel (e.g. "#teneriffa").
+  Future<void> sendToChannel(String channelName, String text) async {
+    final myDid = IdentityService.instance.currentIdentity?.did ?? 'unknown';
+    final name =
+        channelName.startsWith('#') ? channelName : '#$channelName';
+
+    final msg = NexusMessage.create(
+      fromDid: myDid,
+      toDid: NexusMessage.broadcastDid,
+      body: text,
+      channel: name,
+    );
+
+    await _manager.sendMessage(msg);
+
+    _conversationCache.putIfAbsent(name, () => []);
+    _conversationCache[name]!.add(msg);
+    await _persistMessage(name, msg);
     ConversationService.instance.notifyUpdate();
 
     notifyListeners();

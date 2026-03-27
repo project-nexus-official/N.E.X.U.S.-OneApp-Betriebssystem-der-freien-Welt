@@ -17,6 +17,12 @@ class NostrKind {
   /// NIP-04 encrypted direct message.
   static const int encryptedDm = 4;
 
+  /// NIP-28 channel creation (Kind 40).
+  static const int channelCreate = 40;
+
+  /// NIP-28 channel message (Kind 42).
+  static const int channelMessage = 42;
+
   /// NIP-78 parameterized replaceable event – NEXUS presence announcements.
   ///
   /// Each node publishes one of these every 30 s so peers can discover it.

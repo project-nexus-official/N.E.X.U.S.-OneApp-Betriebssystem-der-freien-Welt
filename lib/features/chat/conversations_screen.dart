@@ -11,11 +11,15 @@ import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/identicon.dart';
 import '../contacts/contacts_screen.dart';
 import '../contacts/widgets/trust_badge.dart';
+import 'channel_conversation_screen.dart';
 import 'chat_provider.dart';
 import 'chat_screen.dart' show RadarScreen;
 import 'conversation.dart';
 import 'conversation_screen.dart';
 import 'conversation_service.dart';
+import 'create_channel_screen.dart';
+import 'group_channel_service.dart';
+import 'join_channel_screen.dart';
 import 'message_search_screen.dart';
 
 /// Chat-Tab: Postfach mit allen Konversationen (wie WhatsApp/Telegram).
@@ -69,6 +73,20 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
   void _openConversation(Conversation conv) {
     // Mark as read immediately
     ConversationService.instance.markAsRead(conv.id);
+
+    if (conv.isGroup) {
+      final channel = GroupChannelService.instance.findByName(conv.id);
+      if (channel == null) return;
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => ChangeNotifierProvider.value(
+            value: context.read<ChatProvider>(),
+            child: ChannelConversationScreen(channel: channel),
+          ),
+        ),
+      );
+      return;
+    }
 
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -148,11 +166,61 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                 _openContacts();
               },
             ),
+            const Divider(height: 1, indent: 16, color: AppColors.surfaceVariant),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Text(
+                'Kanäle',
+                style: const TextStyle(
+                  color: AppColors.gold,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.add_box_outlined, color: AppColors.gold),
+              title: const Text('Kanal erstellen'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _createChannel();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.search, color: AppColors.gold),
+              title: const Text('Kanal beitreten'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _joinChannel();
+              },
+            ),
             const SizedBox(height: 8),
           ],
         ),
       ),
     );
+  }
+
+  void _createChannel() {
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ChangeNotifierProvider.value(
+          value: context.read<ChatProvider>(),
+          child: const CreateChannelScreen(),
+        ),
+      ),
+    ).then((_) => _loadConversations());
+  }
+
+  void _joinChannel() {
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ChangeNotifierProvider.value(
+          value: context.read<ChatProvider>(),
+          child: const JoinChannelScreen(),
+        ),
+      ),
+    ).then((_) => _loadConversations());
   }
 
   Future<void> _deleteConversation(Conversation conv) async {
@@ -301,7 +369,7 @@ class _ConversationTile extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                if (!conv.isBroadcast) ...[
+                if (!conv.isBroadcast && !conv.isGroup) ...[
                   const SizedBox(width: 6),
                   _TrustBadgeInline(peerDid: conv.peerDid),
                   _EncryptionDotInline(peerDid: conv.peerDid),
@@ -404,6 +472,18 @@ class _Avatar extends StatelessWidget {
           shape: BoxShape.circle,
         ),
         child: const Icon(Icons.hub, color: AppColors.gold, size: 26),
+      );
+    }
+
+    if (conv.isGroup) {
+      return Container(
+        width: 48,
+        height: 48,
+        decoration: const BoxDecoration(
+          color: AppColors.surfaceVariant,
+          shape: BoxShape.circle,
+        ),
+        child: const Icon(Icons.tag, color: AppColors.gold, size: 26),
       );
     }
 

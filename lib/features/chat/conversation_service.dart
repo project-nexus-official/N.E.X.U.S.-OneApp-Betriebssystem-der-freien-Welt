@@ -6,6 +6,7 @@ import '../../core/identity/identity_service.dart';
 import '../../core/storage/pod_database.dart';
 import '../../core/transport/nexus_message.dart';
 import 'conversation.dart';
+import 'group_channel_service.dart';
 
 /// Manages the conversation list (inbox).
 ///
@@ -80,6 +81,18 @@ class ConversationService {
             lastMessageTime: lastTime,
             unreadCount: unread,
             isPinned: true,
+          ));
+        } else if (convId.startsWith('#')) {
+          // Named group channel.
+          final channel = GroupChannelService.instance.findByName(convId);
+          final name = channel?.name ?? convId;
+          conversations.add(Conversation(
+            id: convId,
+            peerDid: convId,
+            peerPseudonym: name,
+            lastMessage: lastBody,
+            lastMessageTime: lastTime,
+            unreadCount: unread,
           ));
         } else {
           final peerDid = Conversation.peerDidFrom(convId, myDid);

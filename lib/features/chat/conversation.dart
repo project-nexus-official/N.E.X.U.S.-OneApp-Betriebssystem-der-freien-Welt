@@ -42,6 +42,9 @@ class Conversation {
 
   bool get isBroadcast => peerDid == NexusMessage.broadcastDid;
 
+  /// True for named group channels (conversation ID starts with '#').
+  bool get isGroup => id.startsWith('#');
+
   /// Canonical conversation ID for a direct chat between two DIDs.
   /// Matches [ChatProvider._conversationId] — sorted DIDs joined with ':'.
   static String directId(String didA, String didB) {
@@ -54,6 +57,8 @@ class Conversation {
   /// We find the second occurrence of "did:key:" to split.
   static String? peerDidFrom(String convId, String myDid) {
     if (convId == 'broadcast') return 'broadcast';
+    // Named group channels: use the channel name as "peer DID".
+    if (convId.startsWith('#')) return convId;
     final second = convId.indexOf('did:', 1);
     if (second <= 0) return null;
     final didA = convId.substring(0, second - 1);

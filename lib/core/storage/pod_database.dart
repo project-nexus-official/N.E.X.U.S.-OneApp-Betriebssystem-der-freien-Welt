@@ -31,7 +31,7 @@ class PodDatabase {
     final path = p.join(await getDatabasesPath(), 'nexus_pod.db');
     _db = await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -127,6 +127,16 @@ class PodDatabase {
       )
     ''');
 
+    // Group channels: named multi-user channels (e.g. #teneriffa)
+    await db.execute('''
+      CREATE TABLE group_channels (
+        id         TEXT PRIMARY KEY,
+        enc        TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    ''');
+
     // Unencrypted housekeeping metadata (schema version, etc.)
     await db.execute('''
       CREATE TABLE pod_meta (
@@ -152,6 +162,17 @@ class PodDatabase {
       await db.execute(
         'ALTER TABLE pod_messages ADD COLUMN message_id TEXT',
       );
+    }
+    if (oldVersion < 4) {
+      // Add group_channels table for named multi-user channels.
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS group_channels (
+          id         TEXT PRIMARY KEY,
+          enc        TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      ''');
     }
   }
 
@@ -388,6 +409,45 @@ class PodDatabase {
   /// Deletes all messages from all conversations.
   Future<void> deleteAllMessages() async {
     await _database.delete('pod_messages');
+  }
+
+  // ── Group channels namespace ──────────────────────────────────────────────
+
+  Future<void> upsertChannel(String id, Map<String, dynamic> data) async {
+    final enc = await PodEncryption.encrypt(jsonEncode(data), _key);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await _database.insert(
+      'group_channels',
+      {
+        'id': id,
+        'enc': enc,
+        'created_at': now,
+        'updated_at': now,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> listChannels() async {
+    final rows =
+        await _database.query('group_channels', orderBy: 'updated_at DESC');
+    final result = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      try {
+        final plain =
+            await PodEncryption.decrypt(row['enc'] as String, _key);
+        result.add(jsonDecode(plain) as Map<String, dynamic>);
+      } catch (_) {}
+    }
+    return result;
+  }
+
+  Future<void> deleteChannel(String id) async {
+    await _database.delete(
+      'group_channels',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   // ── Export / Import ───────────────────────────────────────────────────────

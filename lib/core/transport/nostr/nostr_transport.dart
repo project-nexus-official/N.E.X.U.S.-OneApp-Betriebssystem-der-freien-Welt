@@ -69,6 +69,17 @@ class NostrTransport implements MessageTransport {
   String? _meshSubId;
   String? _presenceSubId;
   String? _metadataSubId;
+  String? _channelDiscoverySubId;
+
+  // nostrTag → subscription ID for joined group channels
+  final Map<String, String> _channelSubIds = {};
+
+  final _channelAnnouncedController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
+  /// Emits a channel data map whenever a Kind-40 announcement arrives.
+  Stream<Map<String, dynamic>> get onChannelAnnounced =>
+      _channelAnnouncedController.stream;
 
   StreamSubscription<NostrEvent>? _eventSub;
   Timer? _presenceTimer;
@@ -196,10 +207,59 @@ class NostrTransport implements MessageTransport {
     if (_meshSubId != null) _relayManager.closeSubscription(_meshSubId!);
     if (_presenceSubId != null) _relayManager.closeSubscription(_presenceSubId!);
     if (_metadataSubId != null) _relayManager.closeSubscription(_metadataSubId!);
+    if (_channelDiscoverySubId != null) {
+      _relayManager.closeSubscription(_channelDiscoverySubId!);
+    }
+    for (final subId in _channelSubIds.values) {
+      _relayManager.closeSubscription(subId);
+    }
+    _channelSubIds.clear();
     await _eventSub?.cancel();
     await _relayManager.stop();
     _peers.clear();
     _peerLastPresence.clear();
+  }
+
+  // ── Group channels ────────────────────────────────────────────────────────
+
+  /// Subscribes to Kind-42 messages for the given Nostr tag (channel).
+  void subscribeToChannel(String nostrTag) {
+    if (_keys == null) return;
+    if (_channelSubIds.containsKey(nostrTag)) return; // already subscribed
+    final nowSeconds =
+        DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
+    final since = _lastMessageTimestampSeconds != null
+        ? _lastMessageTimestampSeconds! - 60
+        : nowSeconds - 86400;
+    final subId = _relayManager.subscribe({
+      'kinds': [NostrKind.channelMessage],
+      '#t': [nostrTag],
+      'since': since,
+    });
+    _channelSubIds[nostrTag] = subId;
+    print('[NOSTR] Channel sub: $subId  (#t: $nostrTag)');
+  }
+
+  /// Unsubscribes from Kind-42 messages for [nostrTag].
+  void unsubscribeFromChannel(String nostrTag) {
+    final subId = _channelSubIds.remove(nostrTag);
+    if (subId != null) _relayManager.closeSubscription(subId);
+  }
+
+  /// Publishes a Kind-40 channel creation announcement.
+  void publishChannelCreate(Map<String, dynamic> channelData) {
+    if (_keys == null) return;
+    final event = NostrEvent.create(
+      keys: _keys!,
+      kind: NostrKind.channelCreate,
+      content: jsonEncode(channelData),
+      tags: [
+        ['t', channelData['nostrTag'] as String? ?? 'nexus-channel'],
+        ['t', 'nexus-channel'],
+      ],
+    );
+    _relayManager.publish(event);
+    print('[NOSTR] Published Kind-40 channel: ${channelData['name']}');
   }
 
   // ── Sending ───────────────────────────────────────────────────────────────
@@ -220,6 +280,26 @@ class NostrTransport implements MessageTransport {
   }
 
   Future<void> _sendBroadcast(NexusMessage message) async {
+    final channel = message.channel;
+
+    // Named group channels use Kind-42; #mesh uses Kind-1.
+    if (channel != null && channel != '#mesh') {
+      final nostrTag =
+          'nexus-channel-${channel.startsWith('#') ? channel.substring(1) : channel}';
+      final event = NostrEvent.create(
+        keys: _keys!,
+        kind: NostrKind.channelMessage,
+        content: jsonEncode(message.toJson()),
+        tags: [
+          ['t', nostrTag],
+        ],
+      );
+      print('[NOSTR] Publishing Kind-42 channel=$channel '
+          'id=${event.id.substring(0, 8)}…');
+      _relayManager.publish(event);
+      return;
+    }
+
     final tags = <List<String>>[
       ['t', 'nexus-mesh'],
     ];
@@ -420,6 +500,16 @@ class NostrTransport implements MessageTransport {
       print('[NOSTR] Metadata sub: $_metadataSubId  '
           '(${contactPubkeys.length} contacts)');
     }
+
+    // Channel discovery: subscribe to Kind-40 to find available channels.
+    if (_channelDiscoverySubId != null) {
+      _relayManager.closeSubscription(_channelDiscoverySubId!);
+    }
+    _channelDiscoverySubId = _relayManager.subscribe({
+      'kinds': [NostrKind.channelCreate],
+      '#t': ['nexus-channel'],
+    });
+    print('[NOSTR] Channel discovery sub: $_channelDiscoverySubId');
   }
 
   void _onRelayEvent(NostrEvent event) {
@@ -432,8 +522,39 @@ class NostrTransport implements MessageTransport {
         _handleDm(event);
       case NostrKind.textNote:
         _handleBroadcast(event);
+      case NostrKind.channelCreate:
+        _handleChannelCreateEvent(event);
+      case NostrKind.channelMessage:
+        _handleChannelMessageEvent(event);
       case NostrKind.presence:
         _handlePresenceEvent(event);
+    }
+  }
+
+  void _handleChannelCreateEvent(NostrEvent event) {
+    try {
+      final data = jsonDecode(event.content) as Map<String, dynamic>;
+      // Emit so GroupChannelService / ChatProvider can add to discovered list.
+      _channelAnnouncedController.add({
+        ...data,
+        '_nostr_pubkey': event.pubkey,
+        '_created_at': event.createdAt,
+      });
+      print('[NOSTR] Kind-40 channel announced: ${data['name']}');
+    } catch (_) {}
+  }
+
+  void _handleChannelMessageEvent(NostrEvent event) {
+    if (_keys == null) return;
+    if (event.pubkey == _keys!.publicKeyHex) return;
+
+    try {
+      final msgJson = jsonDecode(event.content) as Map<String, dynamic>;
+      final message = NexusMessage.fromJson(msgJson);
+      _learnPeer(event.pubkey, message.fromDid, message.metadata);
+      _msgController.add(message);
+    } catch (e) {
+      print('[NOSTR] Kind-42 parse FAILED: $e');
     }
   }
 
