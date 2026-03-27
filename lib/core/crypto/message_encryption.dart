@@ -117,36 +117,48 @@ class MessageEncryption {
 
   // ── Padding ──────────────────────────────────────────────────────────────
 
-  /// Pads [data] with a 2-byte length prefix and zero-padding to the next
-  /// NIP-44 bucket length to hide message sizes.
+  /// Pads [data] with a 4-byte big-endian length prefix and zero-padding to
+  /// the next NIP-44 bucket length to hide message sizes.
+  ///
+  /// Uses a 4-byte prefix (supports payloads up to ~4 GB) to correctly handle
+  /// large binary payloads such as base64-encoded voice audio and images.
   static List<int> _pad(List<int> data) {
     final len = data.length;
     final padLen = _nextPadLength(len);
-    final result = List<int>.filled(2 + padLen, 0);
-    result[0] = (len >> 8) & 0xFF;
-    result[1] = len & 0xFF;
-    result.setRange(2, 2 + len, data);
+    final result = List<int>.filled(4 + padLen, 0);
+    result[0] = (len >> 24) & 0xFF;
+    result[1] = (len >> 16) & 0xFF;
+    result[2] = (len >> 8) & 0xFF;
+    result[3] = len & 0xFF;
+    result.setRange(4, 4 + len, data);
     return result;
   }
 
   /// Unpads data padded by [_pad].
   static String _unpad(List<int> data) {
-    if (data.length < 2) throw FormatException('Padded data too short');
-    final len = (data[0] << 8) | data[1];
-    if (len > data.length - 2) throw FormatException('Invalid pad length');
-    return utf8.decode(data.sublist(2, 2 + len));
+    if (data.length < 4) throw FormatException('Padded data too short');
+    final len = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
+    if (len < 0 || len > data.length - 4) {
+      throw FormatException('Invalid pad length: $len (buf=${data.length})');
+    }
+    return utf8.decode(data.sublist(4, 4 + len));
   }
 
   /// Returns the next NIP-44 bucket size for [msgLen]:
   /// buckets: 32, 64, 96, … 256, 320, 384, … 512, 640, … in a stepped scheme.
+  ///
+  /// The returned value is always ≥ [msgLen] so the padded buffer is never
+  /// smaller than the data it must hold.
   static int _nextPadLength(int msgLen) {
     if (msgLen <= 0) return 32;
     if (msgLen <= 32) return 32;
-    // NIP-44 scheme: find next power of 2 after halving
-    final step = pow(2, (log(msgLen - 1) / ln2).floor()) ~/ 8;
-    final steppedLen =
-        (((msgLen - 1) ~/ step) + 1) * step.clamp(32, 65536).toInt();
-    return steppedLen.clamp(32, 65536);
+    // NIP-44 scheme: step = max(32, 2^floor(log2(msgLen-1)) / 8).
+    // The step size is capped at 65536 to limit padding overhead for large
+    // payloads (e.g. a 1.6 MB voice base64 is padded in 64 KB increments).
+    final step =
+        (pow(2, (log(msgLen - 1) / ln2).floor()) ~/ 8).clamp(32, 65536);
+    // Round up to the next multiple of step (always >= msgLen).
+    return (((msgLen - 1) ~/ step) + 1) * step;
   }
 
   static Uint8List _randomBytes(int length) {

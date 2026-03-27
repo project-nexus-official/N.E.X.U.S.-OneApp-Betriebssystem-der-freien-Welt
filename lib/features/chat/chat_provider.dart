@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
@@ -419,6 +420,14 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       debugPrint('[CHAT] Duplicate message dropped (already in cache): ${processedMsg.id}');
       return;
     }
+
+    // For received voice messages: decode the base64 audio and save it to a
+    // permanent local file so playback survives app restarts and temp-dir
+    // clean-ups.  This runs for both live and catch-up messages.
+    if (processedMsg.type == NexusMessageType.voice) {
+      processedMsg = await _cacheVoiceAudio(processedMsg);
+    }
+
     cache.add(processedMsg);
 
     // Persist first, then notify so the DB query in notifyUpdate() finds the
@@ -488,6 +497,51 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       debugPrint('[CHAT] DB insert OK: convId=$convId');
     } catch (e) {
       debugPrint('[CHAT] DB insert FAILED: $e');
+    }
+  }
+
+  /// Decodes the base64 voice audio from [msg.body] into a permanent local
+  /// file (app documents directory) and returns a new message with
+  /// [audio_local_path] in its metadata.
+  ///
+  /// Returns [msg] unchanged on error or if a valid local path already exists.
+  /// Skips messages whose body starts with '[' (decryption-error placeholder).
+  Future<NexusMessage> _cacheVoiceAudio(NexusMessage msg) async {
+    // Skip decryption-error placeholders.
+    if (msg.body.startsWith('[')) return msg;
+
+    // Already cached.
+    final existing = msg.metadata?['audio_local_path'] as String?;
+    if (existing != null && File(existing).existsSync()) return msg;
+
+    try {
+      final audioBytes = base64Decode(msg.body);
+      final dir = await getApplicationDocumentsDirectory();
+      // Use .m4a for AAC recordings (Android/iOS) and .wav for desktop.
+      final ext = (Platform.isAndroid || Platform.isIOS) ? 'm4a' : 'wav';
+      final path = '${dir.path}/nexus_voice_${msg.id}.$ext';
+      await File(path).writeAsBytes(audioBytes);
+      debugPrint('[CHAT] Voice audio cached → $path');
+
+      return NexusMessage(
+        id: msg.id,
+        fromDid: msg.fromDid,
+        toDid: msg.toDid,
+        type: msg.type,
+        channel: msg.channel,
+        body: msg.body,
+        timestamp: msg.timestamp,
+        ttlHours: msg.ttlHours,
+        hopCount: msg.hopCount,
+        signature: msg.signature,
+        metadata: {
+          ...?msg.metadata,
+          'audio_local_path': path,
+        },
+      );
+    } catch (e) {
+      debugPrint('[CHAT] Voice audio cache failed: $e');
+      return msg;
     }
   }
 
@@ -721,23 +775,44 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       };
     }
 
-    final baseMeta = <String, dynamic>{
-      'duration_ms': durationMs,
-      'audio_local_path': filePath,
-      if (myEncKeyHex != null) 'enc_key': myEncKeyHex,
-      if (recipientEncKey != null) 'encrypted': true,
-      ...?replyMeta,
-    };
-
+    // Local message: plaintext body + local audio path.  'encrypted' flag
+    // shown as lock icon in the UI when the message was (or will be) sent E2E.
     final localMsg = NexusMessage.create(
       fromDid: myDid,
       toDid: recipientDid,
       type: NexusMessageType.voice,
       body: audioBase64,
-      metadata: baseMeta,
+      metadata: {
+        'duration_ms': durationMs,
+        'audio_local_path': filePath,
+        if (myEncKeyHex != null) 'enc_key': myEncKeyHex,
+        if (recipientEncKey != null) 'encrypted': true,
+        ...?replyMeta,
+      },
     );
 
-    NexusMessage transportMsg = localMsg;
+    // Transport message: omits the local file path; body is encrypted when
+    // the recipient's key is known.  If encryption fails for any reason the
+    // audio is still sent unencrypted (NIP-04 / LAN outer layer still applies)
+    // WITHOUT the 'encrypted' flag so the receiver does not try to decrypt it.
+    final transportBaseMeta = <String, dynamic>{
+      'duration_ms': durationMs,
+      if (myEncKeyHex != null) 'enc_key': myEncKeyHex,
+      ...?replyMeta,
+    };
+
+    NexusMessage transportMsg = NexusMessage(
+      id: localMsg.id,
+      fromDid: localMsg.fromDid,
+      toDid: localMsg.toDid,
+      type: NexusMessageType.voice,
+      body: audioBase64,
+      timestamp: localMsg.timestamp,
+      ttlHours: localMsg.ttlHours,
+      hopCount: localMsg.hopCount,
+      metadata: transportBaseMeta,
+    );
+
     if (recipientEncKey != null) {
       final encryptedBody = await MessageEncryption.encrypt(
         audioBase64,
@@ -755,13 +830,13 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
           ttlHours: localMsg.ttlHours,
           hopCount: localMsg.hopCount,
           metadata: {
-            'duration_ms': durationMs,
-            if (myEncKeyHex != null) 'enc_key': myEncKeyHex,
+            ...transportBaseMeta,
             'encrypted': true,
-            ...?replyMeta,
           },
         );
       }
+      // If encryptedBody is null the plaintext transportMsg above is used.
+      // No 'encrypted' flag → receiver plays audio directly.
     }
 
     await _manager.sendMessage(transportMsg, recipientDid: recipientDid);

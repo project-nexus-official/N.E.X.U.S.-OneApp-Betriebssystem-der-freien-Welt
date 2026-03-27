@@ -98,6 +98,47 @@ void main() {
       expect(decrypted, equals(plaintext));
     });
 
+    // Voice messages: base64 audio can easily exceed 65 535 characters.
+    // A 5-second AAC recording at 16 kHz / 32 kbps ≈ 20 KB raw → ~27 KB base64.
+    // A 15-second recording ≈ 60 KB raw → ~80 KB base64 (> old 2-byte limit).
+    test('large payload roundtrip (> 65535 chars – voice audio simulation)',
+        () async {
+      // 80 000 chars simulates a ~15-second voice message in base64.
+      final plaintext = 'A' * 80000;
+      final encrypted = await MessageEncryption.encrypt(
+        plaintext,
+        senderKeyPair: aliceKp,
+        recipientPublicKeyBytes: bobPub,
+      );
+      expect(encrypted, isNotNull,
+          reason: 'Encryption must succeed for large voice payloads');
+
+      final decrypted = await MessageEncryption.decrypt(
+        encrypted!,
+        recipientKeyPair: bobKp,
+        senderPublicKeyBytes: alicePub,
+      );
+      expect(decrypted, equals(plaintext),
+          reason: 'Decryption must recover the full large payload');
+    });
+
+    test('very large payload roundtrip (300 KB – max voice message)', () async {
+      // 400 000 chars ≈ 300 KB raw audio → 5-minute recording at 32 kbps.
+      final plaintext = 'B' * 400000;
+      final encrypted = await MessageEncryption.encrypt(
+        plaintext,
+        senderKeyPair: aliceKp,
+        recipientPublicKeyBytes: bobPub,
+      );
+      expect(encrypted, isNotNull);
+      final decrypted = await MessageEncryption.decrypt(
+        encrypted!,
+        recipientKeyPair: bobKp,
+        senderPublicKeyBytes: alicePub,
+      );
+      expect(decrypted, equals(plaintext));
+    });
+
     test('wrong key returns null (no crash)', () async {
       final charlieKp = await X25519().newKeyPair();
       const plaintext = 'Geheimnis';

@@ -108,6 +108,13 @@ Phase 2: Care-System + Sphären-Plugins
   - `insertMessage()` prüft vor jedem Insert ob ID bereits existiert → silent skip
   - Presence-Subscription bleibt immer bei "letzte 5 Minuten" (keine Catch-Up nötig)
   - DMs und Broadcasts beide mit Catch-Up
+  - **Sprachnachrichten-Catch-Up (Fix)**:
+    - Bug: `MessageEncryption._pad` nutzte 2-Byte Längenpräfix (max 65535 Bytes); Base64-Audio >~12s überläuft das → `encrypt()` gab silent `null` zurück
+    - Fix: 4-Byte big-endian Längenpräfix in `_pad`/`_unpad` (unterstützt bis ~4 GB); `_nextPadLength` nicht mehr auf 65536 geclampt
+    - Fix: `sendVoice` Null-Encryption-Fallthrough: Transport-Msg setzt `encrypted: true` jetzt nur wenn Verschlüsselung tatsächlich erfolgreich war
+    - Fix: `_cacheVoiceAudio` speichert empfangenes Audio permanent in App-Documents-Verzeichnis (verhindert Verlust beim Temp-Bereinigung)
+    - Limitation: Öffentliche Nostr-Relays (Größenlimit ~32–128 KB) speichern große Voice-Events ggf. nicht → Catch-Up über Relay nur für kurze Nachrichten zuverlässig; Live-Weiterleitung funktioniert immer
+    - Tests: 15 Tests in `voice_catchup_test.dart`, 2 neue Großpayload-Tests in `encryption_test.dart`
 
 ## Aktueller Fokus
 >>> PHASE 1a: Fundament + Identität (in Fertigstellung) <<<
