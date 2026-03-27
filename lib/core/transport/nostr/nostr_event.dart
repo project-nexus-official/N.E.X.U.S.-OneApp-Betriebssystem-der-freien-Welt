@@ -8,6 +8,9 @@ import 'nostr_keys.dart';
 
 /// Nostr event kinds used by NEXUS.
 class NostrKind {
+  /// NIP-01 kind 0 – user metadata (name, about, picture).
+  static const int metadata = 0;
+
   /// NIP-01 text note (used for #mesh broadcasts).
   static const int textNote = 1;
 

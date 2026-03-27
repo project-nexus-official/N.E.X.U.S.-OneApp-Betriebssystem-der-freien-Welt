@@ -88,12 +88,9 @@ class ConversationService {
           // Skip conversations with blocked peers.
           if (ContactService.instance.isBlocked(peerDid)) continue;
 
-          // Look up pseudonym from contacts, fall back to short DID.
+          // Look up display name via central resolver (contact → live peer → DID fragment).
+          final pseudonym = ContactService.instance.getDisplayName(peerDid);
           final contact = _findContact(peerDid);
-          final pseudonym = contact?.pseudonym ??
-              (peerDid.length > 12
-                  ? peerDid.substring(peerDid.length - 12)
-                  : peerDid);
           final profileImage = contact?.profileImage;
 
           conversations.add(Conversation(

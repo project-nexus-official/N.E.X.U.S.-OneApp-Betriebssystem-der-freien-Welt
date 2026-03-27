@@ -68,6 +68,7 @@ class NostrTransport implements MessageTransport {
   String? _dmSubId;
   String? _meshSubId;
   String? _presenceSubId;
+  String? _metadataSubId;
 
   StreamSubscription<NostrEvent>? _eventSub;
   Timer? _presenceTimer;
@@ -144,6 +145,7 @@ class NostrTransport implements MessageTransport {
         _state == TransportState.scanning) {
       if (_keys != null) {
         _setupSubscriptions();
+        await _publishMetadata();
         await _sendPresenceAnnouncement();
         _startPresenceTimer();
       }
@@ -162,6 +164,7 @@ class NostrTransport implements MessageTransport {
 
     if (_keys != null) {
       _setupSubscriptions();
+      await _publishMetadata();
       await _sendPresenceAnnouncement();
       _startPresenceTimer();
     } else {
@@ -178,6 +181,7 @@ class NostrTransport implements MessageTransport {
     print('[NOSTR] Keys initialised, pubkey: ${_keys!.publicKeyHex}');
     if (_state == TransportState.connected) {
       _setupSubscriptions();
+      await _publishMetadata();
       await _sendPresenceAnnouncement();
       _startPresenceTimer();
     }
@@ -191,6 +195,7 @@ class NostrTransport implements MessageTransport {
     if (_dmSubId != null) _relayManager.closeSubscription(_dmSubId!);
     if (_meshSubId != null) _relayManager.closeSubscription(_meshSubId!);
     if (_presenceSubId != null) _relayManager.closeSubscription(_presenceSubId!);
+    if (_metadataSubId != null) _relayManager.closeSubscription(_metadataSubId!);
     await _eventSub?.cancel();
     await _relayManager.stop();
     _peers.clear();
@@ -265,6 +270,25 @@ class NostrTransport implements MessageTransport {
 
   // ── Presence ──────────────────────────────────────────────────────────────
 
+  /// Publishes a Kind-0 (NIP-01) metadata event with our own display name.
+  ///
+  /// Relays store only the latest kind-0 per pubkey, so contacts can fetch it
+  /// at any time to learn our pseudonym even without a live presence event.
+  Future<void> _publishMetadata() async {
+    if (_keys == null) return;
+    final event = NostrEvent.create(
+      keys: _keys!,
+      kind: NostrKind.metadata,
+      content: jsonEncode({
+        'name': localPseudonym,
+        'about': 'DID: $localDid',
+      }),
+      tags: [],
+    );
+    _relayManager.publish(event);
+    print('[NOSTR] Published Kind-0 metadata (name: $localPseudonym)');
+  }
+
   /// Publishes a Kind 30078 presence announcement so other nodes can find us.
   Future<void> _sendPresenceAnnouncement() async {
     if (_keys == null) return;
@@ -338,6 +362,7 @@ class NostrTransport implements MessageTransport {
     if (_dmSubId != null) _relayManager.closeSubscription(_dmSubId!);
     if (_meshSubId != null) _relayManager.closeSubscription(_meshSubId!);
     if (_presenceSubId != null) _relayManager.closeSubscription(_presenceSubId!);
+    if (_metadataSubId != null) _relayManager.closeSubscription(_metadataSubId!);
 
     print('[NOSTR] Setting up subscriptions for pubkey: '
         '${myPubkey.substring(0, 8)}…${myPubkey.substring(myPubkey.length - 4)}');
@@ -378,12 +403,31 @@ class NostrTransport implements MessageTransport {
       'since': nowSeconds - 300,
     });
     print('[NOSTR] Presence sub: $_presenceSubId');
+
+    // Kind-0 metadata for known contacts (fetch their display names).
+    // Combine pubkeys from persisted contacts and learned DID mappings.
+    final contactPubkeys = <String>{
+      ...ContactService.instance.contacts
+          .where((c) => c.nostrPubkey != null && c.nostrPubkey!.isNotEmpty)
+          .map((c) => c.nostrPubkey!),
+      ..._didToNostrPubkey.values,
+    };
+    if (contactPubkeys.isNotEmpty) {
+      _metadataSubId = _relayManager.subscribe({
+        'kinds': [NostrKind.metadata],
+        'authors': contactPubkeys.toList(),
+      });
+      print('[NOSTR] Metadata sub: $_metadataSubId  '
+          '(${contactPubkeys.length} contacts)');
+    }
   }
 
   void _onRelayEvent(NostrEvent event) {
     if (_keys == null) return;
 
     switch (event.kind) {
+      case NostrKind.metadata:
+        _handleMetadataEvent(event);
       case NostrKind.encryptedDm:
         _handleDm(event);
       case NostrKind.textNote:
@@ -478,7 +522,38 @@ class NostrTransport implements MessageTransport {
       // Record presence timestamp for timeout tracking
       _peerLastPresence[event.pubkey] = DateTime.now().toUtc();
 
+      // Persist the peer's self-reported name so it survives across sessions.
+      ContactService.instance.updatePseudonymIfBetter(did, pseudonym);
+
       _peersController.add(List.from(_peers.values));
+    } catch (_) {}
+  }
+
+  /// Handles a Kind-0 (NIP-01 metadata) event.
+  ///
+  /// Updates the stored pseudonym of a known contact when their self-reported
+  /// name arrives from the relay.
+  void _handleMetadataEvent(NostrEvent event) {
+    if (_keys == null) return;
+    // Ignore our own metadata events
+    if (event.pubkey == _keys!.publicKeyHex) return;
+
+    try {
+      final data = jsonDecode(event.content) as Map<String, dynamic>;
+      final name = (data['name'] as String?)?.trim() ?? '';
+      if (name.isEmpty) return;
+
+      // Resolve the DID for this Nostr pubkey
+      final did = _didToNostrPubkey.entries
+          .where((e) => e.value == event.pubkey)
+          .map((e) => e.key)
+          .firstOrNull;
+
+      if (did != null) {
+        ContactService.instance.updatePseudonymIfBetter(did, name);
+        print('[NOSTR] Kind-0 name update: '
+            '${event.pubkey.substring(0, 8)}… → $name');
+      }
     } catch (_) {}
   }
 

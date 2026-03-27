@@ -679,7 +679,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                 child: Text(
                                   widget.isBroadcast
                                       ? '#mesh'
-                                      : widget.peerPseudonym,
+                                      : ContactService.instance
+                                          .getDisplayName(widget.peerDid),
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
@@ -2099,6 +2100,10 @@ class _UnknownPeerBannerState extends State<_UnknownPeerBanner> {
     final isKnown = ContactService.instance.findByDid(widget.peerDid) != null;
     if (isKnown || _dismissed) return const SizedBox.shrink();
 
+    // Use the best available name (live peer > contact > DID fragment).
+    final displayName =
+        ContactService.instance.getDisplayName(widget.peerDid);
+
     return Container(
       color: AppColors.surfaceVariant,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -2108,22 +2113,23 @@ class _UnknownPeerBannerState extends State<_UnknownPeerBanner> {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              '${widget.peerPseudonym} ist noch kein Kontakt',
+              '$displayName ist noch kein Kontakt',
               style: const TextStyle(color: Colors.grey, fontSize: 13),
               overflow: TextOverflow.ellipsis,
             ),
           ),
           TextButton(
             onPressed: () async {
+              final messenger = ScaffoldMessenger.of(context);
               await ContactService.instance
-                  .addContact(widget.peerDid, widget.peerPseudonym);
+                  .addContact(widget.peerDid, displayName);
               if (mounted) {
                 setState(() {});
                 widget.onAdded();
-                ScaffoldMessenger.of(context).showSnackBar(
+                messenger.showSnackBar(
                   SnackBar(
-                    content: Text(
-                        '${widget.peerPseudonym} zu Kontakten hinzugefügt.'),
+                    content:
+                        Text('$displayName zu Kontakten hinzugefügt.'),
                   ),
                 );
               }

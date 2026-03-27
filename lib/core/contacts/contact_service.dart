@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:nexus_oneapp/core/identity/profile.dart';
 import 'package:nexus_oneapp/core/storage/pod_database.dart';
+import 'package:nexus_oneapp/core/transport/transport_manager.dart';
 import 'contact.dart';
 
 /// Manages contacts and trust levels, backed by the encrypted [PodDatabase].
@@ -228,6 +229,51 @@ class ContactService {
 
   /// Looks up a contact by DID. Returns null if not known.
   Contact? findByDid(String did) => _findByDid(did);
+
+  /// Returns the best available display name for [did].
+  ///
+  /// Priority:
+  ///   1. Contact's pseudonym (if set and not just a raw DID fragment).
+  ///   2. Live transport peer name (correct but ephemeral – requires peer online).
+  ///   3. Last 12 characters of the DID as final fallback.
+  String getDisplayName(String did) {
+    final contact = _findByDid(did);
+    if (contact != null) {
+      final p = contact.pseudonym.trim();
+      if (p.isNotEmpty && !_isDidFragment(p, did)) return p;
+    }
+    // Fall back to live peer name from any active transport
+    final livePeer = TransportManager.instance.peers
+        .where((p) => p.did == did)
+        .firstOrNull;
+    if (livePeer != null && livePeer.pseudonym.isNotEmpty) {
+      return livePeer.pseudonym;
+    }
+    return did.length > 12 ? did.substring(did.length - 12) : did;
+  }
+
+  /// Updates a contact's stored pseudonym only when [pseudonym] is a proper
+  /// name (i.e. not a raw DID fragment) and differs from what is stored.
+  ///
+  /// Called when a presence event or Kind-0 metadata event arrives with the
+  /// peer's self-reported name.
+  Future<void> updatePseudonymIfBetter(String did, String pseudonym) async {
+    final trimmed = pseudonym.trim();
+    if (trimmed.isEmpty) return;
+    final contact = _findByDid(did);
+    if (contact == null) return;
+    if (_isDidFragment(trimmed, did)) return; // not an improvement
+    if (contact.pseudonym == trimmed) return; // no change
+    contact.pseudonym = trimmed;
+    await _persist(contact);
+  }
+
+  /// Returns true when [value] is just the tail fragment of [did] (i.e. was
+  /// generated as a fallback, not supplied by the peer themselves).
+  bool _isDidFragment(String value, String did) {
+    if (did.length > 12) return value == did.substring(did.length - 12);
+    return value == did;
+  }
 
   /// Returns the profile fields of [myProfile] that a contact with [did]
   /// is allowed to see, based on their trust level.

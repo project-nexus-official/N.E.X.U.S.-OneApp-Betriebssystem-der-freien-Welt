@@ -118,6 +118,23 @@ Phase 2: Care-System + Sphären-Plugins
   - Android: Kamera-Berechtigung in AndroidManifest eingetragen
   - Tests: 24 Tests in `qr_scanner_test.dart`
   - `QrContactPayload` (pure model in `lib/features/contacts/qr_contact_payload.dart`): `tryParse()` validiert type, did:key:-Prefix, Pseudonym; `toJsonString()` generiert das QR-Format
+- **Anzeigename-Fix + Nostr Kind-0 (komplett)**:
+  - **Root-Cause**: `_UnknownPeerBanner` rief `ContactService.addContact(did, peerPseudonym)` auf, wobei `peerPseudonym` bereits ein DID-Fragment war (letzten 12 Zeichen) → Kontakt dauerhaft mit falschem Namen gespeichert
+  - **Fix**: Zentrale `ContactService.getDisplayName(did)` Funktion mit Fallback-Kette:
+    1. Kontakt-Pseudonym (wenn nicht ein DID-Fragment)
+    2. Live-Peer aus `TransportManager.instance.peers` (korrekt, aber ephemer)
+    3. Letzte 12 Zeichen der DID (letzter Ausweg)
+  - `ContactService.updatePseudonymIfBetter(did, pseudonym)`: Aktualisiert gespeicherten Pseudonym nur wenn neuer Name kein DID-Fragment ist
+  - `ConversationService.getConversations()`: Nutzt jetzt `getDisplayName()` statt eigenem Fallback
+  - `ConversationScreen` AppBar: Zeigt jetzt live `getDisplayName()` statt statischem `widget.peerPseudonym`
+  - `_UnknownPeerBanner`: Ermittelt echten Namen per `getDisplayName()` vor dem Speichern + Anzeigen
+  - **Nostr Kind-0 (NIP-01 Metadata)**:
+    - `NostrKind.metadata = 0` in `nostr_event.dart`
+    - Beim Start: Eigenes Profil als Kind-0 publizieren (`name`, `about: "DID: ..."`)
+    - Subscription auf Kind-0 Events von bekannten Kontakten (kombiniert aus `Contact.nostrPubkey` und `_didToNostrPubkey`)
+    - `_handleMetadataEvent`: Aktualisiert Kontakt-Pseudonym via `updatePseudonymIfBetter()`
+    - Presence-Handler: Aktualisiert Kontakt-Pseudonym auch aus Presence-Events (Kind 30078)
+  - Tests: 10 Tests in `display_name_test.dart`
 - **Nostr Catch-Up (verpasste Nachrichten, komplett)**:
   - Letzter Nachrichten-Timestamp in SharedPreferences gespeichert
   - Beim App-Start: Nostr-Subscriptions starten ab diesem Timestamp (minus 60s Puffer)
