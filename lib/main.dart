@@ -1,11 +1,14 @@
 import 'dart:io';
+import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:nexus_oneapp/core/contacts/contact_service.dart';
 import 'package:nexus_oneapp/core/crypto/encryption_keys.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
 import 'package:nexus_oneapp/core/identity/profile_service.dart';
 import 'package:nexus_oneapp/features/chat/conversation_service.dart';
+import 'package:nexus_oneapp/features/dashboard/node_counter_service.dart';
 import 'package:nexus_oneapp/core/router.dart';
 import 'package:nexus_oneapp/core/storage/pod_database.dart';
 import 'package:nexus_oneapp/core/storage/retention_service.dart';
@@ -15,23 +18,132 @@ import 'package:nexus_oneapp/services/notification_service.dart';
 import 'package:nexus_oneapp/services/notification_settings_service.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
 import 'package:nexus_oneapp/shared/widgets/notification_banner.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+// ── Crash logging ─────────────────────────────────────────────────────────────
+//
+// Crash logging writes errors to a file for debugging purposes.
+// It does NOT trigger any "safe mode" or restricted startup — the app always
+// starts normally regardless of what the log contains.
+
+File? _crashLogFile;
+
+/// Fallback log path using environment variables, before path_provider is ready.
+String _fallbackLogPath() {
+  if (Platform.isWindows) {
+    final localAppData = Platform.environment['LOCALAPPDATA'];
+    if (localAppData != null) {
+      return '$localAppData\\nexus_oneapp\\nexus_crash.log';
+    }
+    final profile =
+        Platform.environment['USERPROFILE'] ?? Directory.systemTemp.path;
+    return '$profile\\AppData\\Local\\nexus_oneapp\\nexus_crash.log';
+  }
+  return '${Directory.systemTemp.path}/nexus_crash.log';
+}
+
+void _logCrash(String source, Object error, StackTrace? stack) {
+  try {
+    final timestamp = DateTime.now().toIso8601String();
+    final platformInfo =
+        'OS: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}';
+    final entry = '[$timestamp] [$source]\n'
+        '$platformInfo\n'
+        'Dart SDK: ${Platform.version}\n'
+        'ERROR: $error\n'
+        '${stack ?? "(no stack trace)"}\n'
+        '${"─" * 60}\n';
+
+    final logFile = _crashLogFile;
+    if (logFile != null) {
+      logFile.writeAsStringSync(entry, mode: FileMode.append, flush: true);
+    } else {
+      // Early-crash fallback: write to known path without path_provider.
+      try {
+        final fallback = File(_fallbackLogPath());
+        fallback.parent.createSync(recursive: true);
+        fallback.writeAsStringSync(entry, mode: FileMode.append, flush: true);
+      } catch (_) {}
+    }
+    debugPrint('[NEXUS CRASH] $source: $error');
+  } catch (_) {
+    // Never throw from a crash handler.
+  }
+}
+
+/// Initialises the crash log file. Clears any previous log on a clean start
+/// so stale entries don't accumulate. Does NOT affect startup behaviour.
+Future<void> _initCrashLog() async {
+  try {
+    final docsDir = await getApplicationDocumentsDirectory();
+    _crashLogFile = File('${docsDir.path}/nexus_crash.log');
+    // Clear old log each fresh launch so the file stays small.
+    if (await _crashLogFile!.exists()) {
+      await _crashLogFile!.writeAsString('');
+    }
+  } catch (e) {
+    // If path_provider fails, fall back to the env-based path.
+    try {
+      final fallback = File(_fallbackLogPath());
+      fallback.parent.createSync(recursive: true);
+      _crashLogFile = fallback;
+    } catch (_) {}
+    debugPrint('[NEXUS] Could not init crash log: $e');
+  }
+}
+
+// ── Entry point ───────────────────────────────────────────────────────────────
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // sqflite on desktop requires FFI initialisation.
-  if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfi;
+  // Install Flutter/Dart error handlers before any other work.
+  // These log to file for debugging but never alter startup behaviour.
+  FlutterError.onError = (details) {
+    _logCrash('FlutterError', details.exception, details.stack);
+    FlutterError.presentError(details);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    _logCrash('PlatformDispatcher', error, stack);
+    return false; // let Flutter handle the error normally
+  };
+
+  await _initCrashLog();
+
+  Object? startupError;
+  StackTrace? startupStack;
+
+  try {
+    // sqflite on desktop requires FFI initialisation.
+    // On Android/iOS the default factory is already correct – skip this block.
+    if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+    }
+
+    await IdentityService.instance.init();
+    if (IdentityService.instance.hasIdentity) {
+      await initServicesAfterIdentity();
+    }
+  } catch (e, st) {
+    _logCrash('main.startup', e, st);
+    startupError = e;
+    startupStack = st;
   }
 
-  await IdentityService.instance.init();
-  if (IdentityService.instance.hasIdentity) {
-    await initServicesAfterIdentity();
+  if (startupError != null) {
+    // Show a visible error screen instead of a silent crash.
+    // This only fires when startup itself throws — not on routine Flutter errors.
+    runApp(_CrashReportApp(
+      error: startupError,
+      stackTrace: startupStack,
+      logPath: _crashLogFile?.path ?? _fallbackLogPath(),
+    ));
+  } else {
+    runApp(const NexusApp());
   }
-  runApp(const NexusApp());
 }
 
 /// Opens the encrypted POD and loads profile + contacts.
@@ -40,8 +152,7 @@ Future<void> initServicesAfterIdentity() async {
   try {
     final encKey = await IdentityService.instance.getPodEncryptionKey();
     await PodDatabase.instance.open(encKey);
-    final pseudonym =
-        IdentityService.instance.currentIdentity!.pseudonym;
+    final pseudonym = IdentityService.instance.currentIdentity!.pseudonym;
     await ProfileService.instance.load(pseudonym);
     await ContactService.instance.load();
     await ConversationService.instance.load();
@@ -50,14 +161,16 @@ Future<void> initServicesAfterIdentity() async {
     await NotificationSettingsService.instance.load();
     await NotificationService.instance.init(
       onTap: (payload) {
-        // Navigation happens via global key – see router
         debugPrint('[NOTIF] Tapped: $payload');
       },
     );
     await BackgroundServiceManager.instance.init();
-    // Initialize X25519 encryption keys
+    // Initialize node counter (lazy – starts listening once transports run).
+    NodeCounterService.instance.init();
+    // Initialize X25519 encryption keys.
     try {
-      final ed25519Bytes = await IdentityService.instance.getEd25519PrivateBytes();
+      final ed25519Bytes =
+          await IdentityService.instance.getEd25519PrivateBytes();
       if (ed25519Bytes != null) {
         await EncryptionKeys.instance.initFromEd25519Private(ed25519Bytes);
       }
@@ -68,6 +181,8 @@ Future<void> initServicesAfterIdentity() async {
     debugPrint('[NEXUS] Storage init error: $e');
   }
 }
+
+// ── App widget ────────────────────────────────────────────────────────────────
 
 class NexusApp extends StatelessWidget {
   const NexusApp({super.key});
@@ -95,6 +210,114 @@ class NexusApp extends StatelessWidget {
     );
   }
 }
+
+// ── Crash report app ──────────────────────────────────────────────────────────
+
+/// Shown instead of the main app when startup itself fails fatally
+/// (e.g. sqfliteFfiInit throws on Windows, or IdentityService init throws).
+class _CrashReportApp extends StatelessWidget {
+  final Object error;
+  final StackTrace? stackTrace;
+  final String logPath;
+
+  const _CrashReportApp({
+    required this.error,
+    required this.logPath,
+    this.stackTrace,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'NEXUS OneApp',
+      debugShowCheckedModeBanner: false,
+      darkTheme: ThemeData.dark(),
+      themeMode: ThemeMode.dark,
+      home: Scaffold(
+        backgroundColor: const Color(0xFF0D1B2A),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.error_outline,
+                    color: Color(0xFFD4AF37), size: 48),
+                const SizedBox(height: 16),
+                const Text(
+                  'NEXUS konnte nicht starten',
+                  style: TextStyle(
+                    color: Color(0xFFD4AF37),
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Ein Fehler beim Start verhinderte das Laden der App. '
+                  'Bitte sende die folgende Log-Datei an den Support:',
+                  style: TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1A2D3E),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                        color: const Color(0xFFD4AF37).withAlpha(80)),
+                  ),
+                  child: Text(
+                    logPath,
+                    style: const TextStyle(
+                      color: Color(0xFFD4AF37),
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1A2D3E),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    error.toString(),
+                    style: const TextStyle(
+                      color: Colors.white54,
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                    ),
+                    maxLines: 6,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFD4AF37),
+                      foregroundColor: Colors.black,
+                    ),
+                    onPressed: () => exit(0),
+                    child: const Text('App beenden'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Splash wrapper ────────────────────────────────────────────────────────────
 
 class _SplashWrapper extends StatefulWidget {
   final Widget child;
@@ -138,7 +361,6 @@ class _SplashWrapperState extends State<_SplashWrapper>
   @override
   Widget build(BuildContext context) {
     if (!_showSplash) return widget.child;
-
     return FadeTransition(
       opacity: _fadeOut,
       child: const _SplashScreen(),
@@ -151,15 +373,15 @@ class _SplashScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    return Scaffold(
       backgroundColor: AppColors.deepBlue,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _NexusLogo(),
-            SizedBox(height: 32),
-            Text(
+            const _NexusLogo(),
+            const SizedBox(height: 32),
+            const Text(
               'N.E.X.U.S. OneApp',
               style: TextStyle(
                 color: AppColors.gold,
@@ -168,8 +390,8 @@ class _SplashScreen extends StatelessWidget {
                 letterSpacing: 2.0,
               ),
             ),
-            SizedBox(height: 8),
-            Text(
+            const SizedBox(height: 8),
+            const Text(
               'Für die Menschheitsfamilie',
               style: TextStyle(
                 color: AppColors.onDark,
