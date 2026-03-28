@@ -8,6 +8,7 @@ import 'package:nexus_oneapp/shared/theme/app_theme.dart';
 import 'package:nexus_oneapp/shared/widgets/identicon.dart';
 
 import 'contact_detail_screen.dart';
+import 'manual_key_input_dialog.dart';
 import 'widgets/trust_badge.dart';
 
 /// Full-screen contacts management view.
@@ -107,8 +108,17 @@ class _ContactsScreenState extends State<ContactsScreen> {
               },
             ),
             ListTile(
+              leading: const Icon(Icons.vpn_key, color: AppColors.gold),
+              title: const Text('Schlüssel eingeben'),
+              subtitle: const Text('Netzwerkschlüssel, npub oder DID einfügen'),
+              onTap: () {
+                Navigator.pop(ctx);
+                showManualKeyInputDialog(context);
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.radar, color: AppColors.gold),
-              title: const Text('Peers in der Nähe'),
+              title: const Text('Peers im Netzwerk'),
               subtitle: const Text('Entdecke Peers über BLE, LAN oder Nostr'),
               onTap: () {
                 Navigator.pop(ctx);
@@ -205,7 +215,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                   )
                 : ListView.separated(
                     itemCount: visible.length,
-                    separatorBuilder: (_, __) => const Divider(
+                    separatorBuilder: (_, _) => const Divider(
                       height: 1,
                       indent: 72,
                       color: AppColors.surfaceVariant,
@@ -361,7 +371,7 @@ class _EmptyState extends StatelessWidget {
             Text(
               hasContacts
                   ? 'Kein Kontakt entspricht dem Filter.'
-                  : 'Noch keine Kontakte.\nEntdecke Peers in der Nähe oder scanne einen QR-Code!',
+                  : 'Noch keine Kontakte.\nEntdecke Peers im Netzwerk oder scanne einen QR-Code!',
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.grey, fontSize: 16),
             ),

@@ -29,7 +29,10 @@ import 'message_search_screen.dart';
 /// Swipe und Tab-Tap wechseln zwischen den Tabs.
 /// FAB zeigt kontextabhängige Aktionen je nach aktivem Tab.
 class ConversationsScreen extends StatefulWidget {
-  const ConversationsScreen({super.key});
+  /// Which inner tab to show on first render: 0 = Chats, 1 = Kanäle.
+  final int initialTabIndex;
+
+  const ConversationsScreen({super.key, this.initialTabIndex = 0});
 
   @override
   State<ConversationsScreen> createState() => _ConversationsScreenState();
@@ -46,7 +49,11 @@ class _ConversationsScreenState extends State<ConversationsScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(
+      length: 2,
+      vsync: this,
+      initialIndex: widget.initialTabIndex.clamp(0, 1),
+    );
     _tabController.addListener(() => setState(() {})); // rebuild FAB on tab change
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -209,7 +216,7 @@ class _ConversationsScreenState extends State<ConversationsScreen>
             ),
             ListTile(
               leading: const Icon(Icons.radar, color: AppColors.gold),
-              title: const Text('Peers in der Nähe'),
+              title: const Text('Peers im Netzwerk'),
               onTap: () {
                 Navigator.pop(ctx);
                 _openRadar();
@@ -665,7 +672,7 @@ class _EmptyChatsState extends StatelessWidget {
             const Icon(Icons.chat_bubble_outline, size: 64, color: Colors.grey),
             const SizedBox(height: 16),
             const Text(
-              'Noch keine Nachrichten.\nFinde Peers in der Nähe!',
+              'Noch keine Nachrichten.\nFinde Peers im Netzwerk!',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey, fontSize: 16),
             ),

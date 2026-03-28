@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
 
@@ -11,6 +12,7 @@ import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/identicon.dart';
 import '../chat/chat_provider.dart';
 import 'contact_detail_screen.dart';
+import 'manual_key_input_dialog.dart';
 import 'qr_contact_payload.dart';
 
 /// Full-screen QR code scanner for adding NEXUS contacts.
@@ -79,25 +81,17 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
   void _tryParseManual() {
     final text = _manualCtrl.text.trim();
     if (text.isEmpty) {
-      setState(() => _manualError = 'Bitte JSON oder DID eingeben');
+      setState(() => _manualError = 'Bitte Schlüssel oder DID eingeben');
       return;
     }
-    // Try full JSON first, then bare DID.
-    QrContactPayload? payload = QrContactPayload.tryParse(text);
-    if (payload == null && text.startsWith('did:key:')) {
-      payload = QrContactPayload(did: text, pseudonym: _shortDid(text));
-    }
+    final payload = tryParseAnyKey(text);
     if (payload == null) {
-      setState(() => _manualError = 'Kein NEXUS-Kontakt erkannt');
+      setState(() => _manualError =
+          'Kein gültiger Schlüssel erkannt (did:key:…, npub1…, Hex oder JSON)');
       return;
     }
     setState(() => _manualError = null);
     _showResultSheet(payload);
-  }
-
-  String _shortDid(String did) {
-    if (did.length <= 20) return did;
-    return '${did.substring(0, 10)}…${did.substring(did.length - 6)}';
   }
 
   // ── Result bottom sheet ─────────────────────────────────────────────────────
@@ -211,6 +205,25 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
             ),
           ),
         ),
+
+        // Manual key fallback link
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 80,
+          child: GestureDetector(
+            onTap: () => showManualKeyInputDialog(context),
+            child: const Text(
+              'Schlüssel manuell eingeben',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppColors.gold,
+                fontSize: 13,
+                decoration: TextDecoration.underline,
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -267,16 +280,17 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
               ],
             ),
             const SizedBox(height: 32),
-            const Icon(Icons.qr_code_scanner, color: AppColors.gold, size: 64),
+            const Icon(Icons.vpn_key, color: AppColors.gold, size: 64),
             const SizedBox(height: 16),
             const Text(
-              'QR-Code-Scanner ist auf diesem Gerät nicht verfügbar.',
-              style: TextStyle(color: AppColors.onDark, fontSize: 16),
+              'Auf Desktop-Geräten kannst du den QR-Code nicht scannen. '
+              'Bitte füge den Kontakt über seinen Netzwerkschlüssel hinzu.',
+              style: TextStyle(color: AppColors.onDark, fontSize: 15),
             ),
             const SizedBox(height: 8),
             const Text(
-              'Gib stattdessen den QR-Code-Inhalt (JSON) oder die DID manuell ein:',
-              style: TextStyle(color: Colors.grey, fontSize: 14),
+              'Akzeptiert: did:key:…  ·  npub1…  ·  64-stelliger Hex  ·  NEXUS-JSON',
+              style: TextStyle(color: Colors.grey, fontSize: 12),
             ),
             const SizedBox(height: 24),
             _ManualInputWidget(
@@ -324,6 +338,11 @@ class _ManualInputWidget extends StatelessWidget {
     required this.onBack,
   });
 
+  Future<void> _paste() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (data?.text != null) controller.text = data!.text!.trim();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -331,14 +350,18 @@ class _ManualInputWidget extends StatelessWidget {
       children: [
         TextField(
           controller: controller,
-          maxLines: 4,
+          maxLines: 3,
+          minLines: 1,
           style: const TextStyle(color: AppColors.onDark, fontSize: 13),
           decoration: InputDecoration(
-            hintText: '{"type":"nexus-contact","did":"did:key:z6Mk…",…}\noder einfach: did:key:z6Mk…',
+            hintText: 'did:key:z6Mk…  ·  npub1…  ·  64-stelliger Hex',
             hintStyle: const TextStyle(color: Colors.grey, fontSize: 12),
             errorText: error,
+            errorMaxLines: 2,
             filled: true,
             fillColor: AppColors.surfaceVariant,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: AppColors.gold, width: 1),
@@ -346,6 +369,12 @@ class _ManualInputWidget extends StatelessWidget {
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: AppColors.gold, width: 2),
+            ),
+            suffixIcon: IconButton(
+              icon: const Icon(Icons.content_paste,
+                  color: AppColors.gold, size: 20),
+              tooltip: 'Aus Zwischenablage einfügen',
+              onPressed: _paste,
             ),
           ),
         ),

@@ -497,7 +497,7 @@ class _EmptyPeerList extends StatelessWidget {
       child: Padding(
         padding: EdgeInsets.all(32),
         child: Text(
-          'Keine NEXUS-Nodes in der Nähe.\n'
+          'Keine NEXUS-Nodes im Netzwerk.\n'
           'Starte die App auf einem anderen Gerät im selben Netzwerk.',
           textAlign: TextAlign.center,
           style: TextStyle(color: Colors.grey),
