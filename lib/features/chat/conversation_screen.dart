@@ -834,7 +834,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
                   SizedBox(
                     height: 280,
                     child: EmojiPicker(
-                      textEditingController: _textCtrl,
                       onEmojiSelected: (_, emoji) =>
                           _onEmojiSelected(emoji.emoji),
                       onBackspacePressed: () {
