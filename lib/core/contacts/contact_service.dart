@@ -32,8 +32,14 @@ class ContactService {
               .where((r) => r['_deleted'] != true)
               .map((r) => Contact.fromJson(r)),
         );
-    } catch (_) {
+      debugPrint('[CONTACTS] Loaded ${_contacts.length} contacts from DB');
+      for (final c in _contacts) {
+        debugPrint('[CONTACTS]   ${c.did.length > 16 ? c.did.substring(c.did.length - 16) : c.did}'
+            '  "${c.pseudonym}"  trust=${c.trustLevel.name}');
+      }
+    } catch (e) {
       // Database not yet open (e.g. during onboarding) – ignore.
+      debugPrint('[CONTACTS] load() failed (DB not open?): $e');
     }
   }
 

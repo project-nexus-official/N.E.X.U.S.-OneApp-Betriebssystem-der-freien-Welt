@@ -1053,6 +1053,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _loadAndMergeFromDb(String convId) async {
     try {
       final rows = await PodDatabase.instance.listMessages(convId);
+      debugPrint('[CHAT] Loading ${rows.length} messages from DB for conv=$convId');
       final dbMsgs = rows.map((row) {
         try {
           return NexusMessage.fromJson(
@@ -1073,11 +1074,15 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       final merged = [...dbMsgs, ...newOnly]
         ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
+      debugPrint('[CHAT] Merged cache: ${merged.length} messages '
+          '(${dbMsgs.length} from DB, ${newOnly.length} in-memory-only) '
+          'for conv=$convId');
       _conversationCache[convId] = merged;
       _cacheLoadedFromDb.add(convId);
-    } catch (_) {
+    } catch (e, st) {
       // On error, mark as loaded so we don't retry on every call, and keep
       // whatever in-memory messages exist.
+      debugPrint('[CHAT] _loadAndMergeFromDb failed for conv=$convId: $e\n$st');
       _cacheLoadedFromDb.add(convId);
     }
   }

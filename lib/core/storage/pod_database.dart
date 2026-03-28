@@ -1,5 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import 'pod_encryption.dart';
@@ -26,21 +29,42 @@ class PodDatabase {
 
   /// Opens (or creates) the database and sets the encryption key.
   /// [encKey] must be 32 bytes (256-bit AES key).
+  ///
+  /// The database is stored in [getApplicationDocumentsDirectory] so the path
+  /// stays stable regardless of the process working directory (important on
+  /// Windows desktop where sqflite_ffi defaults to the CWD).
   Future<void> open(Uint8List encKey) async {
     _encKey = encKey;
-    final path = p.join(await getDatabasesPath(), 'nexus_pod.db');
+
+    // Use path_provider so the path is consistent across restarts on all
+    // platforms (sqflite_ffi otherwise falls back to the CWD on Windows).
+    final docsDir = await getApplicationDocumentsDirectory();
+    final dbPath = p.join(docsDir.path, 'nexus_pod.db');
+
+    final dbFileExists = File(dbPath).existsSync();
+    debugPrint('[DB] Path: $dbPath  exists: $dbFileExists');
+
     _db = await openDatabase(
-      path,
+      dbPath,
       version: 4,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
+
     // Write schema version to metadata
     await _db!.insert(
       'pod_meta',
       {'key': 'schema_version', 'value': '1'},
       conflictAlgorithm: ConflictAlgorithm.ignore,
     );
+
+    final msgCount = (await _db!.rawQuery(
+      'SELECT COUNT(*) AS cnt FROM pod_messages',
+    )).first['cnt'] as int? ?? 0;
+    final contactCount = (await _db!.rawQuery(
+      'SELECT COUNT(*) AS cnt FROM pod_contacts',
+    )).first['cnt'] as int? ?? 0;
+    debugPrint('[DB] Opened – messages: $msgCount  contacts: $contactCount');
   }
 
   /// Allows injecting a pre-opened database (for tests).
@@ -218,6 +242,7 @@ class PodDatabase {
 
   Future<List<Map<String, dynamic>>> listContacts() async {
     final rows = await _database.query('pod_contacts', orderBy: 'updated_at DESC');
+    debugPrint('[DB] listContacts: rows=${rows.length}');
     final result = <Map<String, dynamic>>[];
     for (final row in rows) {
       final plain = await PodEncryption.decrypt(row['enc'] as String, _key);
@@ -243,7 +268,10 @@ class PodDatabase {
         'SELECT 1 FROM pod_messages WHERE message_id = ? LIMIT 1',
         [msgId],
       );
-      if (rows.isNotEmpty) return; // duplicate – skip silently
+      if (rows.isNotEmpty) {
+        debugPrint('[DB] insertMessage: duplicate $msgId – skip');
+        return;
+      }
     }
 
     final enc = await PodEncryption.encrypt(jsonEncode(data), _key);
@@ -251,10 +279,11 @@ class PodDatabase {
       'conversation_id': conversationId,
       'sender_did': senderDid,
       'enc': enc,
-      'ts': DateTime.now().millisecondsSinceEpoch,
+      'ts': data['ts'] as int? ?? DateTime.now().millisecondsSinceEpoch,
       'status': 'pending',
       if (msgId != null) 'message_id': msgId,
     });
+    debugPrint('[DB] insertMessage: saved ${msgId ?? "(no id)"} conv=$conversationId');
   }
 
   Future<List<Map<String, dynamic>>> listMessages(String conversationId) async {
@@ -264,12 +293,14 @@ class PodDatabase {
       whereArgs: [conversationId],
       orderBy: 'ts ASC',
     );
+    debugPrint('[DB] listMessages: conv=$conversationId  rows=${rows.length}');
     final result = <Map<String, dynamic>>[];
     for (final row in rows) {
       final plain = await PodEncryption.decrypt(row['enc'] as String, _key);
       final data = jsonDecode(plain) as Map<String, dynamic>;
       result.add({'sender_did': row['sender_did'], 'ts': row['ts'], ...data});
     }
+    debugPrint('[DB] listMessages: decoded ${result.length} messages for conv=$conversationId');
     return result;
   }
 
