@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/contacts/contact_service.dart';
@@ -337,24 +340,42 @@ class _InputBar extends StatelessWidget {
         child: Row(
           children: [
             Expanded(
-              child: TextField(
-                controller: controller,
-                focusNode: focusNode,
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => onSend(),
-                style: const TextStyle(color: AppColors.onDark),
-                decoration: InputDecoration(
-                  hintText: 'Nachricht an ${context
-                      .findAncestorWidgetOfExactType<ChannelConversationScreen>()
-                      ?.channel.name ?? 'Kanal'}…',
-                  hintStyle: TextStyle(color: Colors.grey[600]),
-                  filled: true,
-                  fillColor: AppColors.surfaceVariant,
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 10),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide.none,
+              child: Focus(
+                onKeyEvent: (_, event) {
+                  if (Platform.isAndroid || Platform.isIOS) {
+                    return KeyEventResult.ignored;
+                  }
+                  if (event is KeyDownEvent &&
+                      event.logicalKey == LogicalKeyboardKey.enter &&
+                      !HardwareKeyboard.instance.isShiftPressed) {
+                    onSend();
+                    return KeyEventResult.handled;
+                  }
+                  return KeyEventResult.ignored;
+                },
+                child: TextField(
+                  controller: controller,
+                  focusNode: focusNode,
+                  maxLines: 5,
+                  minLines: 1,
+                  keyboardType: TextInputType.multiline,
+                  textInputAction: (Platform.isAndroid || Platform.isIOS)
+                      ? TextInputAction.newline
+                      : TextInputAction.newline,
+                  style: const TextStyle(color: AppColors.onDark),
+                  decoration: InputDecoration(
+                    hintText: 'Nachricht an ${context
+                        .findAncestorWidgetOfExactType<ChannelConversationScreen>()
+                        ?.channel.name ?? 'Kanal'}…',
+                    hintStyle: TextStyle(color: Colors.grey[600]),
+                    filled: true,
+                    fillColor: AppColors.surfaceVariant,
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 10),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(24),
+                      borderSide: BorderSide.none,
+                    ),
                   ),
                 ),
               ),

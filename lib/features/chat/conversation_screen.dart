@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' show Random, min;
 
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
@@ -1726,27 +1727,55 @@ class _InputBarState extends State<_InputBar> with TickerProviderStateMixin {
                           constraints: const BoxConstraints(minWidth: 36),
                         ),
                         Expanded(
-                          child: TextField(
-                            controller: widget.ctrl,
-                            focusNode: widget.focus,
-                            textCapitalization: TextCapitalization.sentences,
-                            decoration: InputDecoration(
-                              hintText: 'Nachricht schreiben…',
-                              hintStyle:
-                                  const TextStyle(color: Colors.grey),
-                              filled: true,
-                              fillColor: AppColors.surfaceVariant,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(24),
-                                borderSide: BorderSide.none,
-                              ),
-                              contentPadding:
-                                  const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 10,
+                          child: Focus(
+                            // Desktop: Enter = send, Shift+Enter = newline.
+                            // Mobile: Enter key is handled by the keyboard
+                            // action button; the send button submits.
+                            onKeyEvent: (_, event) {
+                              if (Platform.isAndroid || Platform.isIOS) {
+                                return KeyEventResult.ignored;
+                              }
+                              if (event is KeyDownEvent &&
+                                  event.logicalKey ==
+                                      LogicalKeyboardKey.enter &&
+                                  !HardwareKeyboard.instance.isShiftPressed) {
+                                widget.onSend();
+                                return KeyEventResult.handled;
+                              }
+                              return KeyEventResult.ignored;
+                            },
+                            child: TextField(
+                              controller: widget.ctrl,
+                              focusNode: widget.focus,
+                              maxLines: 5,
+                              minLines: 1,
+                              keyboardType: TextInputType.multiline,
+                              textCapitalization:
+                                  TextCapitalization.sentences,
+                              // Mobile: Enter key inserts a newline;
+                              // send button submits the message.
+                              // Desktop: Enter is intercepted above.
+                              textInputAction:
+                                  (Platform.isAndroid || Platform.isIOS)
+                                      ? TextInputAction.newline
+                                      : TextInputAction.newline,
+                              decoration: InputDecoration(
+                                hintText: 'Nachricht schreiben…',
+                                hintStyle:
+                                    const TextStyle(color: Colors.grey),
+                                filled: true,
+                                fillColor: AppColors.surfaceVariant,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(24),
+                                  borderSide: BorderSide.none,
+                                ),
+                                contentPadding:
+                                    const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 10,
+                                ),
                               ),
                             ),
-                            onSubmitted: (_) => widget.onSend(),
                           ),
                         ),
                       ],
