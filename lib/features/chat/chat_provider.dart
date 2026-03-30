@@ -78,6 +78,11 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// Direct access to the Nostr transport (for settings screen).
   NostrTransport? get nostrTransport => _nostrTransport;
 
+  /// Re-publishes Kind-0 metadata and presence with the current effective
+  /// pseudonym. Call this immediately after the user saves a new display name
+  /// so peers see the update without waiting for the next heartbeat.
+  Future<void> republishIdentity() => _nostrTransport?.republishMetadata() ?? Future.value();
+
   List<NexusPeer> get peers => _manager.peers;
 
   // Per-conversation cached messages

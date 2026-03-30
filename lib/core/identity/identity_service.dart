@@ -90,6 +90,22 @@ class IdentityService {
     return _current!;
   }
 
+  /// Updates the pseudonym in secure storage and the in-memory identity.
+  ///
+  /// Call this whenever the user changes their display name (e.g. in the
+  /// profile editor) so that transports and Kind-0 use the correct name after
+  /// the next app start.
+  Future<void> updatePseudonym(String pseudonym) async {
+    await _storage.write(key: _keyPseudonym, value: pseudonym);
+    if (_current != null) {
+      _current = NexusIdentity(
+        publicKeyHex: _current!.publicKeyHex,
+        pseudonym: pseudonym,
+        did: _current!.did,
+      );
+    }
+  }
+
   /// Derives and returns the Ed25519 signing key pair from the stored seed phrase.
   ///
   /// Uses the same SLIP-0010 derivation as [createIdentity].

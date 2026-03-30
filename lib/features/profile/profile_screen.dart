@@ -213,7 +213,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
       ),
     );
-    if (saved == true && mounted) setState(() {});
+    if (saved == true && mounted) {
+      setState(() {});
+      // Re-publish Kind-0 and presence so peers see the new name immediately,
+      // without waiting for the next periodic heartbeat.
+      context.read<ChatProvider>().republishIdentity();
+    }
   }
 
   void _snack(String msg) {

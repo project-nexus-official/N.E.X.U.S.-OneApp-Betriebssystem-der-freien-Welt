@@ -7,6 +7,7 @@ import 'package:cryptography/cryptography.dart' show AesCbc, MacAlgorithm,
     SecretKey, SecretBox, Mac;
 
 import '../../../core/contacts/contact_service.dart';
+import '../../../core/identity/profile_service.dart';
 import '../message_transport.dart';
 import '../nexus_message.dart';
 import '../nexus_peer.dart';
@@ -33,7 +34,7 @@ class NostrTransport implements MessageTransport {
   }) : _relayManager = relayManager ?? NostrRelayManager();
 
   final String localDid;
-  final String localPseudonym;
+  String localPseudonym;
   final NostrRelayManager _relayManager;
 
   /// How often to (re)publish a presence announcement.
@@ -353,34 +354,59 @@ class NostrTransport implements MessageTransport {
 
   // ── Presence ──────────────────────────────────────────────────────────────
 
+  /// The current effective display name.
+  ///
+  /// Prefers the profile pseudonym (updated when the user edits their profile)
+  /// over [localPseudonym] (set at construction from identity secure storage).
+  /// This ensures Kind-0 and presence immediately reflect name changes within
+  /// the same app session, without needing a restart.
+  String get _effectivePseudonym {
+    final profileName =
+        ProfileService.instance.currentProfile?.pseudonym.value;
+    if (profileName != null && profileName.isNotEmpty) return profileName;
+    return localPseudonym;
+  }
+
+  /// Re-publishes Kind-0 metadata and a presence announcement immediately.
+  ///
+  /// Call this after the user saves a new pseudonym so peers see the updated
+  /// name without waiting for the next periodic heartbeat.
+  Future<void> republishMetadata() async {
+    if (_state != TransportState.connected) return;
+    await _publishMetadata();
+    await _sendPresenceAnnouncement();
+  }
+
   /// Publishes a Kind-0 (NIP-01) metadata event with our own display name.
   ///
   /// Relays store only the latest kind-0 per pubkey, so contacts can fetch it
   /// at any time to learn our pseudonym even without a live presence event.
   Future<void> _publishMetadata() async {
     if (_keys == null) return;
+    final name = _effectivePseudonym;
     final event = NostrEvent.create(
       keys: _keys!,
       kind: NostrKind.metadata,
       content: jsonEncode({
-        'name': localPseudonym,
+        'name': name,
         'about': 'DID: $localDid',
       }),
       tags: [],
     );
     _relayManager.publish(event);
-    print('[NOSTR] Published Kind-0 metadata (name: $localPseudonym)');
+    print('[NOSTR] Published Kind-0 metadata (name: $name)');
   }
 
   /// Publishes a Kind 30078 presence announcement so other nodes can find us.
   Future<void> _sendPresenceAnnouncement() async {
     if (_keys == null) return;
 
+    final name = _effectivePseudonym;
     final tags = <List<String>>[
       ['d', 'nexus-presence'],          // NIP-78 parameterized replaceable key
       ['t', 'nexus-presence'],          // filter tag
       ['did', localDid],                // DID for relay-side filtering
-      ['name', localPseudonym],
+      ['name', name],
     ];
     if (currentGeohash != null) {
       tags.add(['t', 'nexus-geo-$currentGeohash']);
@@ -391,7 +417,7 @@ class NostrTransport implements MessageTransport {
       kind: NostrKind.presence,
       content: jsonEncode({
         'did': localDid,
-        'pseudonym': localPseudonym,
+        'pseudonym': name,
         if (_encryptionPublicKeyHex != null) 'enc_key': _encryptionPublicKeyHex,
       }),
       tags: tags,

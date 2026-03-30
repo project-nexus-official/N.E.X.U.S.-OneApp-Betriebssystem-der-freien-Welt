@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:nexus_oneapp/core/identity/identity_service.dart';
 import 'package:nexus_oneapp/core/identity/profile.dart';
 import 'package:nexus_oneapp/core/identity/profile_service.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
@@ -191,6 +192,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             : _locationCtrl.text.trim());
 
     await ProfileService.instance.save(_p);
+    // Sync the pseudonym to secure storage so all transports use the correct
+    // name after the next app start (IdentityService is the source of truth
+    // for the name used in Kind-0 and presence broadcasts).
+    await IdentityService.instance.updatePseudonym(_p.pseudonym.value);
     if (mounted) Navigator.of(context).pop(true);
   }
 
