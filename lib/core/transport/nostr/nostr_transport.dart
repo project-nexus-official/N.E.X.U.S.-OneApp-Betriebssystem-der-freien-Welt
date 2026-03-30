@@ -83,6 +83,7 @@ class NostrTransport implements MessageTransport {
 
   StreamSubscription<NostrEvent>? _eventSub;
   Timer? _presenceTimer;
+  Timer? _metadataRefreshTimer;
 
   // ── Public API ────────────────────────────────────────────────────────────
 
@@ -203,6 +204,8 @@ class NostrTransport implements MessageTransport {
     _state = TransportState.idle;
     _presenceTimer?.cancel();
     _presenceTimer = null;
+    _metadataRefreshTimer?.cancel();
+    _metadataRefreshTimer = null;
     if (_dmSubId != null) _relayManager.closeSubscription(_dmSubId!);
     if (_meshSubId != null) _relayManager.closeSubscription(_meshSubId!);
     if (_presenceSubId != null) _relayManager.closeSubscription(_presenceSubId!);
@@ -396,6 +399,39 @@ class NostrTransport implements MessageTransport {
     _relayManager.publish(event);
   }
 
+  /// Re-subscribes to Kind-0 for all known contacts.
+  ///
+  /// Called every 30 minutes to pick up name changes made while the app was
+  /// running, and also when new contacts are added at runtime.
+  void _refreshMetadataSubscription() {
+    if (_keys == null || _state != TransportState.connected) return;
+
+    // Re-seed the reverse map from latest persisted contacts.
+    for (final contact in ContactService.instance.contacts) {
+      if (contact.nostrPubkey != null && contact.nostrPubkey!.isNotEmpty) {
+        _didToNostrPubkey[contact.did] = contact.nostrPubkey!;
+      }
+    }
+
+    final pubkeys = <String>{
+      ...ContactService.instance.contacts
+          .where((c) => c.nostrPubkey != null && c.nostrPubkey!.isNotEmpty)
+          .map((c) => c.nostrPubkey!),
+      ..._didToNostrPubkey.values,
+    };
+    if (pubkeys.isEmpty) return;
+
+    if (_metadataSubId != null) {
+      _relayManager.closeSubscription(_metadataSubId!);
+    }
+    _metadataSubId = _relayManager.subscribe({
+      'kinds': [NostrKind.metadata],
+      'authors': pubkeys.toList(),
+    });
+    print('[NOSTR] Metadata refresh sub: $_metadataSubId  '
+        '(${pubkeys.length} contacts)');
+  }
+
   void _startPresenceTimer() {
     _presenceTimer?.cancel();
     _presenceTimer = Timer.periodic(presenceInterval, (_) async {
@@ -484,8 +520,18 @@ class NostrTransport implements MessageTransport {
     });
     print('[NOSTR] Presence sub: $_presenceSubId');
 
-    // Kind-0 metadata for known contacts (fetch their display names).
-    // Combine pubkeys from persisted contacts and learned DID mappings.
+    // ── Kind-0 metadata sync ──────────────────────────────────────────────
+    //
+    // CRITICAL: pre-populate _didToNostrPubkey from persisted contacts BEFORE
+    // subscribing. Without this, when Kind-0 events arrive _handleMetadataEvent
+    // cannot reverse-look up the sender's DID (the map is only populated by
+    // incoming messages, which may not have been exchanged yet on a fresh start).
+    for (final contact in ContactService.instance.contacts) {
+      if (contact.nostrPubkey != null && contact.nostrPubkey!.isNotEmpty) {
+        _didToNostrPubkey[contact.did] = contact.nostrPubkey!;
+      }
+    }
+
     final contactPubkeys = <String>{
       ...ContactService.instance.contacts
           .where((c) => c.nostrPubkey != null && c.nostrPubkey!.isNotEmpty)
@@ -498,8 +544,15 @@ class NostrTransport implements MessageTransport {
         'authors': contactPubkeys.toList(),
       });
       print('[NOSTR] Metadata sub: $_metadataSubId  '
-          '(${contactPubkeys.length} contacts)');
+          '(${contactPubkeys.length} contacts, pubkeys pre-populated)');
     }
+
+    // Refresh metadata every 30 minutes to pick up name changes.
+    _metadataRefreshTimer?.cancel();
+    _metadataRefreshTimer = Timer.periodic(
+      const Duration(minutes: 30),
+      (_) => _refreshMetadataSubscription(),
+    );
 
     // Channel discovery: subscribe to Kind-40 to find available channels.
     if (_channelDiscoverySubId != null) {
@@ -652,28 +705,43 @@ class NostrTransport implements MessageTransport {
 
   /// Handles a Kind-0 (NIP-01 metadata) event.
   ///
-  /// Updates the stored pseudonym of a known contact when their self-reported
-  /// name arrives from the relay.
+  /// Resolves the sender's DID via [_didToNostrPubkey] (pre-populated from
+  /// persisted contacts on startup) and updates the stored pseudonym.
   void _handleMetadataEvent(NostrEvent event) {
     if (_keys == null) return;
-    // Ignore our own metadata events
+    // Ignore our own metadata events.
     if (event.pubkey == _keys!.publicKeyHex) return;
 
     try {
       final data = jsonDecode(event.content) as Map<String, dynamic>;
-      final name = (data['name'] as String?)?.trim() ?? '';
-      if (name.isEmpty) return;
 
-      // Resolve the DID for this Nostr pubkey
+      // NIP-01 uses "name"; some clients also set "display_name" (NIP-24).
+      // Prefer display_name when it is a non-empty human-readable name.
+      final name = (data['name'] as String?)?.trim() ?? '';
+      final displayName = (data['display_name'] as String?)?.trim() ?? '';
+      final resolved = displayName.isNotEmpty ? displayName : name;
+
+      print('[NOSTR] Kind-0 received: pubkey=${event.pubkey.substring(0, 8)}… '
+          'name="$name" display_name="$displayName"');
+
+      if (resolved.isEmpty) return;
+
+      // Resolve the DID for this Nostr pubkey via the reverse map.
       final did = _didToNostrPubkey.entries
           .where((e) => e.value == event.pubkey)
           .map((e) => e.key)
           .firstOrNull;
 
       if (did != null) {
-        ContactService.instance.updatePseudonymIfBetter(did, name);
-        print('[NOSTR] Kind-0 name update: '
-            '${event.pubkey.substring(0, 8)}… → $name');
+        final oldName =
+            ContactService.instance.findByDid(did)?.pseudonym ?? '?';
+        print('[NOSTR] Kind-0 updating contact: did=…${did.length > 8 ? did.substring(did.length - 8) : did} '
+            '"$oldName" → "$resolved"');
+        ContactService.instance.updatePseudonymIfBetter(did, resolved);
+      } else {
+        print('[NOSTR] Kind-0 DID not found for pubkey: '
+            '${event.pubkey.substring(0, 8)}… '
+            '(known mappings: ${_didToNostrPubkey.length})');
       }
     } catch (_) {}
   }

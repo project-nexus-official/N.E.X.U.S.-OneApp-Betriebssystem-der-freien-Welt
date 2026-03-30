@@ -10,6 +10,8 @@ import '../../core/transport/nexus_message.dart';
 import 'conversation.dart';
 import 'group_channel_service.dart';
 
+// ignore_for_file: cancel_subscriptions
+
 /// Manages the conversation list (inbox).
 ///
 /// Reads from [PodDatabase] and provides a reactive [stream] of sorted
@@ -27,9 +29,12 @@ class ConversationService {
   /// Millisecond timestamps of the last-read message per conversationId.
   final Map<String, int> _lastRead = {};
 
+  StreamSubscription<void>? _contactsChangedSub;
+
   // ── Initialisation ──────────────────────────────────────────────────────
 
-  /// Loads persisted last-read timestamps from the POD.
+  /// Loads persisted last-read timestamps from the POD and subscribes to
+  /// contact name changes so the conversation list refreshes automatically.
   Future<void> load() async {
     try {
       final data =
@@ -42,6 +47,12 @@ class ConversationService {
     } catch (_) {
       // POD might not be open yet; ignore on startup.
     }
+
+    // When a contact's display name changes (e.g. Kind-0 sync), refresh the
+    // conversation list so the new name appears immediately in the UI.
+    _contactsChangedSub?.cancel();
+    _contactsChangedSub =
+        ContactService.instance.contactsChanged.listen((_) => notifyUpdate());
   }
 
   // ── Public API ──────────────────────────────────────────────────────────

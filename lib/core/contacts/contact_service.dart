@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -12,6 +13,11 @@ class ContactService {
   ContactService._();
 
   final List<Contact> _contacts = [];
+
+  // Broadcast stream that fires whenever a contact's display name changes.
+  // Listeners (e.g. ConversationService) use this to refresh the UI.
+  final _contactsChangedController = StreamController<void>.broadcast();
+  Stream<void> get contactsChanged => _contactsChangedController.stream;
 
   /// All non-blocked contacts.
   List<Contact> get contacts =>
@@ -227,6 +233,7 @@ class ContactService {
     if (contact == null) return;
     contact.pseudonym = pseudonym;
     await _persist(contact);
+    _contactsChangedController.add(null);
   }
 
   /// Returns all contacts with the given [level].
@@ -270,8 +277,11 @@ class ContactService {
     if (contact == null) return;
     if (_isDidFragment(trimmed, did)) return; // not an improvement
     if (contact.pseudonym == trimmed) return; // no change
+    final old = contact.pseudonym;
     contact.pseudonym = trimmed;
     await _persist(contact);
+    debugPrint('[CONTACTS] Nickname updated: "$old" → "$trimmed" (did: ...${did.length > 8 ? did.substring(did.length - 8) : did})');
+    _contactsChangedController.add(null);
   }
 
   /// Returns true when [value] is just the tail fragment of [did] (i.e. was
