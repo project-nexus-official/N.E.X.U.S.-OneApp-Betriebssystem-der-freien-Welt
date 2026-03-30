@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
@@ -41,8 +40,10 @@ class PodDatabase {
     final docsDir = await getApplicationDocumentsDirectory();
     final dbPath = p.join(docsDir.path, 'nexus_pod.db');
 
-    final dbFileExists = File(dbPath).existsSync();
-    debugPrint('[DB] Path: $dbPath  exists: $dbFileExists');
+    final dbFile = File(dbPath);
+    final dbFileExists = dbFile.existsSync();
+    final dbSize = dbFileExists ? dbFile.lengthSync() : 0;
+    debugPrint('[DB] Path: $dbPath  exists: $dbFileExists  size: ${dbSize}B');
 
     _db = await openDatabase(
       dbPath,
@@ -281,6 +282,7 @@ class PodDatabase {
       'enc': enc,
       'ts': data['ts'] as int? ?? DateTime.now().millisecondsSinceEpoch,
       'status': 'pending',
+      // ignore: use_null_aware_elements
       if (msgId != null) 'message_id': msgId,
     });
     debugPrint('[DB] insertMessage: saved ${msgId ?? "(no id)"} conv=$conversationId');

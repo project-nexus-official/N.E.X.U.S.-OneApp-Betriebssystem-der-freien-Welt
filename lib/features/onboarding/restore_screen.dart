@@ -48,6 +48,12 @@ class _RestoreScreenState extends State<RestoreScreen> {
       return;
     }
 
+    // Warn the user if restoring over an existing identity.
+    if (IdentityService.instance.hasIdentity) {
+      final confirmed = await _confirmOverwrite();
+      if (!confirmed) return;
+    }
+
     final mnemonic =
         _controllers.map((c) => c.text.trim().toLowerCase()).join(' ');
 
@@ -66,6 +72,49 @@ class _RestoreScreenState extends State<RestoreScreen> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// Shows an explicit overwrite-confirmation dialog.
+  /// Returns true only if the user taps the red "Ersetzen" button.
+  Future<bool> _confirmOverwrite() async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A2D3E),
+        title: const Text(
+          'Bestehende Identität ersetzen?',
+          style: TextStyle(
+              color: Color(0xFFD4AF37), fontWeight: FontWeight.bold),
+        ),
+        content: const Text(
+          'Auf diesem Gerät ist bereits eine Identität gespeichert.\n\n'
+          'Wenn du fortfährst, wird die bestehende Identität dauerhaft '
+          'überschrieben und alle lokalen Daten (Kontakte, Nachrichten) '
+          'gehen unwiederbringlich verloren.\n\n'
+          'Diese Aktion kann nicht rückgängig gemacht werden.',
+          style: TextStyle(color: Colors.white70, height: 1.5),
+        ),
+        actions: [
+          // Default action: cancel (highlighted)
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFD4AF37),
+              foregroundColor: Colors.black,
+            ),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Abbrechen'),
+          ),
+          // Destructive action: replace (red, de-emphasised)
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Bestehende Identität ersetzen'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
   }
 
   @override

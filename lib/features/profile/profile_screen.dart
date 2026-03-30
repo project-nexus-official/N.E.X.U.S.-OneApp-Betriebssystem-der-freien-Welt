@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nexus_oneapp/core/contacts/contact_service.dart';
 import 'package:nexus_oneapp/core/crypto/encryption_keys.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
@@ -27,10 +28,33 @@ class ProfileScreen extends StatefulWidget {
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
+const _kLastExportKey = 'nexus_last_export_date';
+
 class _ProfileScreenState extends State<ProfileScreen> {
   final _identityService = IdentityService.instance;
 
   UserProfile? get _profile => ProfileService.instance.currentProfile;
+
+  bool _hasEverExported = true; // start as true to avoid flash; loaded in initState
+
+  @override
+  void initState() {
+    super.initState();
+    _loadExportStatus();
+  }
+
+  Future<void> _loadExportStatus() async {
+    final prefs = await SharedPreferences.getInstance();
+    final lastExport = prefs.getString(_kLastExportKey);
+    if (mounted) setState(() => _hasEverExported = lastExport != null);
+  }
+
+  Future<void> _markExported() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+        _kLastExportKey, DateTime.now().toIso8601String());
+    if (mounted) setState(() => _hasEverExported = true);
+  }
 
   // ── QR data builder ───────────────────────────────────────────────────────
 
@@ -164,6 +188,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final blob = await PodDatabase.instance.exportEncrypted();
       await Clipboard.setData(ClipboardData(text: blob));
       _snack('Export in Zwischenablage kopiert');
+      await _markExported();
     } catch (e) {
       _snack('Export fehlgeschlagen: $e');
     }
@@ -409,6 +434,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
           // ── Contacts shortcut ───────────────────────────────────────
           _contactsCard(),
           const SizedBox(height: 24),
+
+          // ── Backup reminder (shown until first export) ───────────────
+          if (!_hasEverExported) ...[
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFF2A1E00),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                    color: Colors.orange.withValues(alpha: 0.5)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.backup_outlined,
+                      color: Colors.orange, size: 20),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'Tipp: Exportiere regelmäßig deine Daten über '
+                      '"Daten exportieren", um sie bei einem Gerätewechsel '
+                      'wiederherstellen zu können.',
+                      style: TextStyle(
+                          color: Colors.orange,
+                          fontSize: 13,
+                          height: 1.45),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
 
           // ── Actions ─────────────────────────────────────────────────
           _actionButton(

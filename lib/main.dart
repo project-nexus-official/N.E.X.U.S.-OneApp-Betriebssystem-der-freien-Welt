@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:nexus_oneapp/core/contacts/contact_service.dart';
 import 'package:nexus_oneapp/core/crypto/encryption_keys.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
@@ -149,12 +150,17 @@ void main() async {
 /// Opens the encrypted POD and loads profile + contacts.
 /// Call this once after identity is created or restored.
 Future<void> initServicesAfterIdentity() async {
+  final sw = Stopwatch()..start();
+  debugPrint('[NEXUS] initServicesAfterIdentity starting…');
   try {
     final encKey = await IdentityService.instance.getPodEncryptionKey();
+    // pod_database.dart logs: path, exists, size, message count, contact count
     await PodDatabase.instance.open(encKey);
-    final pseudonym = IdentityService.instance.currentIdentity!.pseudonym;
-    await ProfileService.instance.load(pseudonym);
+    final identity = IdentityService.instance.currentIdentity!;
+    debugPrint('[NEXUS] Identity loaded: ${identity.did}');
+    await ProfileService.instance.load(identity.pseudonym);
     await ContactService.instance.load();
+    debugPrint('[NEXUS] Contacts loaded: ${ContactService.instance.contacts.length}');
     await ConversationService.instance.load();
     await RetentionService.instance.load();
     RetentionService.instance.runCleanup(); // fire-and-forget
@@ -177,8 +183,10 @@ Future<void> initServicesAfterIdentity() async {
     } catch (e) {
       debugPrint('[CRYPTO] Encryption key init failed at startup: $e');
     }
+    debugPrint('[NEXUS] Startup complete in ${sw.elapsedMilliseconds}ms');
   } catch (e) {
-    debugPrint('[NEXUS] Storage init error: $e');
+    debugPrint('[NEXUS] initServicesAfterIdentity error: $e');
+    rethrow; // propagate to main() so _CrashReportApp is shown
   }
 }
 
@@ -213,9 +221,10 @@ class NexusApp extends StatelessWidget {
 
 // ── Crash report app ──────────────────────────────────────────────────────────
 
-/// Shown instead of the main app when startup itself fails fatally
-/// (e.g. sqfliteFfiInit throws on Windows, or IdentityService init throws).
-class _CrashReportApp extends StatelessWidget {
+/// Shown instead of the main app when startup itself fails fatally.
+/// Provides a "Retry" button (re-runs init), an "Export log" button
+/// (copies crash log to clipboard), and an "Exit" button.
+class _CrashReportApp extends StatefulWidget {
   final Object error;
   final StackTrace? stackTrace;
   final String logPath;
@@ -225,6 +234,61 @@ class _CrashReportApp extends StatelessWidget {
     required this.logPath,
     this.stackTrace,
   });
+
+  @override
+  State<_CrashReportApp> createState() => _CrashReportAppState();
+}
+
+class _CrashReportAppState extends State<_CrashReportApp> {
+  bool _retrying = false;
+  Object? _lastError;
+  bool _logCopied = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _lastError = widget.error;
+  }
+
+  Future<void> _retry() async {
+    setState(() {
+      _retrying = true;
+      _lastError = null;
+    });
+    try {
+      if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+        sqfliteFfiInit();
+        databaseFactory = databaseFactoryFfi;
+      }
+      await IdentityService.instance.init();
+      if (IdentityService.instance.hasIdentity) {
+        await initServicesAfterIdentity();
+      }
+      // Success – replace the crash screen with the real app.
+      runApp(const NexusApp());
+    } catch (e, st) {
+      _logCrash('_CrashReportApp.retry', e, st);
+      setState(() {
+        _retrying = false;
+        _lastError = e;
+      });
+    }
+  }
+
+  Future<void> _exportLog() async {
+    try {
+      final logFile = File(widget.logPath);
+      final content = await logFile.exists()
+          ? await logFile.readAsString()
+          : 'Log file not found at: ${widget.logPath}';
+      await Clipboard.setData(ClipboardData(text: content));
+      setState(() => _logCopied = true);
+      Future.delayed(const Duration(seconds: 3),
+          () { if (mounted) setState(() => _logCopied = false); });
+    } catch (e) {
+      debugPrint('[NEXUS] Could not export log: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -246,7 +310,7 @@ class _CrashReportApp extends StatelessWidget {
                     color: Color(0xFFD4AF37), size: 48),
                 const SizedBox(height: 16),
                 const Text(
-                  'NEXUS konnte nicht starten',
+                  'Beim Starten ist ein Fehler aufgetreten',
                   style: TextStyle(
                     color: Color(0xFFD4AF37),
                     fontSize: 22,
@@ -255,29 +319,13 @@ class _CrashReportApp extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 const Text(
-                  'Ein Fehler beim Start verhinderte das Laden der App. '
-                  'Bitte sende die folgende Log-Datei an den Support:',
+                  'NEXUS konnte nicht vollständig starten. '
+                  'Versuche es erneut oder exportiere das Crash-Log '
+                  'und sende es an den Support.',
                   style: TextStyle(color: Colors.white70, fontSize: 14),
                 ),
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1A2D3E),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                        color: const Color(0xFFD4AF37).withAlpha(80)),
-                  ),
-                  child: Text(
-                    logPath,
-                    style: const TextStyle(
-                      color: Color(0xFFD4AF37),
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ),
                 const SizedBox(height: 16),
+                // Error detail box (collapsible feel via clipping)
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
@@ -286,7 +334,7 @@ class _CrashReportApp extends StatelessWidget {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
-                    error.toString(),
+                    (_lastError ?? widget.error).toString(),
                     style: const TextStyle(
                       color: Colors.white54,
                       fontSize: 11,
@@ -296,17 +344,80 @@ class _CrashReportApp extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
+                const SizedBox(height: 8),
+                // Log path
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1A2D3E),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                        color: const Color(0xFFD4AF37).withAlpha(60)),
+                  ),
+                  child: Text(
+                    widget.logPath,
+                    style: const TextStyle(
+                      color: Color(0xFFD4AF37),
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 24),
+                // ── Action buttons ───────────────────────────────────────
                 SizedBox(
                   width: double.infinity,
-                  child: ElevatedButton(
+                  child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFD4AF37),
                       foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
-                    onPressed: () => exit(0),
-                    child: const Text('App beenden'),
+                    onPressed: _retrying ? null : _retry,
+                    icon: _retrying
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.black54),
+                          )
+                        : const Icon(Icons.refresh),
+                    label: Text(_retrying ? 'Wird gestartet…' : 'Erneut versuchen'),
                   ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFFD4AF37),
+                          side: const BorderSide(color: Color(0xFFD4AF37)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        onPressed: _exportLog,
+                        icon: Icon(_logCopied
+                            ? Icons.check
+                            : Icons.content_copy_outlined,
+                            size: 18),
+                        label: Text(_logCopied
+                            ? 'Kopiert!'
+                            : 'Crash-Log kopieren'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white54,
+                          side: const BorderSide(color: Colors.white24),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                        onPressed: () => exit(0),
+                        child: const Text('App beenden'),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
