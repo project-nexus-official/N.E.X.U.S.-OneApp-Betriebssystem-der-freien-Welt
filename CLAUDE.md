@@ -179,8 +179,87 @@ Phase 2: Care-System + Sphären-Plugins
   - Kanal-Discovery auch im Entdecken-Hub: neue "Kanäle"-Kachel (gold, aktiv) → navigiert zu `JoinChannelScreen` via `rootNavigator: true`
   - Tests: 19 Tests in `test/features/chat/conversations_tabs_test.dart`
 
+- **Dashboard – Startbildschirm (komplett)**:
+  - `DashboardScreen` ist der neue Default-Startbildschirm (Route `/home`, Index 0)
+  - Navigation umstrukturiert: **Home · Chat · Governance · Entdecken · Profil** (Wallet-Tab entfernt)
+  - Wallet-Route (`/wallet`) bleibt im ShellRoute für zukünftige Nutzung erhalten
+  - App startet auf `/home` statt `/chat`; Onboarding-Redirect → `/home`
+  - **Header**: Zeitabhängige Begrüßung ("Guten Morgen/Tag/Abend, [Pseudonym]") + Datum auf Deutsch
+  - **Radar-Karte** (prominent, 200px hoch, goldener Rahmen):
+    - Mini-Radar-Animation (150px, `_MiniRadarPainter` mit `dart:math` sin/cos)
+    - "Lokal: X Peers" (BLE/LAN) | "NEXUS-Netzwerk: X Nodes" unten
+    - Tipp → öffnet vollen `RadarScreen` (rootNavigator)
+  - **Feature-Karten**: Nachrichten, Kanäle, Kontakte, Governance
+    - Jede Karte: Icon-Kreis (gold), Titel, Status-Subtitle, optionale Preview, Badge
+    - Governance-Karte: Platzhalter-Text "Hier werdet ihr gemeinsam Entscheidungen treffen."
+  - **Coming-Soon-Karten** (halbe Breite, 2er-Reihe, ausgegraut):
+    - Wallet · Marktplatz — kein onTap, Opacity 0.45
+  - **Responsive**: Mobile = volle Breite; Desktop ≥800px = 2-Spalten-Grid für Feature-Karten
+  - **`NodeCounterService`** (`lib/features/dashboard/node_counter_service.dart`):
+    - Singleton; trackt Nostr-Peers (eindeutige DIDs) über 7-Tage-Fenster in SharedPreferences
+    - Hört auf `TransportManager.onPeersChanged`, prunt stale Einträge
+    - 30-Minuten-Refresh-Timer; `countStream` für Live-Updates
+    - Init in `initServicesAfterIdentity()` + in `DashboardScreen.initState()`
+  - **Hilfsfunktionen** (top-level, testbar): `dashboardGreeting(int hour)`, `dashboardFormattedDate(DateTime)`
+  - Tests: 32 Tests in `test/features/dashboard/dashboard_test.dart`
+
+- **Automatischer Update-Checker (komplett)**:
+  - `UpdateService` Singleton (`lib/services/update_service.dart`):
+    - `startPeriodicCheck()`: Hintergrund-Timer, max. ein API-Call pro 6 Stunden (Rate-Limit via SharedPreferences `nexus_last_update_check`)
+    - `checkNow()`: Sofortprüfung ohne Rate-Limit (für "Nach Updates suchen"-Button)
+    - `dismissForSession()`: Blendet Banner bis zum nächsten Kaltstart aus
+    - `skipVersion(version)`: Speichert übersprungene Version in SharedPreferences `nexus_skipped_version` → nie wieder anzeigen
+    - `updateStream`: Broadcast-Stream für Live-Updates (Banner erscheint sofort wenn Update gefunden)
+  - GitHub API: `GET https://api.github.com/repos/project-nexus-official/oneapp/releases/latest`
+  - Versions-Vergleich: `parseVersion()` + `isNewer()` (top-level, testbar) — versteht `v0.1.1`, `v0.1.1-alpha`, `0.1.3+3`
+  - Platform-Asset: `.apk` für Android, `.zip` für Windows; Fallback: `html_url` (GitHub Release-Seite)
+  - **Dashboard-Banner** (`_UpdateBanner`): Goldener Rahmen, zwischen Header und Radar-Karte, Tipp → Bottom Sheet
+  - **Bottom Sheet** (`lib/shared/widgets/update_bottom_sheet.dart`):
+    - "Jetzt herunterladen" (Gold, prominent) → öffnet URL im Browser (`url_launcher`)
+    - "Später" → `dismissForSession()`
+    - "Version X überspringen" → `skipVersion()`
+    - Release Notes (max. 500 Zeichen aus GitHub-Body)
+  - **Einstellungen** (`_AppVersionSection`):
+    - "App-Version: vX.Y.Z" (aus `package_info_plus`)
+    - "Nach Updates suchen" Button → `checkNow()` → Toast oder Bottom Sheet
+  - Neue Abhängigkeiten: `http: ^1.2.0`, `package_info_plus: ^8.0.0`, `url_launcher: ^6.3.0`
+  - Android: `<queries>` für `https`-Schema in AndroidManifest.xml ergänzt
+  - Tests: 26 Tests in `test/services/update_service_test.dart`
+
 ## Aktueller Fokus
 >>> PHASE 1a: Fundament + Identität (in Fertigstellung) <<<
+
+## Release-Prozess
+
+Vor jedem Release folgende Schritte in dieser Reihenfolge:
+
+1. **Version hochzählen** in `pubspec.yaml`:
+   ```yaml
+   version: X.Y.Z+B   # z.B. 0.1.4+4
+   ```
+   Format: `major.minor.patch+buildNumber`
+
+2. **Build erstellen**:
+   ```bash
+   flutter build apk --release          # Android
+   flutter build windows --release      # Windows
+   ```
+
+3. **Commit + Push**:
+   ```bash
+   git add pubspec.yaml
+   git commit -m "chore: bump version to vX.Y.Z"
+   git push origin master:main
+   ```
+
+4. **GitHub Release erstellen**:
+   - Tag: `vX.Y.Z` (z.B. `v0.1.4`)
+   - Release-Titel: `NEXUS OneApp vX.Y.Z`
+   - APK als Asset hochladen: `nexus-vX.Y.Z.apk`
+   - Windows-ZIP als Asset hochladen: `nexus-vX.Y.Z.zip`
+   - Release Notes auf Deutsch verfassen
+
+Der Update-Checker der App prüft diesen GitHub Release automatisch.
 
 ## Code-Standards
 - Dart/Flutter: Effective Dart Style Guide

@@ -8,7 +8,9 @@ import 'package:provider/provider.dart';
 import '../../core/contacts/contact_service.dart';
 import '../../core/identity/profile_service.dart';
 import '../../core/transport/message_transport.dart';
+import '../../services/update_service.dart';
 import '../../shared/theme/app_theme.dart';
+import '../../shared/widgets/update_bottom_sheet.dart';
 import '../chat/chat_provider.dart';
 import '../chat/chat_screen.dart' show RadarScreen;
 import '../chat/conversation.dart';
@@ -66,6 +68,9 @@ class _DashboardScreenState extends State<DashboardScreen>
   DateTime? _nodeCountUpdated;
   StreamSubscription<int>? _nodeCountSub;
 
+  UpdateInfo? _updateInfo;
+  StreamSubscription<UpdateInfo?>? _updateSub;
+
   @override
   void initState() {
     super.initState();
@@ -98,6 +103,14 @@ class _DashboardScreenState extends State<DashboardScreen>
         });
       }
     });
+
+    // Show existing update info if already fetched in this session.
+    _updateInfo = UpdateService.instance.current;
+    _updateSub = UpdateService.instance.updateStream.listen((info) {
+      if (mounted) setState(() => _updateInfo = info);
+    });
+    // Start background checks (respects 6-hour rate limit).
+    UpdateService.instance.startPeriodicCheck();
   }
 
   Future<void> _loadConversations() async {
@@ -110,6 +123,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     _radarCtrl.dispose();
     _convSub?.cancel();
     _nodeCountSub?.cancel();
+    _updateSub?.cancel();
     super.dispose();
   }
 
@@ -149,6 +163,20 @@ class _DashboardScreenState extends State<DashboardScreen>
                 date: dashboardFormattedDate(now),
               ),
             ),
+
+            // Update banner – shown between header and radar when an update
+            // is available. Disappears after "Later" or "Skip version".
+            if (_updateInfo != null)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: _UpdateBanner(
+                    info: _updateInfo!,
+                    onTap: () => showUpdateBottomSheet(context, _updateInfo!),
+                  ),
+                ),
+              ),
+
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               sliver: SliverToBoxAdapter(
@@ -559,6 +587,50 @@ class _MiniRadarPainter extends CustomPainter {
   @override
   bool shouldRepaint(_MiniRadarPainter old) =>
       old.progress != progress || old.peerCount != peerCount;
+}
+
+// ── Update banner ─────────────────────────────────────────────────────────────
+
+class _UpdateBanner extends StatelessWidget {
+  final UpdateInfo info;
+  final VoidCallback onTap;
+
+  const _UpdateBanner({required this.info, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppColors.gold.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: AppColors.gold.withValues(alpha: 0.5), width: 1.2),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.system_update_outlined,
+                color: AppColors.gold, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Update verfügbar: ${info.version}',
+                style: const TextStyle(
+                  color: AppColors.gold,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+            const Icon(Icons.chevron_right,
+                color: AppColors.gold, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 // ── Feature card ──────────────────────────────────────────────────────────────
