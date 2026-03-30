@@ -682,8 +682,13 @@ class NostrTransport implements MessageTransport {
         ContactService.instance.setEncryptionKey(did, encKey);
       }
 
-      // Store DID ↔ Nostr pubkey mapping so we can send DMs
+      // Store DID ↔ Nostr pubkey mapping so we can send DMs.
       _didToNostrPubkey[did] = event.pubkey;
+
+      // Persist nostrPubkey to the contact record so that on the next startup
+      // _setupSubscriptions() can pre-populate _didToNostrPubkey and subscribe
+      // to Kind-0 metadata before any messages have been exchanged.
+      ContactService.instance.setNostrPubkey(did, event.pubkey);
 
       // Update peer record
       _peers[event.pubkey] = NexusPeer(
