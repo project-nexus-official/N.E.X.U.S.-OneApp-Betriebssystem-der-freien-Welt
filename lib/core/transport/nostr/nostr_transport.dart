@@ -683,12 +683,18 @@ class NostrTransport implements MessageTransport {
       }
 
       // Store DID ↔ Nostr pubkey mapping so we can send DMs.
+      final isNewPubkey = _didToNostrPubkey[did] != event.pubkey;
       _didToNostrPubkey[did] = event.pubkey;
 
       // Persist nostrPubkey to the contact record so that on the next startup
       // _setupSubscriptions() can pre-populate _didToNostrPubkey and subscribe
       // to Kind-0 metadata before any messages have been exchanged.
       ContactService.instance.setNostrPubkey(did, event.pubkey);
+
+      // If this is a newly learned pubkey, immediately request their Kind-0
+      // metadata so the display name is updated without waiting for the
+      // 30-minute refresh timer.
+      if (isNewPubkey) _refreshMetadataSubscription();
 
       // Update peer record
       _peers[event.pubkey] = NexusPeer(
