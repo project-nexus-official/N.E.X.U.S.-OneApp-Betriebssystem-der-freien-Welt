@@ -460,7 +460,9 @@ class NostrTransport implements MessageTransport {
 
   void _startPresenceTimer() {
     _presenceTimer?.cancel();
+    print('[NOSTR] Presence heartbeat scheduled, interval=${presenceInterval.inSeconds}s');
     _presenceTimer = Timer.periodic(presenceInterval, (_) async {
+      print('[NOSTR] Sending presence heartbeat');
       await _sendPresenceAnnouncement();
       _evictStalePeers();
     });
@@ -476,10 +478,11 @@ class NostrTransport implements MessageTransport {
 
     if (stale.isEmpty) return;
 
+    print('[NOSTR] Evicting ${stale.length} stale peer(s) '
+        '(timeout: ${peerTimeout.inSeconds}s)');
     for (final pubkey in stale) {
       _peers.remove(pubkey);
       _peerLastPresence.remove(pubkey);
-      // Also clean up DID mapping for this pubkey
       _didToNostrPubkey.removeWhere((_, v) => v == pubkey);
     }
     _peersController.add(List.from(_peers.values));
@@ -702,6 +705,14 @@ class NostrTransport implements MessageTransport {
 
       if (did == null || did.isEmpty) return;
 
+      final nowSeconds =
+          DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
+      final ageSeconds = nowSeconds - event.createdAt;
+      print('[NOSTR] Presence received: '
+          'pubkey=${event.pubkey.substring(0, 8)}, '
+          'timestamp=${event.createdAt}, age=${ageSeconds}s, '
+          'pseudonym=$pseudonym');
+
       final encKey = data['enc_key'] as String?;
       if (encKey != null) {
         // Store in ContactService so ChatProvider can encrypt to this peer
@@ -737,6 +748,8 @@ class NostrTransport implements MessageTransport {
       ContactService.instance.updatePseudonymIfBetter(did, pseudonym);
 
       _peersController.add(List.from(_peers.values));
+      print('[NOSTR] Active nodes: ${_peers.length}, '
+          'pubkeys: [${_peers.keys.map((k) => k.substring(0, 8)).join(', ')}]');
     } catch (_) {}
   }
 
