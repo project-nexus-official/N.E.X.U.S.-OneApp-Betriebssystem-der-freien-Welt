@@ -468,21 +468,28 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
             children: [
               ListTile(
                 leading: Icon(
-                  _contact.muted
+                  ContactService.instance.isMuted(_contact.did)
                       ? Icons.notifications_off_outlined
                       : Icons.notifications_outlined,
-                  color: _contact.muted ? Colors.grey : AppColors.gold,
+                  color: ContactService.instance.isMuted(_contact.did)
+                      ? Colors.grey
+                      : AppColors.gold,
                 ),
                 title: const Text('Benachrichtigungen'),
-                subtitle: Text(_contact.muted ? 'Stumm geschaltet' : 'Aktiviert'),
+                subtitle: Text(ContactService.instance.isMuted(_contact.did)
+                    ? 'Stumm geschaltet'
+                    : 'Aktiviert'),
                 trailing: Switch(
-                  value: !_contact.muted,
+                  value: !ContactService.instance.isMuted(_contact.did),
                   activeColor: AppColors.gold,
                   onChanged: (v) async {
                     if (v) {
-                      await ContactService.instance.unmuteContact(_contact.did);
+                      await ContactService.instance
+                          .unmuteContact(_contact.did);
                     } else {
-                      await ContactService.instance.muteContact(_contact.did);
+                      // Permanent mute via the toggle
+                      await ContactService.instance
+                          .muteContact(_contact.did, null);
                     }
                     _load();
                   },

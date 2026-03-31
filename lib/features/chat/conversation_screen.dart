@@ -496,6 +496,107 @@ class _ConversationScreenState extends State<ConversationScreen> {
     if (mounted) setState(() => _perChatRetention = period);
   }
 
+  // ── Mute ────────────────────────────────────────────────────────────────────
+
+  static const _muteOptions = [
+    ('1 Stunde', Duration(hours: 1)),
+    ('8 Stunden', Duration(hours: 8)),
+    ('24 Stunden', Duration(hours: 24)),
+    ('7 Tage', Duration(days: 7)),
+    ('Dauerhaft', null),
+  ];
+
+  Future<void> _showMuteDialog() async {
+    final contactName =
+        ContactService.instance.getDisplayName(widget.peerDid);
+    int selectedIndex = 0;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setInner) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: const Text('Stummschalten'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Benachrichtigungen für $contactName pausieren',
+                style:
+                    const TextStyle(color: Colors.grey, fontSize: 13),
+              ),
+              const SizedBox(height: 8),
+              ...List.generate(_muteOptions.length, (i) {
+                final selected = selectedIndex == i;
+                return InkWell(
+                  onTap: () => setInner(() => selectedIndex = i),
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(vertical: 8),
+                    child: Row(
+                      children: [
+                        Icon(
+                          selected
+                              ? Icons.radio_button_checked
+                              : Icons.radio_button_unchecked,
+                          color:
+                              selected ? AppColors.gold : Colors.grey,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          _muteOptions[i].$1,
+                          style: const TextStyle(
+                              color: AppColors.onDark),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abbrechen',
+                  style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.gold,
+                foregroundColor: AppColors.deepBlue,
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Stummschalten'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      final duration = _muteOptions[selectedIndex].$2;
+      await ContactService.instance.muteContact(widget.peerDid, duration);
+      setState(() {});
+    }
+  }
+
+  Future<void> _unmute() async {
+    final contactName =
+        ContactService.instance.getDisplayName(widget.peerDid);
+    await ContactService.instance.unmuteContact(widget.peerDid);
+    if (mounted) {
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content:
+            Text('Benachrichtigungen für $contactName wieder aktiv'),
+        backgroundColor: AppColors.gold,
+      ));
+    }
+  }
+
   void _showRetentionSheet() {
     final global = RetentionService.instance.global;
     showModalBottomSheet<void>(
@@ -688,6 +789,16 @@ class _ConversationScreenState extends State<ConversationScreen> {
                               if (!widget.isBroadcast) ...[
                                 const SizedBox(width: 8),
                                 _HeaderTrustBadge(peerDid: widget.peerDid),
+                                if (ContactService.instance
+                                    .isMuted(widget.peerDid))
+                                  const Padding(
+                                    padding: EdgeInsets.only(left: 4),
+                                    child: Icon(
+                                      Icons.notifications_off,
+                                      size: 14,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
                               ],
                             ],
                           ),
@@ -746,13 +857,39 @@ class _ConversationScreenState extends State<ConversationScreen> {
                         icon: const Icon(Icons.more_vert),
                         onSelected: (value) {
                           if (value == 'retention') _showRetentionSheet();
+                          if (value == 'mute') _showMuteDialog();
+                          if (value == 'unmute') _unmute();
                         },
-                        itemBuilder: (_) => const [
-                          PopupMenuItem(
-                            value: 'retention',
-                            child: Text('Aufbewahrung'),
-                          ),
-                        ],
+                        itemBuilder: (_) {
+                          final muted = !widget.isBroadcast &&
+                              ContactService.instance
+                                  .isMuted(widget.peerDid);
+                          return [
+                            const PopupMenuItem(
+                              value: 'retention',
+                              child: Text('Aufbewahrung'),
+                            ),
+                            if (!widget.isBroadcast)
+                              PopupMenuItem(
+                                value: muted ? 'unmute' : 'mute',
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      muted
+                                          ? Icons.notifications_active
+                                          : Icons.notifications_off,
+                                      size: 18,
+                                      color: AppColors.onDark,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Text(muted
+                                        ? 'Stummschaltung aufheben'
+                                        : 'Stummschalten'),
+                                  ],
+                                ),
+                              ),
+                          ];
+                        },
                       ),
                     ],
             ),

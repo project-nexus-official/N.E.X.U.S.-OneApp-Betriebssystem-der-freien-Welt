@@ -101,6 +101,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   StreamSubscription<NexusMessage>? _msgSub;
   StreamSubscription<List<NexusPeer>>? _peersSub;
   StreamSubscription<Map<String, dynamic>>? _channelAnnouncedSub;
+  Timer? _muteExpiryTimer;
 
   // ── Initialization ─────────────────────────────────────────────────────────
 
@@ -192,6 +193,14 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       await GroupChannelService.instance.load();
       await GroupChannelService.instance.ensureDefaults(myDid);
       await ChannelAccessService.instance.load();
+
+      // Clear any already-expired mutes on startup, then check every 60 s.
+      await ContactService.instance.clearExpiredMutes();
+      _muteExpiryTimer?.cancel();
+      _muteExpiryTimer = Timer.periodic(
+        const Duration(seconds: 60),
+        (_) => ContactService.instance.clearExpiredMutes(),
+      );
 
       // Subscribe Nostr to each joined channel.
       for (final ch in GroupChannelService.instance.joinedChannels) {
@@ -577,7 +586,8 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     // Don't notify if this exact conversation is open in the UI.
     if (_activeConversationId != convId) {
       final contact = ContactService.instance.findByDid(processedMsg.fromDid);
-      final muted = !processedMsg.isBroadcast && (contact?.muted ?? false);
+      final muted = !processedMsg.isBroadcast &&
+          ContactService.instance.isMuted(processedMsg.fromDid);
 
       if (!muted) {
         final senderName = contact?.pseudonym ??
@@ -1311,6 +1321,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     _msgSub?.cancel();
     _peersSub?.cancel();
     _connectivitySub?.cancel();
+    _muteExpiryTimer?.cancel();
     _manager.stop();
     super.dispose();
   }

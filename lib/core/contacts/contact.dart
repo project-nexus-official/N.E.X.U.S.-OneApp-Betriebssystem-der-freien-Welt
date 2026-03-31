@@ -80,8 +80,8 @@ class Contact {
   final DateTime addedAt;
   DateTime lastSeen;
   String? notes; // private local note, never transmitted
-  bool blocked;  // local-only, never transmitted
-  bool muted;    // local-only, silences notifications without blocking
+  bool blocked;          // local-only, never transmitted
+  DateTime? mutedUntil; // null = not muted; DateTime(9999) = permanent
   String? encryptionPublicKey; // X25519 pubkey hex (32 bytes = 64 hex chars)
   String? previousEncryptionPublicKey; // for key-change warning
   String? nostrPubkey; // Nostr public key hex (32 bytes = 64 hex chars)
@@ -95,7 +95,7 @@ class Contact {
     required this.lastSeen,
     this.notes,
     this.blocked = false,
-    this.muted = false,
+    this.mutedUntil,
     this.encryptionPublicKey,
     this.previousEncryptionPublicKey,
     this.nostrPubkey,
@@ -110,7 +110,7 @@ class Contact {
         'lastSeen': lastSeen.toIso8601String(),
         'notes': notes,
         'blocked': blocked,
-        'muted': muted,
+        'mutedUntil': mutedUntil?.toIso8601String(),
         'encryptionPublicKey': encryptionPublicKey,
         'previousEncryptionPublicKey': previousEncryptionPublicKey,
         'nostrPubkey': nostrPubkey,
@@ -128,7 +128,7 @@ class Contact {
         lastSeen: _parseDate(json['lastSeen']),
         notes: json['notes'] as String?,
         blocked: json['blocked'] as bool? ?? false,
-        muted: json['muted'] as bool? ?? false,
+        mutedUntil: _parseMutedUntil(json),
         encryptionPublicKey: json['encryptionPublicKey'] as String?,
         previousEncryptionPublicKey: json['previousEncryptionPublicKey'] as String?,
         nostrPubkey: json['nostrPubkey'] as String?,
@@ -141,5 +141,19 @@ class Contact {
     } catch (_) {
       return DateTime.now();
     }
+  }
+
+  /// Reads mutedUntil from JSON. Handles both the new ISO string field and
+  /// the legacy boolean `muted: true` (migrates to permanent mute).
+  static DateTime? _parseMutedUntil(Map<String, dynamic> json) {
+    final raw = json['mutedUntil'];
+    if (raw is String) {
+      try {
+        return DateTime.parse(raw);
+      } catch (_) {}
+    }
+    // Legacy migration: old `muted: true` → permanent mute
+    if (json['muted'] == true) return DateTime(9999);
+    return null;
   }
 }

@@ -551,6 +551,17 @@ class _ConversationTile extends StatelessWidget {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (!conv.isBroadcast &&
+                  !conv.isGroup &&
+                  ContactService.instance.isMuted(conv.peerDid))
+                const Padding(
+                  padding: EdgeInsets.only(right: 4),
+                  child: Icon(
+                    Icons.notifications_off,
+                    size: 12,
+                    color: Colors.grey,
+                  ),
+                ),
               if (conv.transportType != null)
                 Padding(
                   padding: const EdgeInsets.only(right: 4),

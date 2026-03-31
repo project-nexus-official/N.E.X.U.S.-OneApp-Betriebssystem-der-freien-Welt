@@ -177,20 +177,38 @@ class ContactService {
   bool isBlocked(String did) =>
       _contacts.any((c) => c.did == did && c.blocked);
 
-  /// Mutes a contact – their messages arrive but don't produce notifications.
-  Future<void> muteContact(String did) async {
+  /// Mutes a contact for [duration] (null = permanent).
+  /// Their messages arrive but don't produce notifications.
+  Future<void> muteContact(String did, Duration? duration) async {
     final contact = _findByDid(did);
     if (contact == null) return;
-    contact.muted = true;
+    contact.mutedUntil =
+        duration != null ? DateTime.now().add(duration) : DateTime(9999);
     await _persist(contact);
+    _contactsChangedController.add(null); // refresh conversation list icons
   }
 
-  /// Unmutes a contact.
+  /// Unmutes a contact immediately.
   Future<void> unmuteContact(String did) async {
     final contact = _findByDid(did);
     if (contact == null) return;
-    contact.muted = false;
+    contact.mutedUntil = null;
     await _persist(contact);
+    _contactsChangedController.add(null); // refresh conversation list icons
+  }
+
+  /// Clears expired mutes (mutedUntil in the past). Call periodically.
+  Future<void> clearExpiredMutes() async {
+    final now = DateTime.now();
+    final expired = _contacts
+        .where((c) => c.mutedUntil != null && c.mutedUntil!.isBefore(now))
+        .toList();
+    if (expired.isEmpty) return;
+    for (final c in expired) {
+      c.mutedUntil = null;
+      await _persist(c);
+    }
+    _contactsChangedController.add(null);
   }
 
   /// Sets (or updates) the X25519 encryption public key for a peer.
@@ -215,9 +233,22 @@ class ContactService {
     await _persist(contact);
   }
 
-  /// Returns true if [did] is muted (notifications silenced).
-  bool isMuted(String did) =>
-      _contacts.any((c) => c.did == did && c.muted);
+  /// Returns true if [did] is currently muted (mutedUntil is set and in the future).
+  bool isMuted(String did) {
+    final contact = _findByDid(did);
+    if (contact == null) return false;
+    return contact.mutedUntil != null &&
+        contact.mutedUntil!.isAfter(DateTime.now());
+  }
+
+  /// Returns the mutedUntil DateTime for [did], or null if not muted.
+  DateTime? mutedUntil(String did) {
+    final contact = _findByDid(did);
+    if (contact == null) return null;
+    final mu = contact.mutedUntil;
+    if (mu == null || mu.isBefore(DateTime.now())) return null;
+    return mu;
+  }
 
   /// Updates the private local note for a contact.
   Future<void> updateNotes(String did, String? notes) async {
