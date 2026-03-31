@@ -96,9 +96,52 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
     final words = seedPhrase.split(' ');
+    // Build the 3-column word grid using Rows instead of GridView to avoid
+    // the infinite-height constraint bug that GridView.shrinkWrap triggers
+    // inside AlertDialog.content on desktop and some Android configurations.
+    final rowCount = (words.length / 3).ceil();
+    final wordRows = List.generate(rowCount, (row) {
+      return Padding(
+        padding: EdgeInsets.only(top: row == 0 ? 0 : 6),
+        child: Row(
+          children: List.generate(3, (col) {
+            final idx = row * 3 + col;
+            if (idx >= words.length) return const Expanded(child: SizedBox());
+            return Expanded(
+              child: Container(
+                margin: EdgeInsets.only(left: col == 0 ? 0 : 6),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceVariant,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 7),
+                child: Row(
+                  children: [
+                    Text('${idx + 1}.',
+                        style: const TextStyle(
+                            color: AppColors.gold,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold)),
+                    const SizedBox(width: 3),
+                    Expanded(
+                      child: Text(words[idx],
+                          style: const TextStyle(
+                              color: AppColors.onDark, fontSize: 11),
+                          overflow: TextOverflow.ellipsis),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
+        ),
+      );
+    });
+
     showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surface,
         shape:
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -107,6 +150,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 color: AppColors.gold, fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Container(
               padding: const EdgeInsets.all(12),
@@ -134,48 +178,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate:
-                  const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                mainAxisSpacing: 6,
-                crossAxisSpacing: 6,
-                childAspectRatio: 2.4,
-              ),
-              itemCount: words.length,
-              itemBuilder: (context, index) => Container(
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceVariant,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 4, vertical: 4),
-                child: Row(
-                  children: [
-                    Text('${index + 1}.',
-                        style: const TextStyle(
-                            color: AppColors.gold,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold)),
-                    const SizedBox(width: 3),
-                    Expanded(
-                      child: Text(words[index],
-                          style: const TextStyle(
-                              color: AppColors.onDark, fontSize: 11),
-                          overflow: TextOverflow.ellipsis),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+            ...wordRows,
           ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Schließen',
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Verstanden',
                 style: TextStyle(color: AppColors.gold)),
           ),
         ],
