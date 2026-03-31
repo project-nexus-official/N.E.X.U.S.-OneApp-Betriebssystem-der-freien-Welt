@@ -77,10 +77,11 @@ dependencies:
   # Background service for Nostr keepalive (Android)
   flutter_background_service: ^5.0.5
 
-  # Update checker
+  # Update checker + native OS sharing
   http: ^1.2.0
   package_info_plus: ^8.0.0
   url_launcher: ^6.3.0
+  share_plus: ^10.0.0
 
 dev_dependencies:
   flutter_test:

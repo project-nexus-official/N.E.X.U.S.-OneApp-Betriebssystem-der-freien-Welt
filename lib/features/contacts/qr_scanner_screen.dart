@@ -10,7 +10,11 @@ import '../../core/contacts/contact.dart';
 import '../../core/contacts/contact_service.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/identicon.dart';
+import '../chat/channel_access_service.dart';
+import '../chat/channel_invite_payload.dart';
 import '../chat/chat_provider.dart';
+import '../chat/group_channel.dart';
+import '../chat/group_channel_service.dart';
 import 'contact_detail_screen.dart';
 import 'manual_key_input_dialog.dart';
 import 'qr_contact_payload.dart';
@@ -53,11 +57,22 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     for (final barcode in capture.barcodes) {
       final raw = barcode.rawValue;
       if (raw == null) continue;
-      final payload = QrContactPayload.tryParse(raw);
-      if (payload != null) {
+
+      // Contact QR code
+      final contactPayload = QrContactPayload.tryParse(raw);
+      if (contactPayload != null) {
         _scanned = true;
         _controller.stop();
-        _showResultSheet(payload);
+        _showResultSheet(contactPayload);
+        return;
+      }
+
+      // Channel invite QR code
+      final channelPayload = ChannelInvitePayload.tryParse(raw);
+      if (channelPayload != null) {
+        _scanned = true;
+        _controller.stop();
+        _showChannelResultSheet(channelPayload);
         return;
       }
     }
@@ -81,17 +96,27 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
   void _tryParseManual() {
     final text = _manualCtrl.text.trim();
     if (text.isEmpty) {
-      setState(() => _manualError = 'Bitte Schlüssel oder DID eingeben');
+      setState(() => _manualError = 'Bitte Schlüssel, DID oder Kanal-Link eingeben');
       return;
     }
-    final payload = tryParseAnyKey(text);
-    if (payload == null) {
+
+    // Try channel invite first (nexus:// link or channel JSON)
+    final channelPayload = ChannelInvitePayload.tryParse(text);
+    if (channelPayload != null) {
+      setState(() => _manualError = null);
+      _showChannelResultSheet(channelPayload);
+      return;
+    }
+
+    // Then try contact key formats
+    final contactPayload = tryParseAnyKey(text);
+    if (contactPayload == null) {
       setState(() => _manualError =
-          'Kein gültiger Schlüssel erkannt (did:key:…, npub1…, Hex oder JSON)');
+          'Kein gültiger Schlüssel oder Kanal-Link erkannt');
       return;
     }
     setState(() => _manualError = null);
-    _showResultSheet(payload);
+    _showResultSheet(contactPayload);
   }
 
   // ── Result bottom sheet ─────────────────────────────────────────────────────
@@ -126,6 +151,26 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
           );
         },
         onCancel: () {
+          Navigator.of(ctx).pop();
+          if (_useCamera) _resetScanner();
+        },
+      ),
+    );
+  }
+
+  // ── Channel invite result sheet ─────────────────────────────────────────────
+
+  Future<void> _showChannelResultSheet(ChannelInvitePayload payload) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => _ChannelResultSheet(
+        payload: payload,
+        onDone: () {
           Navigator.of(ctx).pop();
           if (_useCamera) _resetScanner();
         },
@@ -197,7 +242,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
           right: 0,
           bottom: 120,
           child: Text(
-            'NEXUS-Kontakt-QR-Code in den Rahmen halten',
+            'NEXUS-Kontakt- oder Kanal-QR-Code in den Rahmen halten',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.85),
@@ -715,3 +760,178 @@ class _ResultSheetState extends State<_ResultSheet> {
   }
 }
 
+
+// ── Channel invite result sheet ────────────────────────────────────────────────
+
+/// Shows a preview of a scanned channel invite and lets the user join,
+/// request access, or cancel.
+class _ChannelResultSheet extends StatefulWidget {
+  const _ChannelResultSheet({
+    required this.payload,
+    required this.onDone,
+  });
+
+  final ChannelInvitePayload payload;
+  final VoidCallback onDone;
+
+  @override
+  State<_ChannelResultSheet> createState() => _ChannelResultSheetState();
+}
+
+class _ChannelResultSheetState extends State<_ChannelResultSheet> {
+  bool _loading = false;
+
+  bool get _alreadyMember =>
+      GroupChannelService.instance.isJoined(widget.payload.channelName);
+
+  bool get _hasToken => widget.payload.inviteToken != null;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.payload;
+    final isMember = _alreadyMember;
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 32,
+              backgroundColor: AppColors.surfaceVariant,
+              child: Icon(
+                p.isPublic ? Icons.tag : Icons.lock,
+                color: AppColors.gold,
+                size: 28,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              p.channelName,
+              style: const TextStyle(
+                color: AppColors.gold,
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              p.accessLabel,
+              style: const TextStyle(color: Colors.grey, fontSize: 13),
+            ),
+            const SizedBox(height: 24),
+            if (isMember) ...[
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceVariant,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.check_circle, color: AppColors.gold, size: 18),
+                    SizedBox(width: 8),
+                    Text('Bereits Mitglied',
+                        style: TextStyle(color: AppColors.gold)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ] else ...[
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _loading ? null : _primaryAction,
+                  icon: _loading
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: AppColors.deepBlue),
+                        )
+                      : Icon(_primaryIcon),
+                  label: Text(_primaryLabel),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.gold,
+                    foregroundColor: AppColors.deepBlue,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    textStyle: const TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
+            TextButton(
+              onPressed: widget.onDone,
+              child: const Text('Schließen',
+                  style: TextStyle(color: Colors.grey)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  IconData get _primaryIcon =>
+      (widget.payload.isPublic || _hasToken) ? Icons.login : Icons.send;
+
+  String get _primaryLabel {
+    if (widget.payload.isPublic || _hasToken) return 'Beitreten';
+    return 'Beitritt anfragen';
+  }
+
+  Future<void> _primaryAction() async {
+    setState(() => _loading = true);
+    try {
+      final p = widget.payload;
+      final provider = context.read<ChatProvider>();
+
+      if (p.isPublic || _hasToken) {
+        await provider.joinChannelFromInvite(
+          channelId: p.channelId,
+          channelName: p.channelName,
+          nostrTag: p.nostrTag,
+          isPublic: p.isPublic,
+          isDiscoverable: p.isDiscoverable,
+          channelSecret: p.inviteToken,
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('${p.channelName} beigetreten!'),
+            backgroundColor: AppColors.gold,
+          ));
+          widget.onDone();
+        }
+      } else {
+        final channel = GroupChannel(
+          id: p.channelId.isNotEmpty
+              ? p.channelId
+              : DateTime.now().millisecondsSinceEpoch.toRadixString(16),
+          name: p.channelName,
+          description: '',
+          createdBy: '',
+          createdAt: DateTime.now().toUtc(),
+          isPublic: false,
+          isDiscoverable: true,
+          nostrTag: p.nostrTag,
+        );
+        await ChannelAccessService.instance
+            .sendJoinRequest(channel, provider.sendSystemDm);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Beitrittsantrag für ${p.channelName} gesendet.'),
+            backgroundColor: AppColors.gold,
+            duration: const Duration(seconds: 4),
+          ));
+          widget.onDone();
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+}

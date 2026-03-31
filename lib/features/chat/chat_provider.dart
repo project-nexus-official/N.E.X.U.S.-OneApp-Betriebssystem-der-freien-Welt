@@ -901,6 +901,42 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     _nostrTransport?.subscribeToChannel(channel.nostrTag);
   }
 
+  /// Joins a channel received via QR code or invite link.
+  ///
+  /// If the channel is already known locally, its existing data is preserved
+  /// and only [channelSecret] is updated when provided.
+  Future<void> joinChannelFromInvite({
+    required String channelId,
+    required String channelName,
+    required String nostrTag,
+    required bool isPublic,
+    bool isDiscoverable = true,
+    String? channelSecret,
+  }) async {
+    final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+    final existing = GroupChannelService.instance.findByName(channelName);
+
+    final channel = GroupChannel(
+      id: channelId.isNotEmpty
+          ? channelId
+          : (existing?.id ??
+              DateTime.now().millisecondsSinceEpoch.toRadixString(16)),
+      name: channelName,
+      description: existing?.description ?? '',
+      createdBy: existing?.createdBy ?? '',
+      createdAt: existing?.createdAt ?? DateTime.now().toUtc(),
+      isPublic: isPublic,
+      isDiscoverable: isDiscoverable,
+      channelSecret: channelSecret ?? existing?.channelSecret,
+      nostrTag: nostrTag,
+      joinedAt: DateTime.now().toUtc(),
+      members: existing?.members ?? [if (myDid.isNotEmpty) myDid],
+    );
+
+    await joinChannelAndSubscribe(channel);
+    debugPrint('[CHAT] Joined channel from invite: $channelName');
+  }
+
   /// Sends an encrypted system DM for channel access control
   /// (join request, invite, acceptance, rejection).
   Future<void> sendSystemDm(

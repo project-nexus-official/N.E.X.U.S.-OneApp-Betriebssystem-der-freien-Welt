@@ -9,6 +9,7 @@ import '../../core/identity/identity_service.dart';
 import '../../core/transport/nexus_message.dart';
 import '../../shared/theme/app_theme.dart';
 import 'channel_access_service.dart';
+import 'channel_share_sheet.dart';
 import 'chat_provider.dart';
 import 'conversation_service.dart';
 import 'group_channel.dart';
@@ -92,6 +93,18 @@ class _ChannelConversationScreenState
         .read<ChatProvider>()
         .sendToChannel(widget.channel.name, text);
     await _loadMessages();
+  }
+
+  void _shareChannel() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => ChannelShareSheet(channel: widget.channel),
+    );
   }
 
   void _showChannelInfo() {
@@ -308,6 +321,11 @@ class _ChannelConversationScreenState
           ),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.share),
+            tooltip: 'Kanal teilen',
+            onPressed: _shareChannel,
+          ),
           IconButton(
             icon: const Icon(Icons.info_outline),
             tooltip: 'Kanal-Info',
