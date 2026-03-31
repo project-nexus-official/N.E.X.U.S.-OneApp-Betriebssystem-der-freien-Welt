@@ -1,0 +1,27 @@
+NEXUS OneApp – Installation
+===========================
+
+Falls die App nicht startet (Fehler 0xc0000022 oder "DLL not found"):
+
+Bitte das Visual C++ Redistributable (x64) von Microsoft installieren:
+https://aka.ms/vs/17/release/vc_redist.x64.exe
+
+Dieses Paket stellt die benoetigten Runtime-Bibliotheken bereit
+(msvcp140.dll, vcruntime140.dll, vcruntime140_1.dll).
+
+Nach der Installation den PC neu starten und die App erneut starten.
+
+---
+
+NEXUS OneApp – Installation (English)
+======================================
+
+If the app does not start (error 0xc0000022 or "DLL not found"):
+
+Please install the Visual C++ Redistributable (x64) from Microsoft:
+https://aka.ms/vs/17/release/vc_redist.x64.exe
+
+This package provides the required runtime libraries
+(msvcp140.dll, vcruntime140.dll, vcruntime140_1.dll).
+
+After installation, restart your PC and launch the app again.

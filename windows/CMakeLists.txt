@@ -106,3 +106,34 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
+
+# ── Visual C++ Runtime ────────────────────────────────────────────────────────
+# Bundle the VC++ runtime DLLs (msvcp140.dll, vcruntime140.dll, …) so that
+# nexus_oneapp.exe starts on machines without Visual C++ Redistributable
+# installed (error 0xc0000022 = access denied / missing DLL).
+#
+# InstallRequiredSystemLibraries is the standard CMake way to locate and
+# bundle the MSVC runtime; it finds the correct DLLs for the active compiler
+# without relying on hard-coded paths.
+set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION "${INSTALL_BUNDLE_LIB_DIR}")
+set(CMAKE_INSTALL_SYSTEM_RUNTIME_COMPONENT Runtime)
+set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
+include(InstallRequiredSystemLibraries)
+if(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+  install(FILES ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS}
+    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+  foreach(_rt_lib ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS})
+    get_filename_component(_rt_name "${_rt_lib}" NAME)
+    message(STATUS "Bundling VC++ runtime: ${_rt_name}")
+  endforeach()
+else()
+  message(WARNING "No VC++ runtime libraries found via InstallRequiredSystemLibraries. "
+    "Users without Visual C++ Redistributable may see error 0xc0000022.")
+endif()
+
+# Bundle the plain-text install guide as a last-resort fallback for users
+# whose machines still lack the runtime (e.g. very restricted environments).
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/INSTALL.txt"
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  COMPONENT Runtime)
