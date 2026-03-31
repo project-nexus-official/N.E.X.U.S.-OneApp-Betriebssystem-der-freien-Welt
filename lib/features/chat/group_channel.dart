@@ -34,6 +34,7 @@ class GroupChannel {
     required String name,
     required String description,
     required String createdBy,
+    bool isPublic = true,
   }) {
     final normalised = normaliseName(name);
     return GroupChannel(
@@ -42,6 +43,7 @@ class GroupChannel {
       description: description,
       createdBy: createdBy,
       createdAt: DateTime.now().toUtc(),
+      isPublic: isPublic,
       nostrTag: nameToNostrTag(normalised),
       joinedAt: DateTime.now().toUtc(),
     );

@@ -115,7 +115,9 @@ class GroupChannelService {
   ///
   /// If the channel is already joined, updates its metadata.
   /// Otherwise adds it to the discovered list.
+  /// Private channels (isPublic == false) are never added to discovered.
   void addDiscoveredFromNostr(GroupChannel channel) {
+    if (!channel.isPublic) return; // private channels are not discoverable
     if (_joined.any((c) => c.name == channel.name)) return;
     _discovered.removeWhere((c) => c.name == channel.name);
     _discovered.add(channel);

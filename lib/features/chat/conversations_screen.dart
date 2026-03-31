@@ -489,6 +489,11 @@ class _ConversationTile extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
+                if (conv.isGroup && !(GroupChannelService.instance.findByName(conv.id)?.isPublic ?? true))
+                  const Padding(
+                    padding: EdgeInsets.only(left: 4),
+                    child: Icon(Icons.lock, size: 12, color: Colors.grey),
+                  ),
                 if (!conv.isBroadcast && !conv.isGroup) ...[
                   const SizedBox(width: 6),
                   _TrustBadgeInline(peerDid: conv.peerDid),
@@ -583,7 +588,9 @@ class _Avatar extends StatelessWidget {
       return _CircleIcon(icon: Icons.hub);
     }
     if (conv.isGroup) {
-      return _CircleIcon(icon: Icons.tag);
+      final channel = GroupChannelService.instance.findByName(conv.id);
+      final isPrivate = channel != null && !channel.isPublic;
+      return _CircleIcon(icon: isPrivate ? Icons.lock : Icons.tag);
     }
     if (conv.peerProfileImage != null) {
       // TODO: load from local file path when profile image caching is added.

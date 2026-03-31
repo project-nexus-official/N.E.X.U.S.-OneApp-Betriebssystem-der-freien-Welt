@@ -45,8 +45,10 @@ class _JoinChannelScreenState extends State<JoinChannelScreen> {
   }
 
   List<GroupChannel> get _filtered {
-    if (_query.isEmpty) return _channels;
-    return _channels
+    // Only show public channels in discovery.
+    final public = _channels.where((c) => c.isPublic).toList();
+    if (_query.isEmpty) return public;
+    return public
         .where((c) =>
             c.name.toLowerCase().contains(_query) ||
             c.description.toLowerCase().contains(_query))

@@ -203,7 +203,7 @@ class _ChannelConversationScreenState
                 ),
               ),
               Text(
-                'Öffentlicher Kanal',
+                widget.channel.isPublic ? 'Öffentlicher Kanal' : 'Privater Kanal',
                 style: TextStyle(color: Colors.grey[500], fontSize: 11),
               ),
             ],

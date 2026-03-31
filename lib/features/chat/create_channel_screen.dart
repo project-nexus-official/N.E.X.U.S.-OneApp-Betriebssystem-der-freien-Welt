@@ -20,6 +20,7 @@ class _CreateChannelScreenState extends State<CreateChannelScreen> {
   final _descController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _creating = false;
+  bool _isPublic = true;
   String? _nameError;
 
   @override
@@ -60,16 +61,20 @@ class _CreateChannelScreenState extends State<CreateChannelScreen> {
       name: name,
       description: _descController.text.trim(),
       createdBy: myDid,
+      isPublic: _isPublic,
     );
 
     await GroupChannelService.instance.createChannel(channel);
 
     if (!mounted) return;
 
-    // Publish Kind-40 announcement on Nostr.
-    final nostr = context.read<ChatProvider>().nostrTransport;
-    nostr?.publishChannelCreate(channel.toJson());
-    nostr?.subscribeToChannel(channel.nostrTag);
+    // Public channels are announced on Nostr (Kind-40) and subscribed to.
+    // Private channels are local-only for now (V1).
+    if (channel.isPublic) {
+      final nostr = context.read<ChatProvider>().nostrTransport;
+      nostr?.publishChannelCreate(channel.toJson());
+      nostr?.subscribeToChannel(channel.nostrTag);
+    }
 
     Navigator.of(context).pop(channel);
   }
@@ -93,8 +98,8 @@ class _CreateChannelScreenState extends State<CreateChannelScreen> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Öffentliche Kanäle können von allen NEXUS-Nutzern gefunden und '
-              'betreten werden.',
+              'Erstelle einen Kanal für Gruppen-Gespräche. Öffentliche Kanäle '
+              'können von allen NEXUS-Nutzern entdeckt werden.',
               style: TextStyle(color: Colors.grey, fontSize: 13),
             ),
             const SizedBox(height: 24),
@@ -133,6 +138,36 @@ class _CreateChannelScreenState extends State<CreateChannelScreen> {
                 fillColor: AppColors.surfaceVariant,
                 border:
                     OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+            const SizedBox(height: 24),
+            // Visibility selector.
+            Container(
+              decoration: BoxDecoration(
+                color: AppColors.surfaceVariant,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _VisibilityOption(
+                    icon: Icons.public,
+                    title: 'Öffentlich',
+                    subtitle: 'Jeder kann beitreten und den Kanal entdecken',
+                    selected: _isPublic,
+                    onTap: () => setState(() => _isPublic = true),
+                    topRounded: true,
+                  ),
+                  const Divider(height: 1, color: AppColors.surface),
+                  _VisibilityOption(
+                    icon: Icons.lock,
+                    title: 'Privat',
+                    subtitle: 'Nur per Einladung – nicht öffentlich sichtbar',
+                    selected: !_isPublic,
+                    onTap: () => setState(() => _isPublic = false),
+                    bottomRounded: true,
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 24),
@@ -184,6 +219,78 @@ class _CreateChannelScreenState extends State<CreateChannelScreen> {
                 ),
                 onPressed: _creating ? null : _create,
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Visibility option tile ───────────────────────────────────────────────────
+
+class _VisibilityOption extends StatelessWidget {
+  const _VisibilityOption({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.selected,
+    required this.onTap,
+    this.topRounded = false,
+    this.bottomRounded = false,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool selected;
+  final VoidCallback onTap;
+  final bool topRounded;
+  final bool bottomRounded;
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = Radius.circular(topRounded || bottomRounded ? 12 : 0);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.only(
+        topLeft: topRounded ? radius : Radius.zero,
+        topRight: topRounded ? radius : Radius.zero,
+        bottomLeft: bottomRounded ? radius : Radius.zero,
+        bottomRight: bottomRounded ? radius : Radius.zero,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            Icon(icon,
+                color: selected ? AppColors.gold : Colors.grey, size: 22),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color:
+                          selected ? AppColors.onDark : Colors.grey,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                        color: Colors.grey, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              selected ? Icons.check_circle : Icons.radio_button_unchecked,
+              color: selected ? AppColors.gold : Colors.grey,
+              size: 20,
             ),
           ],
         ),

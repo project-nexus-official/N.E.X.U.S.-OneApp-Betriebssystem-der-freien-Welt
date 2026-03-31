@@ -15,6 +15,7 @@ import '../chat/chat_provider.dart';
 import '../chat/chat_screen.dart' show RadarScreen;
 import '../chat/conversation.dart';
 import '../chat/conversation_service.dart';
+import '../chat/group_channel_service.dart';
 import '../contacts/contacts_screen.dart';
 import 'node_counter_service.dart';
 
@@ -283,13 +284,19 @@ class _DashboardScreenState extends State<DashboardScreen>
     final channelConvs = _conversations.where((c) => c.isGroup).toList();
     final unread = channelConvs.fold(0, (sum, c) => sum + c.unreadCount);
     final latest = channelConvs.isNotEmpty ? channelConvs.first : null;
+    final privateCount = channelConvs.where((c) {
+      return !(GroupChannelService.instance.findByName(c.id)?.isPublic ?? true);
+    }).length;
+
+    final subtitleParts = ['${channelConvs.length} aktive Kanäle'];
+    if (privateCount > 0) subtitleParts.add('$privateCount privat');
+    if (unread > 0) subtitleParts.add('$unread ungelesen');
 
     return _FeatureCard(
       key: const Key('channels_card'),
       icon: Icons.tag,
       title: 'Kanäle',
-      subtitle: '${channelConvs.length} aktive Kanäle'
-          '${unread > 0 ? ', $unread ungelesen' : ''}',
+      subtitle: subtitleParts.join(', '),
       preview: latest != null
           ? '${latest.peerPseudonym}: ${latest.lastMessage}'
           : null,
