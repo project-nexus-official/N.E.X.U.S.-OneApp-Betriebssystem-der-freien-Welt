@@ -2,7 +2,7 @@
 ///
 /// Implements the NEXUS "Selective Disclosure" principle:
 /// data is withheld by default, not shared.
-enum VisibilityLevel { public, contacts, trusted, private }
+enum VisibilityLevel { public, contacts, trusted, guardians, private }
 
 extension VisibilityLevelX on VisibilityLevel {
   String get label {
@@ -13,6 +13,8 @@ extension VisibilityLevelX on VisibilityLevel {
         return 'Kontakte';
       case VisibilityLevel.trusted:
         return 'Vertrauenspersonen';
+      case VisibilityLevel.guardians:
+        return 'Bürgen';
       case VisibilityLevel.private:
         return 'Privat';
     }
@@ -21,6 +23,8 @@ extension VisibilityLevelX on VisibilityLevel {
   static VisibilityLevel fromString(String s) =>
       VisibilityLevel.values.firstWhere(
         (e) => e.name == s,
+        // Unknown values (e.g. written by a newer app version) default to
+        // private so data is never accidentally exposed on older builds.
         orElse: () => VisibilityLevel.private,
       );
 }

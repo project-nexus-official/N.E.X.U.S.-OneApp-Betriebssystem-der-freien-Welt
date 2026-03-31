@@ -151,9 +151,20 @@ void main() {
       expect(visible.containsKey('birthDate'), isFalse);
     });
 
-    test('guardian has same profile visibility as trusted', () {
-      expect(TrustLevel.guardian.allowedVisibility,
-          equals(TrustLevel.trusted.allowedVisibility));
+    test('guardian sees trusted fields plus guardians-only fields', () {
+      // Guardian is a superset of trusted: same fields + anything marked guardians.
+      final trustedVisible =
+          profile.visibleTo(TrustLevel.trusted.allowedVisibility);
+      final guardianVisible =
+          profile.visibleTo(TrustLevel.guardian.allowedVisibility);
+      // Everything trusted can see, guardian can also see.
+      for (final key in trustedVisible.keys) {
+        expect(guardianVisible.containsKey(key), isTrue,
+            reason: 'guardian must see "$key" that trusted can see');
+      }
+      // Guardian has at least as many visible fields as trusted.
+      expect(guardianVisible.length,
+          greaterThanOrEqualTo(trustedVisible.length));
     });
 
     test('birthDate is NEVER exposed regardless of trust level', () {

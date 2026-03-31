@@ -41,11 +41,17 @@ extension TrustLevelX on TrustLevel {
       case TrustLevel.contact:
         return {VisibilityLevel.public, VisibilityLevel.contacts};
       case TrustLevel.trusted:
+        return {
+          VisibilityLevel.public,
+          VisibilityLevel.contacts,
+          VisibilityLevel.trusted,
+        };
       case TrustLevel.guardian:
         return {
           VisibilityLevel.public,
           VisibilityLevel.contacts,
           VisibilityLevel.trusted,
+          VisibilityLevel.guardians,
         };
     }
   }

@@ -24,9 +24,33 @@ void main() {
       });
     });
 
-    test('guardian has same visibility as trusted', () {
-      expect(TrustLevel.guardian.allowedVisibility,
-          TrustLevel.trusted.allowedVisibility);
+    test('guardian allows public + contacts + trusted + guardians', () {
+      expect(TrustLevel.guardian.allowedVisibility, {
+        VisibilityLevel.public,
+        VisibilityLevel.contacts,
+        VisibilityLevel.trusted,
+        VisibilityLevel.guardians,
+      });
+    });
+
+    test('guardian allows more than trusted', () {
+      // Guardian is a superset of trusted — they see everything trusted sees
+      // plus the exclusive guardians level.
+      expect(
+        TrustLevel.guardian.allowedVisibility
+            .containsAll(TrustLevel.trusted.allowedVisibility),
+        isTrue,
+      );
+      expect(
+        TrustLevel.guardian.allowedVisibility
+            .contains(VisibilityLevel.guardians),
+        isTrue,
+      );
+      expect(
+        TrustLevel.trusted.allowedVisibility
+            .contains(VisibilityLevel.guardians),
+        isFalse,
+      );
     });
   });
 

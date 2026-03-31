@@ -244,6 +244,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         return Icons.people_outline;
       case VisibilityLevel.trusted:
         return Icons.star_outline;
+      case VisibilityLevel.guardians:
+        return Icons.shield_outlined;
       case VisibilityLevel.private:
         return Icons.lock_outline;
     }
