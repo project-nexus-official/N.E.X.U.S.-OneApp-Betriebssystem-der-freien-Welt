@@ -67,6 +67,18 @@ class GroupChannelService {
     }
   }
 
+  GroupChannel? findById(String id) {
+    try {
+      return _joined.firstWhere((c) => c.id == id);
+    } catch (_) {
+      try {
+        return _discovered.firstWhere((c) => c.id == id);
+      } catch (_) {
+        return null;
+      }
+    }
+  }
+
   GroupChannel? findByNostrTag(String tag) {
     try {
       return _joined.firstWhere((c) => c.nostrTag == tag);
@@ -77,6 +89,16 @@ class GroupChannelService {
         return null;
       }
     }
+  }
+
+  /// Updates the member list of a joined channel and persists it.
+  Future<void> updateMembers(String name, List<String> newMembers) async {
+    final n = GroupChannel.normaliseName(name);
+    final channel = _joined.firstWhere((c) => c.name == n,
+        orElse: () => throw StateError('Channel not found: $n'));
+    channel.members = List.from(newMembers);
+    await PodDatabase.instance.upsertChannel(channel.id, channel.toJson());
+    _joinedController.add(joinedChannels);
   }
 
   /// Creates a new channel, persists it, and returns it.
@@ -113,11 +135,10 @@ class GroupChannelService {
 
   /// Called when a Nostr Kind-40 announcement arrives.
   ///
-  /// If the channel is already joined, updates its metadata.
-  /// Otherwise adds it to the discovered list.
-  /// Private channels (isPublic == false) are never added to discovered.
+  /// Adds the channel to the discovered list unless it is hidden
+  /// (isDiscoverable == false) or already joined.
   void addDiscoveredFromNostr(GroupChannel channel) {
-    if (!channel.isPublic) return; // private channels are not discoverable
+    if (!channel.isDiscoverable) return; // hidden channels not in discovery
     if (_joined.any((c) => c.name == channel.name)) return;
     _discovered.removeWhere((c) => c.name == channel.name);
     _discovered.add(channel);

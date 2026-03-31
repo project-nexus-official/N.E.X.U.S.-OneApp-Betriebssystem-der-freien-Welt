@@ -13,6 +13,7 @@ import 'package:image/image.dart' as img;
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/contacts/contact_service.dart';
+import '../../core/crypto/channel_encryption.dart';
 import '../../core/crypto/encryption_keys.dart';
 import '../../core/crypto/message_encryption.dart';
 import '../../core/identity/bip39.dart';
@@ -29,6 +30,7 @@ import '../../core/transport/transport_manager.dart';
 import '../../services/background_service.dart';
 import '../../services/notification_service.dart';
 import '../../shared/widgets/notification_banner.dart';
+import 'channel_access_service.dart';
 import 'conversation_service.dart';
 import 'group_channel.dart';
 import 'group_channel_service.dart';
@@ -189,6 +191,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     try {
       await GroupChannelService.instance.load();
       await GroupChannelService.instance.ensureDefaults(myDid);
+      await ChannelAccessService.instance.load();
 
       // Subscribe Nostr to each joined channel.
       for (final ch in GroupChannelService.instance.joinedChannels) {
@@ -229,6 +232,8 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
                 isUtc: true,
               )
             : DateTime.now().toUtc(),
+        isPublic: (data['isPublic'] as bool?) ?? true,
+        isDiscoverable: (data['isDiscoverable'] as bool?) ?? true,
         nostrTag: nostrTag,
       );
       GroupChannelService.instance.addDiscoveredFromNostr(channel);
@@ -464,6 +469,64 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
           );
         }
       }
+    }
+
+    // ── Private channel message decryption ───────────────────────────────────
+    if (processedMsg.isBroadcast &&
+        processedMsg.metadata?['ch_enc'] == true &&
+        processedMsg.channel != null &&
+        processedMsg.channel != '#mesh') {
+      final ch =
+          GroupChannelService.instance.findByName(processedMsg.channel!);
+      if (ch != null && ch.channelSecret != null) {
+        final plaintext = await ChannelEncryption.decrypt(
+          processedMsg.body,
+          ch.channelSecret!,
+          ch.id,
+        );
+        processedMsg = NexusMessage(
+          id: processedMsg.id,
+          fromDid: processedMsg.fromDid,
+          toDid: processedMsg.toDid,
+          type: processedMsg.type,
+          channel: processedMsg.channel,
+          body: plaintext ?? '[Nachricht konnte nicht entschlüsselt werden]',
+          timestamp: processedMsg.timestamp,
+          ttlHours: processedMsg.ttlHours,
+          hopCount: processedMsg.hopCount,
+          signature: processedMsg.signature,
+          metadata: processedMsg.metadata,
+        );
+      } else {
+        // Non-member: store a placeholder.
+        processedMsg = NexusMessage(
+          id: processedMsg.id,
+          fromDid: processedMsg.fromDid,
+          toDid: processedMsg.toDid,
+          type: processedMsg.type,
+          channel: processedMsg.channel,
+          body: '🔒 Verschlüsselte Nachricht',
+          timestamp: processedMsg.timestamp,
+          ttlHours: processedMsg.ttlHours,
+          hopCount: processedMsg.hopCount,
+          signature: processedMsg.signature,
+          metadata: processedMsg.metadata,
+        );
+      }
+    }
+
+    // ── Channel access system messages ────────────────────────────────────────
+    final sysType = processedMsg.metadata?['sys_type'] as String?;
+    if (sysType != null && sysType.startsWith('channel_')) {
+      try {
+        final bodyData =
+            jsonDecode(processedMsg.body) as Map<String, dynamic>;
+        await _handleChannelSystemMessage(
+            sysType, bodyData, processedMsg.fromDid);
+      } catch (e) {
+        debugPrint('[CHAT] Channel system-message parse error: $e');
+      }
+      return; // never store system messages in the conversation cache
     }
 
     final myDid = IdentityService.instance.currentIdentity?.did ?? '';
@@ -767,26 +830,159 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// Sends a text message to a named group channel (e.g. "#teneriffa").
+  ///
+  /// For private channels the body is encrypted with the shared channelSecret.
+  /// The sender always stores a plaintext copy locally.
   Future<void> sendToChannel(String channelName, String text) async {
     final myDid = IdentityService.instance.currentIdentity?.did ?? 'unknown';
     final name =
         channelName.startsWith('#') ? channelName : '#$channelName';
 
-    final msg = NexusMessage.create(
+    final channel = GroupChannelService.instance.findByName(name);
+
+    // Build wire message (possibly encrypted).
+    String wireBody = text;
+    Map<String, dynamic>? extraMeta;
+    if (channel != null && !channel.isPublic && channel.channelSecret != null) {
+      final enc = await ChannelEncryption.encrypt(
+          text, channel.channelSecret!, channel.id);
+      if (enc != null) {
+        wireBody = enc;
+        extraMeta = {'ch_enc': true};
+      }
+    }
+
+    final wireMsg = NexusMessage.create(
       fromDid: myDid,
       toDid: NexusMessage.broadcastDid,
-      body: text,
+      body: wireBody,
       channel: name,
+      metadata: extraMeta,
     );
 
-    await _manager.sendMessage(msg);
+    await _manager.sendMessage(wireMsg);
+
+    // Store plaintext locally so the sender can read their own messages.
+    final localMsg = extraMeta != null
+        ? NexusMessage(
+            id: wireMsg.id,
+            fromDid: wireMsg.fromDid,
+            toDid: wireMsg.toDid,
+            type: wireMsg.type,
+            channel: wireMsg.channel,
+            body: text,
+            timestamp: wireMsg.timestamp,
+            ttlHours: wireMsg.ttlHours,
+            metadata: extraMeta,
+          )
+        : wireMsg;
 
     _conversationCache.putIfAbsent(name, () => []);
-    _conversationCache[name]!.add(msg);
-    await _persistMessage(name, msg);
+    _conversationCache[name]!.add(localMsg);
+    await _persistMessage(name, localMsg);
     ConversationService.instance.notifyUpdate();
 
     notifyListeners();
+  }
+
+  /// Joins [channel] and subscribes to its Nostr tag.
+  Future<void> joinChannelAndSubscribe(GroupChannel channel) async {
+    await GroupChannelService.instance.joinChannel(channel);
+    _nostrTransport?.subscribeToChannel(channel.nostrTag);
+  }
+
+  /// Sends an encrypted system DM for channel access control
+  /// (join request, invite, acceptance, rejection).
+  Future<void> sendSystemDm(
+      String recipientDid, Map<String, dynamic> data) async {
+    final myDid =
+        IdentityService.instance.currentIdentity?.did ?? 'unknown';
+    final sysType = data['sys_type'] as String? ?? '';
+    final bodyJson = jsonEncode(data);
+
+    final baseMeta = <String, dynamic>{
+      'sys_type': sysType,
+      if (EncryptionKeys.instance.publicKeyHex != null)
+        'enc_key': EncryptionKeys.instance.publicKeyHex!,
+    };
+
+    final recipientEncKey =
+        ContactService.instance.findByDid(recipientDid)?.encryptionPublicKey;
+
+    NexusMessage msg;
+    if (recipientEncKey != null) {
+      final encBody = await MessageEncryption.encrypt(
+        bodyJson,
+        senderKeyPair: EncryptionKeys.instance.keyPair,
+        recipientPublicKeyBytes: EncryptionKeys.hexToBytes(recipientEncKey),
+      );
+      msg = NexusMessage.create(
+        fromDid: myDid,
+        toDid: recipientDid,
+        type: NexusMessageType.system,
+        body: encBody ?? bodyJson,
+        metadata: {
+          ...baseMeta,
+          if (encBody != null) 'encrypted': true,
+        },
+      );
+    } else {
+      msg = NexusMessage.create(
+        fromDid: myDid,
+        toDid: recipientDid,
+        type: NexusMessageType.system,
+        body: bodyJson,
+        metadata: baseMeta,
+      );
+    }
+
+    await _manager.sendMessage(msg, recipientDid: recipientDid);
+  }
+
+  // ── Channel access system-message handlers ─────────────────────────────────
+
+  Future<void> _handleChannelSystemMessage(
+      String sysType, Map<String, dynamic> data, String senderDid) async {
+    switch (sysType) {
+      case 'channel_join_request':
+      case 'channel_invite':
+        ChannelAccessService.instance
+            .handleIncoming(sysType, data, senderDid);
+      case 'channel_join_accepted':
+        await _joinChannelFromAcceptance(data, senderDid);
+      case 'channel_join_rejected':
+        debugPrint('[CHAT] Join request rejected for: '
+            '${data['channelName'] ?? data['channelId']}');
+    }
+  }
+
+  Future<void> _joinChannelFromAcceptance(
+      Map<String, dynamic> data, String adminDid) async {
+    final channelName = data['channelName'] as String? ?? '';
+    final channelSecret = data['channelSecret'] as String? ?? '';
+    final channelId = data['channelId'] as String? ?? '';
+    final nostrTag = data['nostrTag'] as String? ??
+        GroupChannel.nameToNostrTag(channelName);
+    final description = data['description'] as String? ?? '';
+    final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+
+    final existing = GroupChannelService.instance.findByName(channelName);
+    final channel = GroupChannel(
+      id: channelId.isNotEmpty ? channelId : (existing?.id ?? channelId),
+      name: channelName,
+      description: description,
+      createdBy: adminDid,
+      createdAt: existing?.createdAt ?? DateTime.now().toUtc(),
+      isPublic: false,
+      isDiscoverable: existing?.isDiscoverable ?? true,
+      channelSecret: channelSecret,
+      nostrTag: nostrTag,
+      joinedAt: DateTime.now().toUtc(),
+      members: [adminDid, if (myDid.isNotEmpty) myDid],
+    );
+
+    await joinChannelAndSubscribe(channel);
+    debugPrint('[CHAT] Joined private channel via acceptance: $channelName');
   }
 
   /// Sends a JPEG image to [recipientDid] (or broadcast if null).

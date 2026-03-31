@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../shared/theme/app_theme.dart';
+import 'channel_access_service.dart';
 import 'channel_conversation_screen.dart';
 import 'chat_provider.dart';
 import 'group_channel.dart';
@@ -45,10 +46,10 @@ class _JoinChannelScreenState extends State<JoinChannelScreen> {
   }
 
   List<GroupChannel> get _filtered {
-    // Only show public channels in discovery.
-    final public = _channels.where((c) => c.isPublic).toList();
-    if (_query.isEmpty) return public;
-    return public
+    // Show all discoverable channels (public + private+visible).
+    final discoverable = _channels.where((c) => c.isDiscoverable).toList();
+    if (_query.isEmpty) return discoverable;
+    return discoverable
         .where((c) =>
             c.name.toLowerCase().contains(_query) ||
             c.description.toLowerCase().contains(_query))
@@ -90,6 +91,24 @@ class _JoinChannelScreenState extends State<JoinChannelScreen> {
       );
       // Auto-open the channel chat after joining.
       _openChannel(channel);
+    }
+  }
+
+  Future<void> _sendJoinRequest(GroupChannel channel) async {
+    final provider = context.read<ChatProvider>();
+    await ChannelAccessService.instance
+        .sendJoinRequest(channel, provider.sendSystemDm);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              'Beitrittsantrag für ${channel.name} gesendet. '
+              'Du wirst benachrichtigt wenn der Admin dich freischaltet.'),
+          backgroundColor: AppColors.gold,
+          duration: const Duration(seconds: 4),
+        ),
+      );
     }
   }
 
@@ -185,24 +204,44 @@ class _JoinChannelScreenState extends State<JoinChannelScreen> {
                   final ch = filtered[i];
                   final joined =
                       GroupChannelService.instance.isJoined(ch.name);
+                  final isPrivate = !ch.isPublic;
                   return ListTile(
                     onTap: joined ? () => _openChannel(ch) : null,
                     leading: CircleAvatar(
                       backgroundColor: AppColors.surfaceVariant,
-                      child: Text(
-                        '#',
-                        style: const TextStyle(
-                          color: AppColors.gold,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      child: Icon(
+                        isPrivate ? Icons.lock : Icons.tag,
+                        color: AppColors.gold,
+                        size: 18,
                       ),
                     ),
-                    title: Text(
-                      ch.name,
-                      style: const TextStyle(
-                        color: AppColors.gold,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    title: Row(
+                      children: [
+                        Text(
+                          ch.name,
+                          style: const TextStyle(
+                            color: AppColors.gold,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (isPrivate)
+                          Container(
+                            margin: const EdgeInsets.only(left: 6),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: AppColors.surfaceVariant,
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(
+                                  color: Colors.grey.withValues(alpha: 0.4)),
+                            ),
+                            child: const Text(
+                              'Privat',
+                              style: TextStyle(
+                                  color: Colors.grey, fontSize: 10),
+                            ),
+                          ),
+                      ],
                     ),
                     subtitle: ch.description.isNotEmpty
                         ? Text(
@@ -222,14 +261,23 @@ class _JoinChannelScreenState extends State<JoinChannelScreen> {
                             ),
                             child: const Text('Verlassen'),
                           )
-                        : ElevatedButton(
-                            onPressed: () => _join(ch),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.gold,
-                              foregroundColor: AppColors.deepBlue,
-                            ),
-                            child: const Text('Beitreten'),
-                          ),
+                        : isPrivate
+                            ? ElevatedButton(
+                                onPressed: () => _sendJoinRequest(ch),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.surfaceVariant,
+                                  foregroundColor: AppColors.onDark,
+                                ),
+                                child: const Text('Anfragen'),
+                              )
+                            : ElevatedButton(
+                                onPressed: () => _join(ch),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.gold,
+                                  foregroundColor: AppColors.deepBlue,
+                                ),
+                                child: const Text('Beitreten'),
+                              ),
                   );
                 },
               ),

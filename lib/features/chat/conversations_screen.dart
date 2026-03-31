@@ -16,6 +16,8 @@ import 'chat_screen.dart' show RadarScreen;
 import 'conversation.dart';
 import 'conversation_screen.dart';
 import 'conversation_service.dart';
+import 'channel_access_service.dart';
+import 'channel_requests_screen.dart';
 import 'create_channel_screen.dart';
 import 'group_channel_service.dart';
 import 'join_channel_screen.dart';
@@ -274,6 +276,49 @@ class _ConversationsScreenState extends State<ConversationsScreen>
               onTap: () {
                 Navigator.pop(ctx);
                 _joinChannel();
+              },
+            ),
+            StreamBuilder<void>(
+              stream: ChannelAccessService.instance.onChanged,
+              builder: (ctx2, _) {
+                final count =
+                    ChannelAccessService.instance.pendingCount;
+                return ListTile(
+                  leading: const Icon(Icons.pending_actions,
+                      color: AppColors.gold),
+                  title: const Text('Kanal-Anfragen'),
+                  trailing: count > 0
+                      ? Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 2),
+                          decoration: const BoxDecoration(
+                            color: AppColors.gold,
+                            borderRadius:
+                                BorderRadius.all(Radius.circular(10)),
+                          ),
+                          child: Text(
+                            '$count',
+                            style: const TextStyle(
+                              color: AppColors.deepBlue,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        )
+                      : null,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    Navigator.of(context, rootNavigator: true).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) =>
+                            ChangeNotifierProvider.value(
+                          value: context.read<ChatProvider>(),
+                          child: const ChannelRequestsScreen(),
+                        ),
+                      ),
+                    );
+                  },
+                );
               },
             ),
             const SizedBox(height: 8),

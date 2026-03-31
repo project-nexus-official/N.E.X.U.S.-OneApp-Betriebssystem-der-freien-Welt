@@ -21,6 +21,7 @@ class _CreateChannelScreenState extends State<CreateChannelScreen> {
   final _formKey = GlobalKey<FormState>();
   bool _creating = false;
   bool _isPublic = true;
+  bool _isDiscoverable = true;
   String? _nameError;
 
   @override
@@ -62,19 +63,18 @@ class _CreateChannelScreenState extends State<CreateChannelScreen> {
       description: _descController.text.trim(),
       createdBy: myDid,
       isPublic: _isPublic,
+      isDiscoverable: _isPublic ? true : _isDiscoverable,
     );
 
     await GroupChannelService.instance.createChannel(channel);
 
     if (!mounted) return;
 
-    // Public channels are announced on Nostr (Kind-40) and subscribed to.
-    // Private channels are local-only for now (V1).
-    if (channel.isPublic) {
-      final nostr = context.read<ChatProvider>().nostrTransport;
-      nostr?.publishChannelCreate(channel.toJson());
-      nostr?.subscribeToChannel(channel.nostrTag);
-    }
+    // ALL channels (public and private) are announced on Nostr (Kind-40) and
+    // subscribed to. Private messages are encrypted with the channelSecret.
+    final nostr = context.read<ChatProvider>().nostrTransport;
+    nostr?.publishChannelCreate(channel.toJson());
+    nostr?.subscribeToChannel(channel.nostrTag);
 
     Navigator.of(context).pop(channel);
   }
@@ -141,7 +141,7 @@ class _CreateChannelScreenState extends State<CreateChannelScreen> {
               ),
             ),
             const SizedBox(height: 24),
-            // Visibility selector.
+            // Zugangstyp selector.
             Container(
               decoration: BoxDecoration(
                 color: AppColors.surfaceVariant,
@@ -157,19 +157,65 @@ class _CreateChannelScreenState extends State<CreateChannelScreen> {
                     selected: _isPublic,
                     onTap: () => setState(() => _isPublic = true),
                     topRounded: true,
+                    bottomRounded: _isPublic,
                   ),
                   const Divider(height: 1, color: AppColors.surface),
                   _VisibilityOption(
                     icon: Icons.lock,
                     title: 'Privat',
-                    subtitle: 'Nur per Einladung – nicht öffentlich sichtbar',
+                    subtitle: 'Zugang nur für zugelassene Mitglieder',
                     selected: !_isPublic,
                     onTap: () => setState(() => _isPublic = false),
-                    bottomRounded: true,
+                    bottomRounded: _isPublic, // rounded only if no sub-options
                   ),
                 ],
               ),
             ),
+            // When private is selected: show discoverable sub-option.
+            if (!_isPublic) ...[
+              const SizedBox(height: 8),
+              Container(
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceVariant,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                      color: AppColors.gold.withValues(alpha: 0.25)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                      child: Text(
+                        'Auffindbarkeit',
+                        style: TextStyle(
+                            color: Colors.grey[500], fontSize: 11),
+                      ),
+                    ),
+                    _VisibilityOption(
+                      icon: Icons.visibility,
+                      title: 'Sichtbar',
+                      subtitle:
+                          'Kanal ist auffindbar – Beitritt nur auf Antrag',
+                      selected: _isDiscoverable,
+                      onTap: () =>
+                          setState(() => _isDiscoverable = true),
+                      topRounded: true,
+                    ),
+                    const Divider(height: 1, color: AppColors.surface),
+                    _VisibilityOption(
+                      icon: Icons.visibility_off,
+                      title: 'Unsichtbar',
+                      subtitle: 'Kanal ist nicht auffindbar – nur per Einladung',
+                      selected: !_isDiscoverable,
+                      onTap: () =>
+                          setState(() => _isDiscoverable = false),
+                      bottomRounded: true,
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 24),
             // Preview of the channel name.
             ValueListenableBuilder<TextEditingValue>(

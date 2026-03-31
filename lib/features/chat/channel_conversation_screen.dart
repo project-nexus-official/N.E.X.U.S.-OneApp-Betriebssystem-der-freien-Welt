@@ -5,8 +5,10 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/contacts/contact_service.dart';
+import '../../core/identity/identity_service.dart';
 import '../../core/transport/nexus_message.dart';
 import '../../shared/theme/app_theme.dart';
+import 'channel_access_service.dart';
 import 'chat_provider.dart';
 import 'conversation_service.dart';
 import 'group_channel.dart';
@@ -93,9 +95,20 @@ class _ChannelConversationScreenState
   }
 
   void _showChannelInfo() {
+    final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+    final isAdmin = widget.channel.createdBy == myDid;
+    final isPrivate = !widget.channel.isPublic;
+    final members = widget.channel.members;
+    final pendingCount = isAdmin
+        ? ChannelAccessService.instance.pendingRequests
+            .where((r) => r.channelName == widget.channel.name)
+            .length
+        : 0;
+
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.surface,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -106,13 +119,23 @@ class _ChannelConversationScreenState
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                widget.channel.name,
-                style: const TextStyle(
-                  color: AppColors.gold,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
+              Row(
+                children: [
+                  Icon(
+                    isPrivate ? Icons.lock : Icons.tag,
+                    color: AppColors.gold,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    widget.channel.name,
+                    style: const TextStyle(
+                      color: AppColors.gold,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
               ),
               if (widget.channel.description.isNotEmpty) ...[
                 const SizedBox(height: 8),
@@ -123,10 +146,47 @@ class _ChannelConversationScreenState
               ],
               const SizedBox(height: 4),
               Text(
-                'Öffentlicher Kanal',
+                widget.channel.isPublic
+                    ? 'Öffentlicher Kanal'
+                    : widget.channel.isDiscoverable
+                        ? 'Privater Kanal (sichtbar)'
+                        : 'Privater Kanal (unsichtbar)',
                 style: TextStyle(color: Colors.grey[600], fontSize: 12),
               ),
+              if (isPrivate && members.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  '${members.length} Mitglied${members.length == 1 ? "" : "er"}',
+                  style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                ),
+              ],
               const SizedBox(height: 20),
+              // Admin controls for private channels.
+              if (isAdmin && isPrivate) ...[
+                if (pendingCount > 0)
+                  _InfoRow(
+                    icon: Icons.pending_actions,
+                    label: '$pendingCount offene Beitrittsanfrage'
+                        '${pendingCount == 1 ? "" : "n"}',
+                    color: AppColors.gold,
+                  ),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.person_add),
+                    label: const Text('Mitglieder einladen'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.gold,
+                      foregroundColor: AppColors.deepBlue,
+                    ),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _inviteMembers();
+                    },
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
@@ -149,6 +209,44 @@ class _ChannelConversationScreenState
         ),
       ),
     );
+  }
+
+  /// Opens a contact picker so the admin can invite members.
+  Future<void> _inviteMembers() async {
+    final contacts = ContactService.instance.contacts;
+    if (!mounted) return;
+
+    final selected = await showDialog<List<String>>(
+      context: context,
+      builder: (ctx) => _ContactPickerDialog(
+        contacts: contacts
+            .where((c) =>
+                !widget.channel.members.contains(c.did))
+            .toList(),
+      ),
+    );
+
+    if (selected == null || selected.isEmpty) return;
+    if (!mounted) return;
+
+    final provider = context.read<ChatProvider>();
+    for (final did in selected) {
+      await ChannelAccessService.instance.sendInvitation(
+        widget.channel,
+        did,
+        provider.sendSystemDm,
+      );
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              '${selected.length} Einladung${selected.length == 1 ? "" : "en"} gesendet.'),
+          backgroundColor: AppColors.gold,
+        ),
+      );
+    }
   }
 
   Future<void> _leaveChannel() async {
@@ -424,6 +522,113 @@ class _EmptyChannelHint extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ── Helper widgets ─────────────────────────────────────────────────────────────
+
+class _InfoRow extends StatelessWidget {
+  const _InfoRow({
+    required this.icon,
+    required this.label,
+    this.color = AppColors.onDark,
+  });
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(label,
+                style: TextStyle(color: color, fontSize: 13)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Contact picker dialog ──────────────────────────────────────────────────────
+
+class _ContactPickerDialog extends StatefulWidget {
+  const _ContactPickerDialog({required this.contacts});
+  final List<dynamic> contacts; // List<Contact>
+
+  @override
+  State<_ContactPickerDialog> createState() =>
+      _ContactPickerDialogState();
+}
+
+class _ContactPickerDialogState extends State<_ContactPickerDialog> {
+  final Set<String> _selected = {};
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.surface,
+      title: const Text('Mitglieder einladen',
+          style: TextStyle(color: AppColors.gold)),
+      content: widget.contacts.isEmpty
+          ? const Text(
+              'Alle Kontakte sind bereits Mitglieder.',
+              style: TextStyle(color: AppColors.onDark),
+            )
+          : SizedBox(
+              width: double.maxFinite,
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: widget.contacts.length,
+                itemBuilder: (ctx, i) {
+                  final c = widget.contacts[i];
+                  final did = c.did as String;
+                  final name = c.pseudonym as String;
+                  final selected = _selected.contains(did);
+                  return CheckboxListTile(
+                    value: selected,
+                    onChanged: (v) {
+                      setState(() {
+                        if (v == true) {
+                          _selected.add(did);
+                        } else {
+                          _selected.remove(did);
+                        }
+                      });
+                    },
+                    title: Text(name,
+                        style: const TextStyle(
+                            color: AppColors.onDark)),
+                    activeColor: AppColors.gold,
+                    checkColor: AppColors.deepBlue,
+                  );
+                },
+              ),
+            ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Abbrechen',
+              style: TextStyle(color: Colors.grey)),
+        ),
+        if (widget.contacts.isNotEmpty)
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.gold,
+              foregroundColor: AppColors.deepBlue,
+            ),
+            onPressed: _selected.isEmpty
+                ? null
+                : () => Navigator.pop(context, _selected.toList()),
+            child: const Text('Einladen'),
+          ),
+      ],
     );
   }
 }

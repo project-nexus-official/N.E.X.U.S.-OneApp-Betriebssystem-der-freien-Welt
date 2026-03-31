@@ -251,19 +251,36 @@ class NostrTransport implements MessageTransport {
   }
 
   /// Publishes a Kind-40 channel creation announcement.
+  ///
+  /// Tags include:
+  ///   ["access", "public"|"private"] — whether the channel is open to all
+  ///   ["discoverable", "true"|"false"] — whether it appears in discovery
+  ///
+  /// The channelSecret (for private channels) is NOT included in the Kind-40
+  /// event — it is distributed only to accepted members via encrypted DMs.
   void publishChannelCreate(Map<String, dynamic> channelData) {
     if (_keys == null) return;
+    final isPublic = (channelData['isPublic'] as bool?) ?? true;
+    final isDiscoverable = (channelData['isDiscoverable'] as bool?) ?? true;
+    // Strip channelSecret before publishing to Nostr.
+    final publicData = Map<String, dynamic>.from(channelData)
+      ..remove('channelSecret')
+      ..remove('members');
     final event = NostrEvent.create(
       keys: _keys!,
       kind: NostrKind.channelCreate,
-      content: jsonEncode(channelData),
+      content: jsonEncode(publicData),
       tags: [
         ['t', channelData['nostrTag'] as String? ?? 'nexus-channel'],
         ['t', 'nexus-channel'],
+        ['access', isPublic ? 'public' : 'private'],
+        ['discoverable', isDiscoverable ? 'true' : 'false'],
       ],
     );
     _relayManager.publish(event);
-    print('[NOSTR] Published Kind-40 channel: ${channelData['name']}');
+    print('[NOSTR] Published Kind-40 channel: ${channelData['name']} '
+        '(${isPublic ? "public" : "private"}, '
+        '${isDiscoverable ? "discoverable" : "hidden"})');
   }
 
   // ── Sending ───────────────────────────────────────────────────────────────
