@@ -47,7 +47,7 @@ class PodDatabase {
 
     _db = await openDatabase(
       dbPath,
-      version: 4,
+      version: 5,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -122,7 +122,10 @@ class PodDatabase {
         ts              INTEGER NOT NULL,
         status          TEXT NOT NULL DEFAULT 'pending',
         encrypted       INTEGER NOT NULL DEFAULT 0,
-        message_id      TEXT
+        message_id      TEXT,
+        is_favorite     INTEGER NOT NULL DEFAULT 0,
+        is_deleted      INTEGER NOT NULL DEFAULT 0,
+        edited_body     TEXT
       )
     ''');
 
@@ -198,6 +201,18 @@ class PodDatabase {
           updated_at INTEGER NOT NULL
         )
       ''');
+    }
+    if (oldVersion < 5) {
+      // Add local-state columns for message actions (favorite, delete, edit).
+      await db.execute(
+        'ALTER TABLE pod_messages ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0',
+      );
+      await db.execute(
+        'ALTER TABLE pod_messages ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0',
+      );
+      await db.execute(
+        'ALTER TABLE pod_messages ADD COLUMN edited_body TEXT',
+      );
     }
   }
 
@@ -291,7 +306,7 @@ class PodDatabase {
   Future<List<Map<String, dynamic>>> listMessages(String conversationId) async {
     final rows = await _database.query(
       'pod_messages',
-      where: 'conversation_id = ?',
+      where: 'conversation_id = ? AND is_deleted = 0',
       whereArgs: [conversationId],
       orderBy: 'ts ASC',
     );
@@ -300,9 +315,72 @@ class PodDatabase {
     for (final row in rows) {
       final plain = await PodEncryption.decrypt(row['enc'] as String, _key);
       final data = jsonDecode(plain) as Map<String, dynamic>;
-      result.add({'sender_did': row['sender_did'], 'ts': row['ts'], ...data});
+      result.add({
+        'sender_did': row['sender_did'],
+        'ts': row['ts'],
+        ...data,
+        // Local-state columns – consumed by ChatProvider, not sent over wire.
+        '_is_favorite': row['is_favorite'] as int? ?? 0,
+        '_edited_body': row['edited_body'] as String?,
+      });
     }
     debugPrint('[DB] listMessages: decoded ${result.length} messages for conv=$conversationId');
+    return result;
+  }
+
+  /// Sets or clears the favorite flag for [messageId].
+  Future<void> setMessageFavorite(String messageId, {required bool isFavorite}) async {
+    await _database.update(
+      'pod_messages',
+      {'is_favorite': isFavorite ? 1 : 0},
+      where: 'message_id = ?',
+      whereArgs: [messageId],
+    );
+  }
+
+  /// Soft-deletes a message (hidden from listMessages, data preserved).
+  Future<void> softDeleteMessage(String messageId) async {
+    await _database.update(
+      'pod_messages',
+      {'is_deleted': 1},
+      where: 'message_id = ?',
+      whereArgs: [messageId],
+    );
+  }
+
+  /// Stores an edited body for [messageId] without changing the enc blob.
+  Future<void> setEditedBody(String messageId, String newBody) async {
+    await _database.update(
+      'pod_messages',
+      {'edited_body': newBody},
+      where: 'message_id = ?',
+      whereArgs: [messageId],
+    );
+  }
+
+  /// Returns all favorite messages in [conversationId], newest first.
+  Future<List<Map<String, dynamic>>> listFavoriteMessages(
+      String conversationId) async {
+    final rows = await _database.query(
+      'pod_messages',
+      where: 'conversation_id = ? AND is_favorite = 1 AND is_deleted = 0',
+      whereArgs: [conversationId],
+      orderBy: 'ts DESC',
+    );
+    final result = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      try {
+        final plain = await PodEncryption.decrypt(row['enc'] as String, _key);
+        final data = jsonDecode(plain) as Map<String, dynamic>;
+        result.add({
+          'sender_did': row['sender_did'],
+          'ts': row['ts'],
+          ...data,
+          '_is_favorite': 1,
+          '_edited_body': row['edited_body'] as String?,
+        });
+      } catch (_) {}
+    }
     return result;
   }
 

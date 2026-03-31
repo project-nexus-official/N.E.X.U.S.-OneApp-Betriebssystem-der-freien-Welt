@@ -283,6 +283,24 @@ class NostrTransport implements MessageTransport {
         '${isDiscoverable ? "discoverable" : "hidden"})');
   }
 
+  /// Publishes a NIP-09 Kind-5 deletion request for [messageId].
+  ///
+  /// Best-effort: relays may ignore the request, and clients that already
+  /// cached the message may not remove it automatically.
+  void publishDeletion(String messageId) {
+    if (_keys == null) return;
+    final event = NostrEvent.create(
+      keys: _keys!,
+      kind: NostrKind.deletion,
+      content: 'Nachricht gelöscht',
+      tags: [
+        ['e', messageId],
+      ],
+    );
+    _relayManager.publish(event);
+    print('[NOSTR] Published Kind-5 deletion for event: $messageId');
+  }
+
   // ── Sending ───────────────────────────────────────────────────────────────
 
   @override

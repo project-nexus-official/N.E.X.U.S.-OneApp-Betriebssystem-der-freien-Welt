@@ -698,6 +698,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     String text, {
     NexusMessage? replyTo,
     String? replyToSenderName,
+    Map<String, dynamic>? extraMeta,
   }) async {
     final myDid = IdentityService.instance.currentIdentity?.did ?? 'unknown';
     final contact = ContactService.instance.findByDid(recipientDid);
@@ -726,22 +727,19 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       };
     }
 
+    final localMeta = <String, dynamic>{
+      ...?baseMeta,
+      if (recipientEncKey != null) 'encrypted': true,
+      ...?replyMeta,
+      ...?extraMeta,
+    };
+
     // Local message (always plaintext – what we display and persist locally).
     final localMsg = NexusMessage.create(
       fromDid: myDid,
       toDid: recipientDid,
       body: text,
-      metadata: {
-        ...?baseMeta,
-        if (recipientEncKey != null) 'encrypted': true,
-        ...?replyMeta,
-      }.isNotEmpty
-          ? {
-              ...?baseMeta,
-              if (recipientEncKey != null) 'encrypted': true,
-              ...?replyMeta,
-            }
-          : null,
+      metadata: localMeta.isNotEmpty ? localMeta : null,
     );
 
     // Transport message: encrypted body when the recipient's key is known,
@@ -754,6 +752,12 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
         recipientPublicKeyBytes: EncryptionKeys.hexToBytes(recipientEncKey),
       );
       if (encryptedBody != null) {
+        final transportMeta = <String, dynamic>{
+          ...?baseMeta,
+          'encrypted': true,
+          ...?replyMeta,
+          ...?extraMeta,
+        };
         transportMsg = NexusMessage(
           id: localMsg.id,
           fromDid: localMsg.fromDid,
@@ -765,11 +769,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
           ttlHours: localMsg.ttlHours,
           hopCount: localMsg.hopCount,
           signature: localMsg.signature,
-          metadata: {
-            ...?baseMeta,
-            'encrypted': true,
-            ...?replyMeta,
-          },
+          metadata: transportMeta,
         );
       }
     }
@@ -791,6 +791,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     String text, {
     NexusMessage? replyTo,
     String? replyToSenderName,
+    Map<String, dynamic>? extraMeta,
   }) async {
     final myDid = IdentityService.instance.currentIdentity?.did ?? 'unknown';
 
@@ -811,22 +812,18 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       };
     }
 
+    final meta = <String, dynamic>{
+      if (EncryptionKeys.instance.publicKeyHex != null)
+        'enc_key': EncryptionKeys.instance.publicKeyHex!,
+      ...?replyMeta,
+      ...?extraMeta,
+    };
     final msg = NexusMessage.create(
       fromDid: myDid,
       toDid: NexusMessage.broadcastDid,
       body: text,
       channel: '#mesh',
-      metadata: {
-        if (EncryptionKeys.instance.publicKeyHex != null)
-          'enc_key': EncryptionKeys.instance.publicKeyHex!,
-        ...?replyMeta,
-      }.isNotEmpty
-          ? {
-              if (EncryptionKeys.instance.publicKeyHex != null)
-                'enc_key': EncryptionKeys.instance.publicKeyHex!,
-              ...?replyMeta,
-            }
-          : null,
+      metadata: meta.isNotEmpty ? meta : null,
     );
 
     await _manager.sendMessage(msg);
@@ -843,7 +840,8 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   ///
   /// For private channels the body is encrypted with the shared channelSecret.
   /// The sender always stores a plaintext copy locally.
-  Future<void> sendToChannel(String channelName, String text) async {
+  Future<void> sendToChannel(String channelName, String text,
+      {Map<String, dynamic>? extraMeta}) async {
     final myDid = IdentityService.instance.currentIdentity?.did ?? 'unknown';
     final name =
         channelName.startsWith('#') ? channelName : '#$channelName';
@@ -852,28 +850,37 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     // Build wire message (possibly encrypted).
     String wireBody = text;
-    Map<String, dynamic>? extraMeta;
+    bool isChEnc = false;
     if (channel != null && !channel.isPublic && channel.channelSecret != null) {
       final enc = await ChannelEncryption.encrypt(
           text, channel.channelSecret!, channel.id);
       if (enc != null) {
         wireBody = enc;
-        extraMeta = {'ch_enc': true};
+        isChEnc = true;
       }
     }
+
+    final wireMeta = <String, dynamic>{
+      if (isChEnc) 'ch_enc': true,
+      ...?extraMeta,
+    };
 
     final wireMsg = NexusMessage.create(
       fromDid: myDid,
       toDid: NexusMessage.broadcastDid,
       body: wireBody,
       channel: name,
-      metadata: extraMeta,
+      metadata: wireMeta.isNotEmpty ? wireMeta : null,
     );
 
     await _manager.sendMessage(wireMsg);
 
     // Store plaintext locally so the sender can read their own messages.
-    final localMsg = extraMeta != null
+    final localMeta = <String, dynamic>{
+      if (isChEnc) 'ch_enc': true,
+      ...?extraMeta,
+    };
+    final localMsg = localMeta.isNotEmpty
         ? NexusMessage(
             id: wireMsg.id,
             fromDid: wireMsg.fromDid,
@@ -883,7 +890,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
             body: text,
             timestamp: wireMsg.timestamp,
             ttlHours: wireMsg.ttlHours,
-            metadata: extraMeta,
+            metadata: localMeta,
           )
         : wireMsg;
 
@@ -1073,6 +1080,42 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     ConversationService.instance.notifyUpdate();
 
     notifyListeners();
+  }
+
+  /// Forwards an already-base64-encoded image to [recipientDid].
+  ///
+  /// Used by the forward feature to re-send an existing image without
+  /// re-processing it.
+  Future<void> sendImageBase64(
+    String recipientDid,
+    String base64Body, {
+    Map<String, dynamic>? meta,
+  }) async {
+    final myDid = IdentityService.instance.currentIdentity?.did ?? 'unknown';
+    final msg = NexusMessage.create(
+      fromDid: myDid,
+      toDid: recipientDid,
+      type: NexusMessageType.image,
+      body: base64Body,
+      metadata: meta,
+    );
+
+    await _manager.sendMessage(msg, recipientDid: recipientDid);
+
+    final convId = _conversationId(recipientDid, myDid);
+    _conversationCache.putIfAbsent(convId, () => []);
+    _conversationCache[convId]!.add(msg);
+    await _persistMessage(convId, msg);
+    ConversationService.instance.notifyUpdate();
+    notifyListeners();
+  }
+
+  /// Publishes a Nostr Kind-5 deletion event for [messageId].
+  ///
+  /// Best-effort: relays may not honour the request, and clients that already
+  /// cached the message will not remove it automatically.
+  void publishNostrDeletion(String messageId) {
+    _nostrTransport?.publishDeletion(messageId);
   }
 
   /// Sends a voice message to [recipientDid].
@@ -1303,10 +1346,24 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       debugPrint('[CHAT] Loading ${rows.length} messages from DB for conv=$convId');
       final dbMsgs = rows.map((row) {
         try {
-          return NexusMessage.fromJson(
-            Map<String, dynamic>.from(row)
-              ..remove('sender_did'),
-          );
+          final isFavorite = (row['_is_favorite'] as int? ?? 0) == 1;
+          final editedBody = row['_edited_body'] as String?;
+          final cleaned = Map<String, dynamic>.from(row)
+            ..remove('sender_did')
+            ..remove('_is_favorite')
+            ..remove('_edited_body');
+          var msg = NexusMessage.fromJson(cleaned);
+          // Merge local-state into metadata so the UI can use them.
+          if (isFavorite || editedBody != null) {
+            final meta = Map<String, dynamic>.from(msg.metadata ?? {});
+            if (isFavorite) meta['local_favorite'] = true;
+            if (editedBody != null) meta['local_edited_body'] = editedBody;
+            msg = msg.copyWith(
+              body: editedBody ?? msg.body,
+              metadata: meta,
+            );
+          }
+          return msg;
         } catch (e) {
           debugPrint('[CHAT] Failed to deserialize message from DB: $e');
           return null;
@@ -1342,6 +1399,80 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     _conversationCache.clear();
     _cacheLoadedFromDb.clear();
     notifyListeners();
+  }
+
+  // ── Message actions (favorite, delete, edit) ──────────────────────────────
+
+  /// Toggles the favorite state of [msg] and refreshes the in-memory cache.
+  Future<void> toggleFavorite(NexusMessage msg, String convId) async {
+    final isFav = msg.metadata?['local_favorite'] == true;
+    final newFav = !isFav;
+    await PodDatabase.instance.setMessageFavorite(msg.id, isFavorite: newFav);
+    _updateCachedMessage(convId, msg.id, (m) {
+      final meta = Map<String, dynamic>.from(m.metadata ?? {});
+      if (newFav) {
+        meta['local_favorite'] = true;
+      } else {
+        meta.remove('local_favorite');
+      }
+      return m.copyWith(metadata: meta);
+    });
+    notifyListeners();
+  }
+
+  /// Deletes [msg] locally (soft delete – hidden from UI, stays in DB).
+  Future<void> deleteMessageLocally(NexusMessage msg, String convId) async {
+    await PodDatabase.instance.softDeleteMessage(msg.id);
+    _conversationCache[convId]?.removeWhere((m) => m.id == msg.id);
+    ConversationService.instance.notifyUpdate();
+    notifyListeners();
+  }
+
+  /// Saves the edited body for [msg] locally and updates the in-memory cache.
+  Future<void> editMessage(
+      NexusMessage msg, String convId, String newBody) async {
+    await PodDatabase.instance.setEditedBody(msg.id, newBody);
+    _updateCachedMessage(convId, msg.id, (m) {
+      final meta = Map<String, dynamic>.from(m.metadata ?? {});
+      meta['local_edited_body'] = newBody;
+      return m.copyWith(body: newBody, metadata: meta);
+    });
+    notifyListeners();
+  }
+
+  /// Returns all favorited messages in [convId].
+  Future<List<NexusMessage>> getFavoriteMessages(String convId) async {
+    final rows = await PodDatabase.instance.listFavoriteMessages(convId);
+    return rows.map((row) {
+      try {
+        final editedBody = row['_edited_body'] as String?;
+        final cleaned = Map<String, dynamic>.from(row)
+          ..remove('sender_did')
+          ..remove('_is_favorite')
+          ..remove('_edited_body');
+        var msg = NexusMessage.fromJson(cleaned);
+        final meta = Map<String, dynamic>.from(msg.metadata ?? {});
+        meta['local_favorite'] = true;
+        if (editedBody != null) {
+          meta['local_edited_body'] = editedBody;
+          msg = msg.copyWith(body: editedBody, metadata: meta);
+        } else {
+          msg = msg.copyWith(metadata: meta);
+        }
+        return msg;
+      } catch (_) {
+        return null;
+      }
+    }).whereType<NexusMessage>().toList();
+  }
+
+  void _updateCachedMessage(
+      String convId, String msgId, NexusMessage Function(NexusMessage) update) {
+    final cache = _conversationCache[convId];
+    if (cache == null) return;
+    final idx = cache.indexWhere((m) => m.id == msgId);
+    if (idx == -1) return;
+    cache[idx] = update(cache[idx]);
   }
 
   // ── Utilities ──────────────────────────────────────────────────────────────

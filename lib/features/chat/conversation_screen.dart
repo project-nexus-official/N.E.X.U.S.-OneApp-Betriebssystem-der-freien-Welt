@@ -22,6 +22,7 @@ import '../../shared/widgets/highlighted_text.dart';
 import '../contacts/contact_detail_screen.dart';
 import '../contacts/widgets/trust_badge.dart';
 import 'chat_provider.dart';
+import 'conversation.dart';
 import 'conversation_service.dart';
 import 'voice_player.dart';
 import 'voice_recorder.dart';
@@ -69,6 +70,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
   // ── Reply state ─────────────────────────────────────────────────────────────
   NexusMessage? _replyToMessage;
   String? _replyToSenderName;
+
+  // ── Edit state ───────────────────────────────────────────────────────────────
+  NexusMessage? _editingMessage;
 
   // ── Highlight state (for scroll-to-original) ────────────────────────────────
   final ValueNotifier<String?> _highlightedId = ValueNotifier(null);
@@ -194,6 +198,12 @@ class _ConversationScreenState extends State<ConversationScreen> {
   }
 
   Future<void> _sendText() async {
+    // Editing mode: save the edit instead of sending a new message.
+    if (_editingMessage != null) {
+      await _saveEdit();
+      return;
+    }
+
     final text = _textCtrl.text.trim();
     if (text.isEmpty) return;
     _textCtrl.clear();
@@ -348,6 +358,36 @@ class _ConversationScreenState extends State<ConversationScreen> {
       _replyToMessage = null;
       _replyToSenderName = null;
     });
+  }
+
+  // ── Edit helpers ──────────────────────────────────────────────────────────
+
+  void _startEdit(NexusMessage msg) {
+    setState(() {
+      _editingMessage = msg;
+      _textCtrl.text = msg.body;
+      _textCtrl.selection =
+          TextSelection.collapsed(offset: _textCtrl.text.length);
+    });
+    _textFocus.requestFocus();
+  }
+
+  void _cancelEdit() {
+    setState(() {
+      _editingMessage = null;
+      _textCtrl.clear();
+    });
+  }
+
+  Future<void> _saveEdit() async {
+    final newBody = _textCtrl.text.trim();
+    if (newBody.isEmpty || _editingMessage == null) return;
+    final msg = _editingMessage!;
+    _textCtrl.clear();
+    setState(() => _editingMessage = null);
+    final provider = context.read<ChatProvider>();
+    await provider.editMessage(msg, _convId, newBody);
+    await _refreshMessages();
   }
 
   void _scrollToMessage(String messageId) {
@@ -666,6 +706,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
   void _showMessageMenu(BuildContext context, NexusMessage msg) {
     final myDid = IdentityService.instance.currentIdentity?.did ?? '';
     final isMe = msg.fromDid == myDid;
+    final isFav = msg.metadata?['local_favorite'] == true;
 
     showModalBottomSheet<void>(
       context: context,
@@ -674,7 +715,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // ── Antworten (primary action) ──
+            // ── Antworten ──
             ListTile(
               leading: const Icon(Icons.reply, color: AppColors.gold),
               title: const Text('Antworten'),
@@ -696,26 +737,522 @@ class _ConversationScreenState extends State<ConversationScreen> {
                   );
                 },
               ),
-            // ── Weiterleiten (UI only, Phase 1b) ──
+            // ── Weiterleiten ──
             ListTile(
-              leading: const Icon(Icons.forward, color: Colors.grey),
-              title: const Text('Weiterleiten',
-                  style: TextStyle(color: Colors.grey)),
-              onTap: () => Navigator.pop(ctx),
+              leading: const Icon(Icons.forward, color: AppColors.gold),
+              title: const Text('Weiterleiten'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showForwardSheet(msg);
+              },
             ),
-            // ── Löschen (own messages only) ──
-            if (isMe)
+            // ── Bearbeiten (nur eigene Textnachrichten) ──
+            if (isMe && msg.type == NexusMessageType.text)
               ListTile(
-                leading: const Icon(Icons.delete_outline,
-                    color: Colors.redAccent),
-                title: const Text('Löschen',
-                    style: TextStyle(color: Colors.redAccent)),
-                onTap: () async {
+                leading: const Icon(Icons.edit, color: AppColors.gold),
+                title: const Text('Bearbeiten'),
+                onTap: () {
                   Navigator.pop(ctx);
-                  setState(() => _messages.remove(msg));
-                  ConversationService.instance.notifyUpdate();
+                  _startEdit(msg);
                 },
               ),
+            // ── Favorisieren / Favorit entfernen ──
+            ListTile(
+              leading: Icon(
+                isFav ? Icons.star : Icons.star_border,
+                color: AppColors.gold,
+              ),
+              title: Text(isFav ? 'Favorit entfernen' : 'Favorisieren'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final provider = context.read<ChatProvider>();
+                await provider.toggleFavorite(msg, _convId);
+                await _refreshMessages();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(isFav
+                        ? 'Aus Favoriten entfernt'
+                        : 'Zu Favoriten hinzugefügt'),
+                    duration: const Duration(seconds: 2),
+                  ));
+                }
+              },
+            ),
+            // ── Löschen ──
+            ListTile(
+              leading:
+                  const Icon(Icons.delete_outline, color: Colors.redAccent),
+              title: const Text('Löschen',
+                  style: TextStyle(color: Colors.redAccent)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showDeleteDialog(msg, isMe);
+              },
+            ),
+            // ── Info ──
+            ListTile(
+              leading: const Icon(Icons.info_outline, color: AppColors.gold),
+              title: const Text('Info'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showInfoSheet(msg, isMe);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Forward ───────────────────────────────────────────────────────────────
+
+  Future<void> _showForwardSheet(NexusMessage msg) async {
+    final conversations =
+        await ConversationService.instance.getConversationsWithMesh();
+    if (!mounted) return;
+
+    final selected = <String>{};
+    final searchCtrl = TextEditingController();
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final query = searchCtrl.text.toLowerCase();
+          final filtered = conversations
+              .where((c) =>
+                  c.peerPseudonym.toLowerCase().contains(query) ||
+                  c.id.toLowerCase().contains(query))
+              .toList();
+
+          return DraggableScrollableSheet(
+            expand: false,
+            initialChildSize: 0.65,
+            minChildSize: 0.4,
+            maxChildSize: 0.9,
+            builder: (_, scrollCtrl) => Column(
+              children: [
+                Padding(
+                  padding:
+                      const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: const Text(
+                    'Weiterleiten an…',
+                    style: TextStyle(
+                      color: AppColors.gold,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 4),
+                  child: TextField(
+                    controller: searchCtrl,
+                    onChanged: (_) => setSheet(() {}),
+                    style:
+                        const TextStyle(color: AppColors.onDark),
+                    decoration: InputDecoration(
+                      hintText: 'Suchen…',
+                      hintStyle:
+                          const TextStyle(color: Colors.grey),
+                      prefixIcon: const Icon(Icons.search,
+                          color: Colors.grey),
+                      filled: true,
+                      fillColor: AppColors.surfaceVariant,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding:
+                          const EdgeInsets.symmetric(vertical: 8),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    controller: scrollCtrl,
+                    itemCount: filtered.length,
+                    itemBuilder: (_, i) {
+                      final conv = filtered[i];
+                      final sel = selected.contains(conv.id);
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: AppColors.surfaceVariant,
+                          child: Text(
+                            conv.peerPseudonym.isNotEmpty
+                                ? conv.peerPseudonym[0].toUpperCase()
+                                : '?',
+                            style: const TextStyle(
+                                color: AppColors.gold),
+                          ),
+                        ),
+                        title: Text(conv.peerPseudonym),
+                        trailing: sel
+                            ? const Icon(Icons.check_circle,
+                                color: AppColors.gold)
+                            : const Icon(Icons.circle_outlined,
+                                color: Colors.grey),
+                        onTap: () => setSheet(() {
+                          if (sel) {
+                            selected.remove(conv.id);
+                          } else {
+                            selected.add(conv.id);
+                          }
+                        }),
+                      );
+                    },
+                  ),
+                ),
+                if (selected.isNotEmpty)
+                  Padding(
+                    padding:
+                        const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.gold,
+                          foregroundColor: AppColors.deepBlue,
+                        ),
+                        onPressed: () async {
+                          Navigator.pop(ctx);
+                          await _forwardMessage(
+                              msg, selected, conversations);
+                        },
+                        child: Text(
+                          selected.length == 1
+                              ? 'Senden'
+                              : 'An ${selected.length} senden',
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+    searchCtrl.dispose();
+  }
+
+  Future<void> _forwardMessage(NexusMessage msg,
+      Set<String> targetConvIds, List<Conversation> allConvs) async {
+    final provider = context.read<ChatProvider>();
+
+    // Build forwarded metadata (strip local-state keys, add forwarded flag).
+    final fwdMeta = <String, dynamic>{
+      'forwarded': true,
+      'forwarded_from':
+          ContactService.instance.getDisplayName(msg.fromDid),
+    };
+
+    for (final convId in targetConvIds) {
+      final conv =
+          allConvs.firstWhere((c) => c.id == convId, orElse: () {
+        return Conversation(
+          id: convId,
+          peerDid: convId,
+          peerPseudonym: convId,
+          lastMessage: '',
+          lastMessageTime: DateTime.now().toUtc(),
+        );
+      });
+
+      try {
+        if (msg.type == NexusMessageType.text) {
+          if (conv.id == NexusMessage.broadcastDid) {
+            await provider.sendBroadcast(msg.body,
+                extraMeta: fwdMeta);
+          } else if (conv.isGroup) {
+            await provider.sendToChannel(conv.id, msg.body,
+                extraMeta: fwdMeta);
+          } else {
+            await provider.sendMessage(conv.peerDid, msg.body,
+                extraMeta: fwdMeta);
+          }
+        } else if (msg.type == NexusMessageType.image) {
+          // Forward image as-is (base64 body).
+          if (!conv.isGroup && conv.id != NexusMessage.broadcastDid) {
+            await provider.sendImageBase64(conv.peerDid, msg.body,
+                meta: {
+                  ...?msg.metadata,
+                  ...fwdMeta,
+                });
+          }
+        }
+        // Voice forwarding skipped (too heavy to re-encode).
+      } catch (e) {
+        debugPrint('[FORWARD] Failed to forward to $convId: $e');
+      }
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+          targetConvIds.length == 1
+              ? 'Weitergeleitet'
+              : 'An ${targetConvIds.length} Chats weitergeleitet',
+        ),
+        duration: const Duration(seconds: 2),
+      ));
+    }
+  }
+
+  // ── Delete dialog ─────────────────────────────────────────────────────────
+
+  Future<void> _showDeleteDialog(NexusMessage msg, bool isMe) async {
+    final provider = context.read<ChatProvider>();
+
+    if (!isMe) {
+      // Foreign message: only "for me" option
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: const Text('Nachricht löschen'),
+          content: const Text(
+            'Nachricht nur für dich löschen?',
+            style: TextStyle(color: Colors.grey),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Abbrechen',
+                  style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () async {
+                Navigator.pop(ctx);
+                await provider.deleteMessageLocally(msg, _convId);
+                await _refreshMessages();
+              },
+              child: const Text('Löschen'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    // Own message: two options
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Nachricht löschen'),
+        content: const Text(
+          'Bereits zugestellte Nachrichten können nicht von fremden Geräten entfernt werden.',
+          style: TextStyle(color: Colors.grey, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Abbrechen',
+                style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await provider.deleteMessageLocally(msg, _convId);
+              await _refreshMessages();
+            },
+            child: const Text('Für mich löschen',
+                style: TextStyle(color: Colors.redAccent)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await provider.deleteMessageLocally(msg, _convId);
+              // Send Nostr Kind-5 deletion event
+              provider.publishNostrDeletion(msg.id);
+              await _refreshMessages();
+            },
+            child: const Text('Für alle löschen'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Info sheet ────────────────────────────────────────────────────────────
+
+  void _showInfoSheet(NexusMessage msg, bool isMe) {
+    final local = msg.timestamp.toLocal();
+    final dateStr = _formatFullDate(local);
+    final isEncrypted = msg.metadata?['encrypted'] == true;
+    final transport = _detectTransport(msg);
+    final shortId = msg.id.length > 12 ? msg.id.substring(0, 12) : msg.id;
+    final isEdited = msg.metadata?['local_edited_body'] != null;
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Nachrichten-Info',
+                style: TextStyle(
+                  color: AppColors.gold,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: 16),
+              _InfoRow(
+                icon: Icons.schedule,
+                label: isMe ? 'Gesendet' : 'Empfangen',
+                value: dateStr,
+              ),
+              _InfoRow(
+                icon: isEncrypted ? Icons.lock : Icons.lock_open,
+                label: 'Verschlüsselung',
+                value: isEncrypted
+                    ? 'Ende-zu-Ende verschlüsselt'
+                    : 'Unverschlüsselt',
+                valueColor: isEncrypted ? Colors.greenAccent : Colors.orange,
+              ),
+              _InfoRow(
+                icon: Icons.router,
+                label: 'Transport',
+                value: transport,
+              ),
+              if (isEdited)
+                const _InfoRow(
+                  icon: Icons.edit,
+                  label: 'Bearbeitet',
+                  value: 'Lokal bearbeitet',
+                ),
+              _InfoRow(
+                icon: Icons.tag,
+                label: 'Nachrichten-ID',
+                value: '$shortId…',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  static String _formatFullDate(DateTime dt) {
+    final months = [
+      'Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez',
+    ];
+    final h = dt.hour.toString().padLeft(2, '0');
+    final m = dt.minute.toString().padLeft(2, '0');
+    final s = dt.second.toString().padLeft(2, '0');
+    return '${dt.day}. ${months[dt.month - 1]} ${dt.year}, $h:$m:$s';
+  }
+
+  String _detectTransport(NexusMessage msg) {
+    // Heuristic: if the peer is in the local peer list via BLE/LAN use that,
+    // otherwise assume Nostr (internet).
+    final peer = widget.peer;
+    if (peer != null) {
+      final types = peer.availableTransports;
+      if (types.contains(TransportType.ble)) return 'BLE Mesh';
+      if (types.contains(TransportType.lan)) return 'LAN';
+    }
+    return 'Nostr (Internet)';
+  }
+
+  // ── Favorites sheet ───────────────────────────────────────────────────────
+
+  Future<void> _showFavoritesSheet() async {
+    final provider = context.read<ChatProvider>();
+    final favs = await provider.getFavoriteMessages(_convId);
+    if (!mounted) return;
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        minChildSize: 0.35,
+        maxChildSize: 0.9,
+        builder: (_, scrollCtrl) => Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Row(
+                children: const [
+                  Icon(Icons.star, color: AppColors.gold, size: 20),
+                  SizedBox(width: 8),
+                  Text(
+                    'Favoriten',
+                    style: TextStyle(
+                      color: AppColors.gold,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: favs.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'Noch keine Favoriten in diesem Chat.',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    )
+                  : ListView.builder(
+                      controller: scrollCtrl,
+                      itemCount: favs.length,
+                      itemBuilder: (_, i) {
+                        final m = favs[i];
+                        final local = m.timestamp.toLocal();
+                        final h = local.hour.toString().padLeft(2, '0');
+                        final min =
+                            local.minute.toString().padLeft(2, '0');
+                        final preview = m.type == NexusMessageType.image
+                            ? '📷 Foto'
+                            : m.type == NexusMessageType.voice
+                                ? '🎤 Sprachnachricht'
+                                : m.body;
+                        return ListTile(
+                          leading: const Icon(Icons.star,
+                              color: AppColors.gold, size: 20),
+                          title: Text(
+                            preview,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            '$h:$min',
+                            style: const TextStyle(
+                                color: Colors.grey, fontSize: 11),
+                          ),
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _scrollToMessage(m.id);
+                          },
+                        );
+                      },
+                    ),
+            ),
           ],
         ),
       ),
@@ -859,12 +1396,24 @@ class _ConversationScreenState extends State<ConversationScreen> {
                           if (value == 'retention') _showRetentionSheet();
                           if (value == 'mute') _showMuteDialog();
                           if (value == 'unmute') _unmute();
+                          if (value == 'favorites') _showFavoritesSheet();
                         },
                         itemBuilder: (_) {
                           final muted = !widget.isBroadcast &&
                               ContactService.instance
                                   .isMuted(widget.peerDid);
                           return [
+                            const PopupMenuItem(
+                              value: 'favorites',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.star,
+                                      size: 18, color: AppColors.gold),
+                                  SizedBox(width: 12),
+                                  Text('Favoriten'),
+                                ],
+                              ),
+                            ),
                             const PopupMenuItem(
                               value: 'retention',
                               child: Text('Aufbewahrung'),
@@ -947,8 +1496,11 @@ class _ConversationScreenState extends State<ConversationScreen> {
                     ],
                   ),
                 ),
-                // Reply banner
-                if (_replyToMessage != null)
+                // Edit banner
+                if (_editingMessage != null)
+                  _EditBanner(onCancel: _cancelEdit),
+                // Reply banner (only when not editing)
+                if (_replyToMessage != null && _editingMessage == null)
                   _ReplyBanner(
                     message: _replyToMessage!,
                     senderName: _replyToSenderName ?? '',
@@ -962,9 +1514,10 @@ class _ConversationScreenState extends State<ConversationScreen> {
                   onEmojiToggle: _toggleEmojiPicker,
                   onAttach: _pickAndSendImage,
                   showEmojiIcon: !_showEmojiPicker,
-                  attachEnabled: !_isBleBleOnly,
+                  attachEnabled: !_isBleBleOnly && _editingMessage == null,
                   onSendVoice: _sendVoice,
-                  voiceEnabled: !_isBleBleOnly,
+                  voiceEnabled: !_isBleBleOnly && _editingMessage == null,
+                  isEditing: _editingMessage != null,
                 ),
                 // Emoji picker panel
                 if (_showEmojiPicker)
@@ -1229,6 +1782,9 @@ class _MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasReply = message.metadata?['reply_to_id'] != null;
+    final isForwarded = message.metadata?['forwarded'] == true;
+    final forwardedFrom =
+        message.metadata?['forwarded_from'] as String?;
 
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -1251,6 +1807,35 @@ class _MessageBubble extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // ── Forwarded label ───────────────────────────────────────────
+              if (isForwarded)
+                Padding(
+                  padding:
+                      const EdgeInsets.only(left: 12, right: 12, top: 8),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.forward,
+                          size: 12,
+                          color: isMe
+                              ? AppColors.deepBlue.withValues(alpha: 0.6)
+                              : Colors.grey),
+                      const SizedBox(width: 3),
+                      Text(
+                        forwardedFrom != null
+                            ? 'Weitergeleitet von $forwardedFrom'
+                            : 'Weitergeleitet',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isMe
+                              ? AppColors.deepBlue.withValues(alpha: 0.6)
+                              : Colors.grey,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               if (showSender)
                 Padding(
                   padding:
@@ -1320,10 +1905,15 @@ class _TextContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final time = _formatTime(message.timestamp.toLocal());
+    final isEdited = message.metadata?['local_edited_body'] != null;
+    final isFav = message.metadata?['local_favorite'] == true;
     final textStyle = TextStyle(
       color: isMe ? AppColors.deepBlue : AppColors.onDark,
       fontSize: 15,
     );
+    final metaColor =
+        isMe ? AppColors.deepBlue.withValues(alpha: 0.6) : Colors.grey;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       child: Column(
@@ -1343,13 +1933,19 @@ class _TextContent extends StatelessWidget {
             children: [
               Text(
                 time,
-                style: TextStyle(
-                  color: isMe
-                      ? AppColors.deepBlue.withValues(alpha: 0.6)
-                      : Colors.grey,
-                  fontSize: 10,
-                ),
+                style: TextStyle(color: metaColor, fontSize: 10),
               ),
+              if (isEdited) ...[
+                const SizedBox(width: 3),
+                Text(
+                  '(bearbeitet)',
+                  style: TextStyle(color: metaColor, fontSize: 10),
+                ),
+              ],
+              if (isFav) ...[
+                const SizedBox(width: 3),
+                Icon(Icons.star, size: 10, color: AppColors.gold),
+              ],
               if (message.signature != null) ...[
                 const SizedBox(width: 4),
                 Icon(
@@ -1365,7 +1961,9 @@ class _TextContent extends StatelessWidget {
                 Icon(
                   Icons.lock,
                   size: 10,
-                  color: isMe ? AppColors.deepBlue.withValues(alpha: 0.6) : AppColors.gold,
+                  color: isMe
+                      ? AppColors.deepBlue.withValues(alpha: 0.6)
+                      : AppColors.gold,
                 ),
               ],
             ],
@@ -1691,6 +2289,7 @@ class _InputBar extends StatefulWidget {
     required this.attachEnabled,
     required this.onSendVoice,
     required this.voiceEnabled,
+    this.isEditing = false,
   });
 
   final TextEditingController ctrl;
@@ -1702,6 +2301,8 @@ class _InputBar extends StatefulWidget {
   final bool attachEnabled;
   final Future<void> Function(String filePath, int durationMs) onSendVoice;
   final bool voiceEnabled;
+  /// When true, the send button becomes a checkmark (confirm edit).
+  final bool isEditing;
 
   @override
   State<_InputBar> createState() => _InputBarState();
@@ -1934,10 +2535,12 @@ class _InputBarState extends State<_InputBar> with TickerProviderStateMixin {
               const SizedBox(width: 4),
             ],
             // Right button: send (has text) OR mic (no text / recording)
-            if (_hasText && !_isRecording)
+            if (_hasText && !_isRecording || widget.isEditing)
               IconButton(
                 onPressed: widget.onSend,
-                icon: const Icon(Icons.send_rounded),
+                icon: Icon(widget.isEditing
+                    ? Icons.check_rounded
+                    : Icons.send_rounded),
                 color: AppColors.gold,
                 style: IconButton.styleFrom(
                   backgroundColor: AppColors.surfaceVariant,
@@ -2219,6 +2822,93 @@ class _ReplyBanner extends StatelessWidget {
             icon: const Icon(Icons.close, color: Colors.grey, size: 18),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Edit banner ───────────────────────────────────────────────────────────────
+
+class _EditBanner extends StatelessWidget {
+  const _EditBanner({required this.onCancel});
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: AppColors.surfaceVariant,
+      padding: const EdgeInsets.only(left: 0, right: 4, top: 6, bottom: 6),
+      child: Row(
+        children: [
+          Container(width: 3, height: 40, color: AppColors.gold),
+          const SizedBox(width: 10),
+          const Icon(Icons.edit, color: AppColors.gold, size: 18),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text(
+              'Nachricht bearbeiten',
+              style: TextStyle(
+                color: AppColors.gold,
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+              ),
+            ),
+          ),
+          IconButton(
+            onPressed: onCancel,
+            icon: const Icon(Icons.close, color: Colors.grey, size: 18),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Info row (for info bottom sheet) ─────────────────────────────────────────
+
+class _InfoRow extends StatelessWidget {
+  const _InfoRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.valueColor,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color? valueColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: AppColors.gold, size: 18),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style:
+                        const TextStyle(color: Colors.grey, fontSize: 11)),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: TextStyle(
+                    color: valueColor ?? AppColors.onDark,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),

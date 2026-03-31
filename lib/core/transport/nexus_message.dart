@@ -194,6 +194,25 @@ class NexusMessage {
         '${hex.substring(20)}';
   }
 
+  /// Returns a copy with selected fields replaced.
+  NexusMessage copyWith({
+    String? body,
+    Map<String, dynamic>? metadata,
+  }) =>
+      NexusMessage(
+        id: id,
+        fromDid: fromDid,
+        toDid: toDid,
+        type: type,
+        channel: channel,
+        body: body ?? this.body,
+        timestamp: timestamp,
+        ttlHours: ttlHours,
+        hopCount: hopCount,
+        signature: signature,
+        metadata: metadata ?? this.metadata,
+      );
+
   @override
   bool operator ==(Object other) => other is NexusMessage && other.id == id;
 

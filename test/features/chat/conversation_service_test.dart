@@ -39,7 +39,12 @@ Future<void> openTestDb() async {
             sender_did      TEXT NOT NULL,
             enc             TEXT NOT NULL,
             ts              INTEGER NOT NULL,
-            status          TEXT NOT NULL DEFAULT 'pending'
+            status          TEXT NOT NULL DEFAULT 'pending',
+            encrypted       INTEGER NOT NULL DEFAULT 0,
+            message_id      TEXT,
+            is_favorite     INTEGER NOT NULL DEFAULT 0,
+            is_deleted      INTEGER NOT NULL DEFAULT 0,
+            edited_body     TEXT
           )
         ''');
         await db.execute('''

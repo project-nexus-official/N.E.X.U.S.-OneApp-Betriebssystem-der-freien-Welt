@@ -17,6 +17,9 @@ class NostrKind {
   /// NIP-04 encrypted direct message.
   static const int encryptedDm = 4;
 
+  /// NIP-09 deletion request (Kind 5).
+  static const int deletion = 5;
+
   /// NIP-28 channel creation (Kind 40).
   static const int channelCreate = 40;
 
