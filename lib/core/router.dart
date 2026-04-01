@@ -3,27 +3,41 @@ import 'package:nexus_oneapp/core/identity/identity_service.dart';
 import 'package:nexus_oneapp/features/chat/conversations_screen.dart';
 import 'package:nexus_oneapp/features/contacts/contacts_screen.dart';
 import 'package:nexus_oneapp/features/contacts/qr_scanner_screen.dart';
+import 'package:nexus_oneapp/features/dashboard/dashboard_screen.dart';
 import 'package:nexus_oneapp/features/discover/discover_screen.dart';
 import 'package:nexus_oneapp/features/governance/governance_screen.dart';
 import 'package:nexus_oneapp/features/onboarding/onboarding_screen.dart';
+import 'package:nexus_oneapp/features/onboarding/principles_commitment_screen.dart';
+import 'package:nexus_oneapp/features/onboarding/principles_content_screen.dart';
+import 'package:nexus_oneapp/features/onboarding/principles_intro_screen.dart';
 import 'package:nexus_oneapp/features/onboarding/restore_screen.dart';
 import 'package:nexus_oneapp/features/profile/profile_screen.dart';
 import 'package:nexus_oneapp/features/settings/settings_screen.dart';
 import 'package:nexus_oneapp/features/wallet/wallet_screen.dart';
+import 'package:nexus_oneapp/services/principles_service.dart';
 import 'package:nexus_oneapp/shared/widgets/nexus_scaffold.dart';
 
 final router = GoRouter(
-  initialLocation: '/chat',
+  initialLocation: '/home',
   redirect: (context, state) {
     final hasIdentity = IdentityService.instance.hasIdentity;
-    final isOnboarding = state.uri.path.startsWith('/onboarding');
+    final path = state.uri.path;
+    final isOnboarding = path.startsWith('/onboarding');
+    final isPrinciples = path.startsWith('/principles');
 
-    if (!hasIdentity && !isOnboarding) {
-      return '/onboarding';
-    }
+    // No identity → force onboarding.
+    if (!hasIdentity && !isOnboarding) return '/onboarding';
+
+    // Identity just created / restored → check if principles flow is needed.
     if (hasIdentity && isOnboarding) {
-      return '/chat';
+      return PrinciplesService.instance.hasSeen ? '/home' : '/principles/intro';
     }
+
+    // Already in the app but principles not yet seen → intercept.
+    if (hasIdentity && !isOnboarding && !isPrinciples) {
+      if (!PrinciplesService.instance.hasSeen) return '/principles/intro';
+    }
+
     return null;
   },
   routes: [
@@ -37,6 +51,19 @@ final router = GoRouter(
           builder: (context, state) => const RestoreScreen(),
         ),
       ],
+    ),
+    // Principles flow (outside ShellRoute – no bottom nav)
+    GoRoute(
+      path: '/principles/intro',
+      builder: (context, state) => const PrinciplesIntroScreen(),
+    ),
+    GoRoute(
+      path: '/principles/content',
+      builder: (context, state) => const PrinciplesContentScreen(),
+    ),
+    GoRoute(
+      path: '/principles/commitment',
+      builder: (context, state) => const PrinciplesCommitmentScreen(),
     ),
     // Settings – outside ShellRoute so it appears as a full-screen page
     // without the bottom navigation bar.
@@ -62,8 +89,18 @@ final router = GoRouter(
       },
       routes: [
         GoRoute(
+          path: '/home',
+          builder: (context, state) => const DashboardScreen(),
+        ),
+        GoRoute(
           path: '/chat',
-          builder: (context, state) => const ConversationsScreen(),
+          builder: (context, state) {
+            final tab = int.tryParse(
+                  state.uri.queryParameters['tab'] ?? '',
+                ) ??
+                0;
+            return ConversationsScreen(initialTabIndex: tab);
+          },
         ),
         GoRoute(
           path: '/governance',
@@ -74,12 +111,15 @@ final router = GoRouter(
           builder: (context, state) => const DiscoverScreen(),
         ),
         GoRoute(
-          path: '/wallet',
-          builder: (context, state) => const WalletScreen(),
-        ),
-        GoRoute(
           path: '/profile',
           builder: (context, state) => const ProfileScreen(),
+        ),
+        // Wallet is kept as a shell route for deep-link compatibility but is
+        // not in the bottom navigation bar (it is accessible as a coming-soon
+        // Dashboard card once Phase 1c is implemented).
+        GoRoute(
+          path: '/wallet',
+          builder: (context, state) => const WalletScreen(),
         ),
       ],
     ),
@@ -87,9 +127,10 @@ final router = GoRouter(
 );
 
 int _indexForLocation(String path) {
-  if (path.startsWith('/governance')) return 1;
-  if (path.startsWith('/discover')) return 2;
-  if (path.startsWith('/wallet')) return 3;
+  if (path.startsWith('/home')) return 0;
+  if (path.startsWith('/chat')) return 1;
+  if (path.startsWith('/governance')) return 2;
+  if (path.startsWith('/discover')) return 3;
   if (path.startsWith('/profile')) return 4;
-  return 0; // /chat
+  return 0; // default to /home (covers /wallet etc.)
 }

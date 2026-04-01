@@ -9,7 +9,9 @@ import 'package:provider/provider.dart';
 import '../../core/contacts/contact_service.dart';
 import '../../core/storage/pod_database.dart';
 import '../../core/storage/retention_service.dart';
+import '../onboarding/principles_content_screen.dart';
 import '../../services/notification_settings_service.dart';
+import '../../services/principles_service.dart';
 import '../../services/update_service.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/update_bottom_sheet.dart';
@@ -78,6 +80,17 @@ class SettingsScreen extends StatelessWidget {
           const Divider(height: 1),
           _SectionHeader('Info'),
           ListTile(
+            leading: const Icon(Icons.menu_book_outlined, color: AppColors.gold),
+            title: const Text('Unsere Grundsätze'),
+            subtitle: _principlesSubtitle(),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const PrinciplesContentScreen(readOnly: true),
+              ),
+            ),
+          ),
+          ListTile(
             leading: const Icon(Icons.info_outline, color: AppColors.gold),
             title: const Text('NEXUS OneApp'),
             subtitle: const Text('Phase 1a – AETHER Protokoll'),
@@ -114,6 +127,17 @@ class SettingsScreen extends StatelessWidget {
         );
       }
     }
+  }
+
+  Widget? _principlesSubtitle() {
+    final svc = PrinciplesService.instance;
+    if (svc.isAccepted && svc.acceptedAt != null) {
+      final d = svc.acceptedAt!;
+      final formatted =
+          '${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}.${d.year}';
+      return Text('Bestätigt am $formatted');
+    }
+    return const Text('Die Grundlagen unserer Gemeinschaft');
   }
 
   void _showAbout(BuildContext context) {

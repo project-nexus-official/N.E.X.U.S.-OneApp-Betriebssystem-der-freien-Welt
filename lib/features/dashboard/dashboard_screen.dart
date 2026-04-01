@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../../core/contacts/contact_service.dart';
 import '../../core/identity/profile_service.dart';
 import '../../core/transport/message_transport.dart';
+import '../../services/principles_service.dart';
 import '../../services/update_service.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/update_bottom_sheet.dart';
@@ -71,6 +72,9 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   UpdateInfo? _updateInfo;
   StreamSubscription<UpdateInfo?>? _updateSub;
+
+  // Dismissed for this session only – reappears on next cold start.
+  bool _principlesReminderDismissed = false;
 
   @override
   void initState() {
@@ -174,6 +178,21 @@ class _DashboardScreenState extends State<DashboardScreen>
                   child: _UpdateBanner(
                     info: _updateInfo!,
                     onTap: () => showUpdateBottomSheet(context, _updateInfo!),
+                  ),
+                ),
+              ),
+
+            // Principles reminder banner – shown when user skipped the flow.
+            // Dismissed for the session via X, reappears on next cold start.
+            if (!PrinciplesService.instance.isAccepted &&
+                !_principlesReminderDismissed)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: _PrinciplesReminderBanner(
+                    onReadNow: () => context.go('/principles/intro'),
+                    onDismiss: () =>
+                        setState(() => _principlesReminderDismissed = true),
                   ),
                 ),
               ),
@@ -635,6 +654,79 @@ class _UpdateBanner extends StatelessWidget {
                 color: AppColors.gold, size: 18),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ── Principles reminder banner ────────────────────────────────────────────────
+
+class _PrinciplesReminderBanner extends StatelessWidget {
+  final VoidCallback onReadNow;
+  final VoidCallback onDismiss;
+
+  const _PrinciplesReminderBanner({
+    required this.onReadNow,
+    required this.onDismiss,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: AppColors.gold.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: AppColors.gold.withValues(alpha: 0.5),
+          width: 1.2,
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.menu_book_outlined,
+              color: AppColors.gold, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Du hast die Grundsätze noch nicht bestätigt',
+                  style: TextStyle(
+                    color: AppColors.gold,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                GestureDetector(
+                  onTap: onReadNow,
+                  child: const Text(
+                    'Jetzt lesen',
+                    style: TextStyle(
+                      color: AppColors.goldLight,
+                      fontSize: 12,
+                      decoration: TextDecoration.underline,
+                      decorationColor: AppColors.goldLight,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            key: const Key('principles_banner_dismiss'),
+            onPressed: onDismiss,
+            icon: Icon(
+              Icons.close,
+              color: AppColors.gold.withValues(alpha: 0.6),
+              size: 18,
+            ),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+        ],
       ),
     );
   }

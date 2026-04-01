@@ -149,7 +149,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               pseudonym: _pseudonymController.text.trim().isNotEmpty
                   ? _pseudonymController.text.trim()
                   : _pseudonym,
-              onDone: () => context.go('/chat'),
+              onDone: () => context.go('/home'),
             ),
           ],
         ),

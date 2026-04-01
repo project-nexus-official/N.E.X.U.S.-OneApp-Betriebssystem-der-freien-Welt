@@ -203,6 +203,34 @@ Phase 2: Care-System + Sphären-Plugins
   - **Hilfsfunktionen** (top-level, testbar): `dashboardGreeting(int hour)`, `dashboardFormattedDate(DateTime)`
   - Tests: 32 Tests in `test/features/dashboard/dashboard_test.dart`
 
+- **Grundsätze-Flow (komplett)**:
+  - `PrinciplesService` Singleton (`lib/services/principles_service.dart`):
+    - `load()`: Liest `principles_seen`, `principles_accepted`, `principles_accepted_at` aus SharedPreferences
+    - `accept()`: Setzt `hasSeen=true`, `isAccepted=true`, speichert ISO-8601-Timestamp
+    - `skip()`: Setzt `hasSeen=true`, `isAccepted=false` — kein Timestamp
+    - Wird in `main()` vor dem Router geladen (nach `IdentityService.init()`)
+  - **Screen 1** (`principles_intro_screen.dart`): Ruhiger Eingangsscreen, Fade-In 1s, Gold-Button "Ich bin bereit" → Screen 2
+  - **Screen 2** (`principles_content_screen.dart`): PageView mit 4 Seiten:
+    - Seite 1: Titel + Einleitung + Säule 1 (Do No Harm)
+    - Seite 2: Säulen 2 (Transparenz) + 3 (Subsidiarität) als Gold-Karten
+    - Seite 3: 5 unveräußerliche Rechte als Gold-Bullet-Points
+    - Seite 4: Bekenntnis + Pakt
+    - Fortschrittsanzeige (4 Punkte, aktiver Punkt gold), Zurück-Pfeil ab Seite 2
+    - `readOnly=true` für Settings-Ansicht: letzter Button heißt "Schließen" (kein Commit-Screen)
+  - **Screen 3** (`principles_commitment_screen.dart`): Zwei Checkboxen (animiert, Gold-Akzent)
+    - "Ich trete ein" nur aktiv wenn BEIDE Checkboxen gesetzt; pulsiert einmal beim Aktivwerden
+    - Tipp → `accept()` + `go('/home')`
+    - "Später zurückkehren" → `skip()` + `go('/home')` (zeigt Dashboard-Banner)
+  - **Router-Redirect**: `hasSeen=false` → automatisch `/principles/intro` (gilt auch für bestehende Nutzer nach App-Update)
+  - **Dashboard-Reminder-Banner** (`_PrinciplesReminderBanner`):
+    - Erscheint wenn `!isAccepted && !_principlesReminderDismissed` (session-level Dismiss via X-Button)
+    - Gold-Umrandung, Scroll-Icon, "Jetzt lesen"-Button → `go('/principles/intro')`
+    - Verschwindet permanent nach Bestätigung
+  - **Einstellungen**: Neuer Eintrag "Unsere Grundsätze" (Info-Sektion) → `PrinciplesContentScreen(readOnly: true)`
+    - Subtitle: "Bestätigt am TT.MM.JJJJ" wenn bestätigt, sonst generischer Text
+  - Onboarding `_CompleteStep` navigiert jetzt korrekt zu `/home` (statt `/chat`); Router übernimmt Weiterleitung
+  - Tests: 32 Tests in `test/features/onboarding/principles_test.dart`
+
 - **Automatischer Update-Checker (komplett)**:
   - `UpdateService` Singleton (`lib/services/update_service.dart`):
     - `startPeriodicCheck()`: Hintergrund-Timer, max. ein API-Call pro 6 Stunden (Rate-Limit via SharedPreferences `nexus_last_update_check`)

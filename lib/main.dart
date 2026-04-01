@@ -17,6 +17,7 @@ import 'package:nexus_oneapp/features/chat/chat_provider.dart';
 import 'package:nexus_oneapp/services/background_service.dart';
 import 'package:nexus_oneapp/services/notification_service.dart';
 import 'package:nexus_oneapp/services/notification_settings_service.dart';
+import 'package:nexus_oneapp/services/principles_service.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
 import 'package:nexus_oneapp/shared/widgets/notification_banner.dart';
 import 'package:path_provider/path_provider.dart';
@@ -125,6 +126,7 @@ void main() async {
     }
 
     await IdentityService.instance.init();
+    await PrinciplesService.instance.load();
     if (IdentityService.instance.hasIdentity) {
       await initServicesAfterIdentity();
     }
