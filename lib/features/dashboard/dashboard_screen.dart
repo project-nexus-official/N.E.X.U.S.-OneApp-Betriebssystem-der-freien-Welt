@@ -8,6 +8,8 @@ import 'package:provider/provider.dart';
 import '../../core/contacts/contact_service.dart';
 import '../../core/identity/profile_service.dart';
 import '../../core/transport/message_transport.dart';
+import '../../services/invite_service.dart';
+import '../invite/invite_screen.dart';
 import '../../services/principles_service.dart';
 import '../../services/update_service.dart';
 import '../../shared/theme/app_theme.dart';
@@ -245,6 +247,8 @@ class _DashboardScreenState extends State<DashboardScreen>
             _buildContactsCard(context),
             const SizedBox(height: 12),
             _buildGovernanceCard(context),
+            const SizedBox(height: 12),
+            _buildInviteCard(context),
             const SizedBox(height: 16),
             _buildComingSoonRow(),
           ]),
@@ -351,6 +355,23 @@ class _DashboardScreenState extends State<DashboardScreen>
       subtitle: 'Governance kommt bald',
       preview: 'Hier werdet ihr gemeinsam Entscheidungen treffen.',
       onTap: () => context.go('/governance'),
+    );
+  }
+
+  Widget _buildInviteCard(BuildContext context) {
+    final pendingCount = InviteService.instance.invites
+        .where((r) => r.isPending)
+        .length;
+    return _FeatureCard(
+      key: const Key('invite_card'),
+      icon: Icons.person_add_outlined,
+      title: 'Freunde einladen',
+      subtitle: pendingCount > 0
+          ? '$pendingCount Einladung${pendingCount == 1 ? '' : 'en'} ausstehend'
+          : 'Lade Freunde zu N.E.X.U.S. ein',
+      onTap: () => Navigator.of(context, rootNavigator: true).push(
+        MaterialPageRoute<void>(builder: (_) => const _InviteScreenProxy()),
+      ),
     );
   }
 
@@ -840,6 +861,22 @@ class _FeatureCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ── Invite screen proxy ───────────────────────────────────────────────────────
+
+/// Passes the current [ChatProvider] to [InviteScreen] when opened via
+/// rootNavigator (which exits the widget tree above the Provider).
+class _InviteScreenProxy extends StatelessWidget {
+  const _InviteScreenProxy();
+
+  @override
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider.value(
+      value: context.read<ChatProvider>(),
+      child: const InviteScreen(),
     );
   }
 }

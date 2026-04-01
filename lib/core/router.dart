@@ -7,6 +7,8 @@ import 'package:nexus_oneapp/features/dashboard/dashboard_screen.dart';
 import 'package:nexus_oneapp/features/discover/discover_screen.dart';
 import 'package:nexus_oneapp/features/governance/governance_screen.dart';
 import 'package:nexus_oneapp/features/onboarding/onboarding_screen.dart';
+import 'package:nexus_oneapp/features/invite/invite_screen.dart';
+import 'package:nexus_oneapp/features/invite/redeem_screen.dart';
 import 'package:nexus_oneapp/features/onboarding/principles_commitment_screen.dart';
 import 'package:nexus_oneapp/features/onboarding/principles_content_screen.dart';
 import 'package:nexus_oneapp/features/onboarding/principles_intro_screen.dart';
@@ -80,6 +82,18 @@ final router = GoRouter(
     GoRoute(
       path: '/qr-scanner',
       builder: (context, state) => const QrScannerScreen(),
+    ),
+    // Invite – outside ShellRoute (full-screen, no bottom nav)
+    GoRoute(
+      path: '/invite',
+      builder: (context, state) => const InviteScreen(),
+    ),
+    GoRoute(
+      path: '/invite/redeem',
+      builder: (context, state) {
+        final code = state.uri.queryParameters['c'];
+        return RedeemScreen(initialCode: code);
+      },
     ),
     // Main app shell with bottom navigation
     ShellRoute(

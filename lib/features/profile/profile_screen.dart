@@ -18,6 +18,7 @@ import 'package:nexus_oneapp/shared/widgets/identicon.dart';
 import '../chat/chat_provider.dart';
 import '../contacts/contacts_screen.dart';
 import '../contacts/qr_contact_payload.dart';
+import '../invite/invite_screen.dart';
 import 'edit_profile_screen.dart';
 
 /// Profile tab – shows the user's identity and extended profile data.
@@ -403,6 +404,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.gold,
                       side: const BorderSide(color: AppColors.gold),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => ChangeNotifierProvider.value(
+                          value: context.read<ChatProvider>(),
+                          child: const InviteScreen(),
+                        ),
+                      ),
+                    ),
+                    icon: const Icon(Icons.person_add_outlined, size: 18),
+                    label: const Text('Freund einladen'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.gold,
+                      foregroundColor: AppColors.deepBlue,
                       padding: const EdgeInsets.symmetric(vertical: 10),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10)),

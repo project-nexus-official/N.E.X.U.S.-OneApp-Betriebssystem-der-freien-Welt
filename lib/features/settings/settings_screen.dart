@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import '../../core/contacts/contact_service.dart';
 import '../../core/storage/pod_database.dart';
 import '../../core/storage/retention_service.dart';
+import '../invite/redeem_screen.dart';
 import '../onboarding/principles_content_screen.dart';
 import '../../services/notification_settings_service.dart';
 import '../../services/principles_service.dart';
@@ -48,6 +49,19 @@ class SettingsScreen extends StatelessWidget {
           const _NotificationSection(),
           const Divider(height: 1),
           _NachrichtenSection(chatProvider: context.read<ChatProvider>()),
+          const Divider(height: 1),
+          _SectionHeader('Einladungen'),
+          ListTile(
+            leading: const Icon(Icons.card_giftcard_outlined, color: AppColors.gold),
+            title: const Text('Einladungscode einlösen'),
+            subtitle: const Text('Code eines Freundes eingeben'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const RedeemScreen(),
+              ),
+            ),
+          ),
           const Divider(height: 1),
           _SectionHeader('Kontakte'),
           ListTile(

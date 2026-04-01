@@ -7,6 +7,7 @@ import 'package:nexus_oneapp/core/contacts/contact_service.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
 import 'package:nexus_oneapp/shared/widgets/identicon.dart';
 
+import '../invite/invite_screen.dart';
 import 'contact_detail_screen.dart';
 import 'manual_key_input_dialog.dart';
 import 'widgets/trust_badge.dart';
@@ -123,6 +124,19 @@ class _ContactsScreenState extends State<ContactsScreen> {
               onTap: () {
                 Navigator.pop(ctx);
                 Navigator.of(context).pop(); // go back to chat tab where Radar is
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.person_add_outlined, color: AppColors.gold),
+              title: const Text('Zur App einladen'),
+              subtitle: const Text('Freunde mit einem Einladungscode einladen'),
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const InviteScreen(),
+                  ),
+                );
               },
             ),
             const SizedBox(height: 8),

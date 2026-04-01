@@ -254,6 +254,26 @@ Phase 2: Care-System + Sphären-Plugins
   - Android: `<queries>` für `https`-Schema in AndroidManifest.xml ergänzt
   - Tests: 26 Tests in `test/services/update_service_test.dart`
 
+- **App-Einladungsfunktion (komplett)**:
+  - `InvitePayload` – base64url-JSON-Kodierung mit Code, DID, Pseudonym, X25519-Key, Nostr-Key, Ablaufdatum (30 Tage)
+  - `InviteRecord` – lokale Speicherung mit Einlösestatus (`redeemedByPseudonym`)
+  - `InviteService` Singleton (`lib/services/invite_service.dart`):
+    - `generateInviteCode()`: Generiert 8-Zeichen-Code aus ambiguity-freiem Alphabet, speichert lokal, optional Nostr-Publish
+    - `redeemEncoded()`: Validiert Ablauf, verhindert Selbst-Einlösung, fügt Einlader als Kontakt hinzu, sendet Benachrichtigungs-DM
+    - `markRedeemed()`: Setzt `redeemedByPseudonym` und persistiert
+    - `buildDeepLink()`: `nexus://invite?c=NEXUS-XXXX-XXXX&d=<base64url>`
+    - `buildShareText()`: Fertige Share-Nachricht mit Code, Ablaufdatum, Download-Links
+  - Code-Format: `NEXUS-XXXX-XXXX` (Display), `XXXXXXXX` (intern), Alphabet ohne I/O/0/1
+  - `InviteScreen` (`lib/features/invite/invite_screen.dart`): QR-Code des Deep-Links, Code-Anzeige mit Kopier-Button, Share-Sheet, Einladungs-Liste mit Status
+  - `RedeemScreen` (`lib/features/invite/redeem_screen.dart`): Code-Eingabefeld, Validierung, Erfolgs-Ansicht mit "Zum Dashboard"-Button
+  - **Integration**:
+    - Dashboard-Karte "Freunde einladen" mit ausstehenden Einladungen als Subtitle
+    - Kontakte-FAB: "Zur App einladen" als neuer Eintrag im Bottom Sheet
+    - Profil-Screen: "Freund einladen"-Button unter QR-Code
+    - Einstellungen: Neuer Abschnitt "Einladungen" mit "Einladungscode einlösen"
+    - Router: `/invite` → `InviteScreen`, `/invite/redeem?c=...` → `RedeemScreen`
+  - Tests: 25 Tests in `test/features/invite/invite_service_test.dart`
+
 ## Aktueller Fokus
 >>> PHASE 1a: Fundament + Identität (in Fertigstellung) <<<
 
