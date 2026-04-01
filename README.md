@@ -211,10 +211,7 @@ Werde Teil des Gründungskreises und gestalte die Grundlagen mit: **[nexus-termi
 | | |
 |---|---|
 | Website | [nexus-terminal.org](https://nexus-terminal.org) |
-| Bauplan | [nexus-terminal.org/bauplan](https://nexus-terminal.org/bauplan) |
-| Discord | [discord.gg/nexus-one](https://discord.gg/nexus-one) |
-| Telegram | [t.me/nexusmenschheit](https://t.me/nexusmenschheit) |
-| OpenCollective | [opencollective.com/nexus-one](https://opencollective.com/nexus-one) |
+| Telegram | [t.me/t.me/Nexus_Project_official](https://t.me/Nexus_Project_official) |
 | GitHub Releases | [Releases](https://github.com/project-nexus-official/N.E.X.U.S.-OneApp-Betriebssystem-der-freien-Welt/releases) |
 
 ---
