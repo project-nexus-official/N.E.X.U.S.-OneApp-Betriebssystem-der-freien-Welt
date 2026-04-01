@@ -300,14 +300,25 @@ Vor jedem Release folgende Schritte in dieser Reihenfolge:
    git push origin master:main
    ```
 
-4. **GitHub Release erstellen**:
+4. **Windows Installer erstellen** (optional, empfohlen):
+   ```bash
+   installer\build_installer.bat
+   ```
+   Voraussetzung: [Inno Setup 6](https://jrsoftware.org/isdl.php) installiert (Standard-Pfad).
+   Output: `installer\Output\Setup_NexusOneApp_vX.Y.Z.exe`
+
+   Versionsnummer im Skript aktualisieren: `installer\windows_setup.iss` → `#define AppVersion`
+
+5. **GitHub Release erstellen**:
    - Tag: `vX.Y.Z` (z.B. `v0.1.4`)
    - Release-Titel: `NEXUS OneApp vX.Y.Z`
    - APK als Asset hochladen: `nexus-vX.Y.Z.apk`
-   - Windows-ZIP als Asset hochladen: `nexus-vX.Y.Z.zip`
+   - Windows-Installer hochladen: `Setup_NexusOneApp_vX.Y.Z.exe` *(bevorzugt)*
+   - Windows-ZIP als Asset hochladen: `nexus-vX.Y.Z.zip` *(Fallback)*
    - Release Notes auf Deutsch verfassen
 
 Der Update-Checker der App prüft diesen GitHub Release automatisch.
+Für Windows sucht er nach einem `.exe`-Asset, dann `.zip` als Fallback.
 
 ## Code-Standards
 - Dart/Flutter: Effective Dart Style Guide
