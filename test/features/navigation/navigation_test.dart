@@ -8,10 +8,11 @@ import 'package:nexus_oneapp/shared/widgets/nexus_scaffold.dart';
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
 /// Creates a GoRouter with all app routes pointing to simple placeholders.
-GoRouter _testRouter({String initialLocation = '/chat'}) {
+GoRouter _testRouter({String initialLocation = '/home'}) {
   return GoRouter(
     initialLocation: initialLocation,
     routes: [
+      GoRoute(path: '/home', builder: (_, __) => const _Tab('Home')),
       GoRoute(path: '/chat', builder: (_, __) => const _Tab('Chat')),
       GoRoute(path: '/governance', builder: (_, __) => const _Tab('Governance')),
       GoRoute(path: '/discover', builder: (_, __) => const DiscoverScreen()),
@@ -22,11 +23,12 @@ GoRouter _testRouter({String initialLocation = '/chat'}) {
 }
 
 /// Wraps a widget in a full MaterialApp.router + theme for testing.
-Widget _appFor(Widget child, {double width = 400, String initialLocation = '/chat'}) {
+Widget _appFor(Widget child, {double width = 400, String initialLocation = '/home'}) {
   final router = GoRouter(
     initialLocation: '/test',
     routes: [
       GoRoute(path: '/test', builder: (_, __) => child),
+      GoRoute(path: '/home', builder: (_, __) => const _Tab('Home')),
       GoRoute(path: '/chat', builder: (_, __) => const _Tab('Chat')),
       GoRoute(path: '/governance', builder: (_, __) => const _Tab('Governance')),
       GoRoute(path: '/discover', builder: (_, __) => const DiscoverScreen()),
@@ -57,6 +59,7 @@ Widget _scaffoldApp(int index, {double width = 400}) {
           child: const _Tab('Content'),
         ),
       ),
+      GoRoute(path: '/home', builder: (_, __) => const _Tab('Home')),
       GoRoute(path: '/chat', builder: (_, __) => const _Tab('Chat')),
       GoRoute(path: '/governance', builder: (_, __) => const _Tab('Governance')),
       GoRoute(path: '/discover', builder: (_, __) => const DiscoverScreen()),
@@ -236,12 +239,12 @@ void main() {
     });
 
     testWidgets('correct tab is highlighted by currentIndex', (tester) async {
-      // currentIndex: 2 = Entdecken
-      await tester.pumpWidget(_scaffoldApp(2, width: 400));
+      // currentIndex: 3 = Entdecken (0=Home, 1=Chat, 2=Governance, 3=Entdecken, 4=Profil)
+      await tester.pumpWidget(_scaffoldApp(3, width: 400));
       await tester.pumpAndSettle();
 
       final navBar = tester.widget<NavigationBar>(find.byType(NavigationBar));
-      expect(navBar.selectedIndex, 2);
+      expect(navBar.selectedIndex, 3);
     });
   });
 
@@ -260,9 +263,9 @@ void main() {
       await tester.pumpAndSettle();
 
       // Drawer content should be visible
+      expect(find.text('Home'), findsWidgets);
       expect(find.text('Chat'), findsWidgets);
       expect(find.text('Governance'), findsWidgets);
-      expect(find.text('Wallet'), findsWidgets);
       expect(find.text('Profil'), findsWidgets);
     });
 
@@ -307,10 +310,10 @@ void main() {
       await tester.pumpAndSettle();
 
       // All 5 main nav entries must appear in the drawer
+      expect(find.text('Home'), findsWidgets); // also in bottom nav
       expect(find.text('Chat'), findsWidgets); // also in bottom nav
       expect(find.text('Governance'), findsWidgets);
       expect(find.text('Entdecken'), findsWidgets);
-      expect(find.text('Wallet'), findsWidgets);
       expect(find.text('Profil'), findsWidgets);
     });
 

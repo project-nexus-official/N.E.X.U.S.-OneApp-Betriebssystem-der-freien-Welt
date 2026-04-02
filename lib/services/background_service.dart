@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -9,6 +8,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import '../core/transport/nostr/nostr_event.dart';
+import '../core/transport/nostr/nostr_keys.dart';
 import '../core/transport/nostr/nostr_relay_manager.dart';
 import 'notification_settings_service.dart';
 
@@ -111,12 +112,55 @@ void _onStart(ServiceInstance service) async {
     );
   }
 
-  // ── Nostr subscription ────────────────────────────────────────────────────
+  // ── Identity + Nostr keys ─────────────────────────────────────────────────
   String? pubKeyHex;
+  NostrKeys? nostrKeys;
+  String? localDid;
+  String? localPseudonym;
   try {
     const storage = FlutterSecureStorage();
     pubKeyHex = await storage.read(key: 'nostr_public_key');
+    localDid = await storage.read(key: 'nexus_did');
+    localPseudonym = await storage.read(key: 'nexus_pseudonym');
+    // Reconstruct NostrKeys from cached hex values (seed not needed if keys
+    // are already stored, which they always are after first launch).
+    if (pubKeyHex != null) {
+      nostrKeys = await NostrKeys.loadOrDerive(Uint8List(0));
+    }
   } catch (_) {}
+
+  // ── Presence heartbeat ────────────────────────────────────────────────────
+  Timer? presenceTimer;
+
+  Future<void> sendPresenceHeartbeat() async {
+    if (ws == null || nostrKeys == null || localDid == null) return;
+    try {
+      final event = NostrEvent.create(
+        keys: nostrKeys,
+        kind: 30078, // NostrKind.presence
+        content: jsonEncode({
+          'did': localDid,
+          'pseudonym': localPseudonym ?? '',
+        }),
+        tags: [
+          ['d', 'nexus-presence'],
+          ['t', 'nexus-presence'],
+          ['did', localDid],
+          ['name', localPseudonym ?? ''],
+        ],
+      );
+      ws!.sink.add(jsonEncode(['EVENT', event.toJson()]));
+    } catch (e) {
+      debugPrint('[BGS] presence heartbeat failed: $e');
+    }
+  }
+
+  void startPresenceTimer() {
+    presenceTimer?.cancel();
+    presenceTimer = Timer.periodic(const Duration(seconds: 90), (_) {
+      sendPresenceHeartbeat();
+    });
+  }
 
   Future<void> connectNostr() async {
     if (paused || pubKeyHex == null) return;
@@ -159,16 +203,21 @@ void _onStart(ServiceInstance service) async {
         },
         onDone: () {
           if (!paused) {
-            // Reconnect after 5s
+            presenceTimer?.cancel();
             Future.delayed(const Duration(seconds: 5), connectNostr);
           }
         },
         onError: (_) {
           if (!paused) {
+            presenceTimer?.cancel();
             Future.delayed(const Duration(seconds: 10), connectNostr);
           }
         },
       );
+
+      // Send an immediate heartbeat, then every 90 s.
+      await sendPresenceHeartbeat();
+      startPresenceTimer();
     } catch (e) {
       updateForeground('Verbindungsfehler');
       Future.delayed(const Duration(seconds: 15), connectNostr);
@@ -180,6 +229,8 @@ void _onStart(ServiceInstance service) async {
   // ── Service control events ────────────────────────────────────────────────
   service.on('pauseNostr').listen((_) {
     paused = true;
+    presenceTimer?.cancel();
+    presenceTimer = null;
     wsSub?.cancel();
     ws?.sink.close();
     updateForeground('App im Vordergrund');
