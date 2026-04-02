@@ -491,8 +491,20 @@ class PodDatabase {
   }
 
   /// Counts messages in [conversationId] received after [afterTimestampMs].
+  ///
+  /// Pass [excludeSenderDid] to skip messages sent by that user (i.e. own
+  /// outgoing messages should never count as unread).
   Future<int> countMessagesAfter(
-      String conversationId, int afterTimestampMs) async {
+      String conversationId, int afterTimestampMs,
+      {String? excludeSenderDid}) async {
+    if (excludeSenderDid != null) {
+      final rows = await _database.rawQuery(
+        'SELECT COUNT(*) AS cnt FROM pod_messages '
+        'WHERE conversation_id = ? AND ts > ? AND sender_did != ?',
+        [conversationId, afterTimestampMs, excludeSenderDid],
+      );
+      return (rows.first['cnt'] as int?) ?? 0;
+    }
     final rows = await _database.rawQuery(
       'SELECT COUNT(*) AS cnt FROM pod_messages '
       'WHERE conversation_id = ? AND ts > ?',

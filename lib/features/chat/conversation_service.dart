@@ -82,8 +82,9 @@ class ConversationService {
             DateTime.fromMillisecondsSinceEpoch(lastTs, isUtc: true);
 
         final lastReadTs = _lastRead[convId] ?? 0;
-        final unread =
-            await PodDatabase.instance.countMessagesAfter(convId, lastReadTs);
+        final unread = await PodDatabase.instance.countMessagesAfter(
+            convId, lastReadTs,
+            excludeSenderDid: myDid);
 
         if (convId == NexusMessage.broadcastDid) {
           conversations.add(Conversation(
@@ -223,7 +224,10 @@ class ConversationService {
   /// Returns the number of unread messages in [conversationId].
   Future<int> getUnreadCount(String conversationId) async {
     final lastReadTs = _lastRead[conversationId] ?? 0;
-    return PodDatabase.instance.countMessagesAfter(conversationId, lastReadTs);
+    final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+    return PodDatabase.instance.countMessagesAfter(
+        conversationId, lastReadTs,
+        excludeSenderDid: myDid);
   }
 
   /// Deletes all messages in [conversationId] from the POD.
