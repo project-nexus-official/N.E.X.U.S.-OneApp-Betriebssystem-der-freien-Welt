@@ -154,11 +154,13 @@ class SettingsScreen extends StatelessWidget {
     return const Text('Die Grundlagen unserer Gemeinschaft');
   }
 
-  void _showAbout(BuildContext context) {
+  Future<void> _showAbout(BuildContext context) async {
+    final info = await PackageInfo.fromPlatform();
+    if (!context.mounted) return;
     showAboutDialog(
       context: context,
       applicationName: 'NEXUS OneApp',
-      applicationVersion: '0.1.0',
+      applicationVersion: 'v${info.version}',
       applicationLegalese: '© 2025 – Protokoll, nicht Plattform',
       children: const [
         SizedBox(height: 12),

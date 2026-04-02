@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
 import 'package:nexus_oneapp/core/identity/profile_service.dart';
 import 'package:nexus_oneapp/features/contacts/contacts_screen.dart';
@@ -16,6 +17,8 @@ const double _kSidebarWidth = 280;
 /// Root scaffold with two-level navigation:
 /// - Level 1: Bottom nav (5 tabs) on mobile/tablet; permanent sidebar on desktop
 /// - Level 2: Drawer for secondary destinations, actions and settings
+///
+/// Tab order:  0 Home · 1 Chat · 2 Governance · 3 Entdecken · 4 Profil
 class NexusScaffold extends StatelessWidget {
   final Widget child;
   final int currentIndex;
@@ -29,13 +32,13 @@ class NexusScaffold extends StatelessWidget {
   void _navigate(BuildContext context, int index) {
     switch (index) {
       case 0:
-        context.go('/chat');
+        context.go('/home');
       case 1:
-        context.go('/governance');
+        context.go('/chat');
       case 2:
-        context.go('/discover');
+        context.go('/governance');
       case 3:
-        context.go('/wallet');
+        context.go('/discover');
       case 4:
         context.go('/profile');
     }
@@ -146,6 +149,11 @@ class _BottomNav extends StatelessWidget {
       onDestinationSelected: onNavigate,
       destinations: const [
         NavigationDestination(
+          icon: Icon(Icons.home_outlined),
+          selectedIcon: Icon(Icons.home),
+          label: 'Home',
+        ),
+        NavigationDestination(
           icon: Icon(Icons.chat_bubble_outline),
           selectedIcon: Icon(Icons.chat_bubble),
           label: 'Chat',
@@ -159,11 +167,6 @@ class _BottomNav extends StatelessWidget {
           icon: Icon(Icons.explore_outlined),
           selectedIcon: Icon(Icons.explore),
           label: 'Entdecken',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.account_balance_wallet_outlined),
-          selectedIcon: Icon(Icons.account_balance_wallet),
-          label: 'Wallet',
         ),
         NavigationDestination(
           icon: Icon(Icons.person_outline),
@@ -217,12 +220,14 @@ class _DrawerContent extends StatelessWidget {
     );
   }
 
-  void _showAbout(BuildContext context) {
+  Future<void> _showAbout(BuildContext context) async {
     if (!isPermanent) Navigator.of(context).pop();
+    final info = await PackageInfo.fromPlatform();
+    if (!context.mounted) return;
     showAboutDialog(
       context: context,
       applicationName: 'N.E.X.U.S. OneApp',
-      applicationVersion: '0.1.0-alpha',
+      applicationVersion: 'v${info.version}',
       applicationLegalese: '© 2026 Die Menschheitsfamilie',
       children: [
         const SizedBox(height: 12),
@@ -288,26 +293,26 @@ class _DrawerContent extends StatelessWidget {
 
           // ── Main tabs ───────────────────────────────────────────────────────
           _DrawerNavItem(
-            icon: Icons.chat_bubble_outline,
-            label: 'Chat',
+            icon: Icons.home_outlined,
+            label: 'Home',
             selected: currentIndex == 0,
             onTap: () => _go(context, 0),
           ),
           _DrawerNavItem(
-            icon: Icons.how_to_vote_outlined,
-            label: 'Governance',
+            icon: Icons.chat_bubble_outline,
+            label: 'Chat',
             selected: currentIndex == 1,
             onTap: () => _go(context, 1),
           ),
           _DrawerNavItem(
-            icon: Icons.explore_outlined,
-            label: 'Entdecken',
+            icon: Icons.how_to_vote_outlined,
+            label: 'Governance',
             selected: currentIndex == 2,
             onTap: () => _go(context, 2),
           ),
           _DrawerNavItem(
-            icon: Icons.account_balance_wallet_outlined,
-            label: 'Wallet',
+            icon: Icons.explore_outlined,
+            label: 'Entdecken',
             selected: currentIndex == 3,
             onTap: () => _go(context, 3),
           ),

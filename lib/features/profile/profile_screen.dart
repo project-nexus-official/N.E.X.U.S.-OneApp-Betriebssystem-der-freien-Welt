@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nexus_oneapp/core/contacts/contact_service.dart';
 import 'package:nexus_oneapp/core/crypto/encryption_keys.dart';
@@ -37,11 +38,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
   UserProfile? get _profile => ProfileService.instance.currentProfile;
 
   bool _hasEverExported = true; // start as true to avoid flash; loaded in initState
+  String _appVersion = '';
 
   @override
   void initState() {
     super.initState();
     _loadExportStatus();
+    _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    final info = await PackageInfo.fromPlatform();
+    if (mounted) setState(() => _appVersion = info.version);
   }
 
   Future<void> _loadExportStatus() async {
@@ -541,7 +549,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'N.E.X.U.S. OneApp  v0.1.0',
+            'N.E.X.U.S. OneApp  v$_appVersion',
             style: TextStyle(
                 color: AppColors.onDark.withValues(alpha: 0.5),
                 fontSize: 12,
