@@ -539,7 +539,22 @@ class _PeerTile extends StatelessWidget {
           ],
         ],
       ),
-      subtitle: _TransportBadges(transports: peer.availableTransports),
+      subtitle: (contact?.notes?.isNotEmpty ?? false)
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  contact!.notes!,
+                  style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                _TransportBadges(transports: peer.availableTransports),
+              ],
+            )
+          : _TransportBadges(transports: peer.availableTransports),
       trailing: _SignalIndicator(peer: peer),
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute<void>(
