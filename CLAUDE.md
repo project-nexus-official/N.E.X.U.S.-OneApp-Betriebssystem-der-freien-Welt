@@ -274,6 +274,26 @@ Phase 2: Care-System + Sphären-Plugins
     - Router: `/invite` → `InviteScreen`, `/invite/redeem?c=...` → `RedeemScreen`
   - Tests: 25 Tests in `test/features/invite/invite_service_test.dart`
 
+- **Rollen-Hierarchie (komplett)**:
+  - **SystemRole Enum**: `SUPERADMIN` (Gründer, hartcodiert via DID), `SYSTEM_ADMIN` (ernannt), `USER` (Default)
+  - **ChannelRole Enum**: `CHANNEL_ADMIN` (Ersteller), `CHANNEL_MODERATOR`, `CHANNEL_MEMBER`
+  - **ChannelMode Enum**: `discussion` (alle posten) / `announcement` (nur Admins)
+  - **SystemConfig** (`lib/core/config/system_config.dart`): Lädt Superadmin-DID aus `assets/config/system.json` (PLACEHOLDER_DID); nach Transfer aus SharedPreferences (`nexus_superadmin_did`); `forceForTest()` für Unit-Tests
+  - **assets/config/system.json**: PLACEHOLDER_DID – Joachim trägt seine eigene DID ein; Datei bleibt im Repo (mit Platzhalter), nicht in `.gitignore`
+  - **RoleService** Singleton (`lib/services/role_service.dart`): `init()`, `isSuperadmin()`, `isSystemAdmin()`, `getSystemRole()`, `getChannelRole()`; `grantSystemAdmin/revokeSystemAdmin/transferSuperadmin` (Superadmin-exklusiv); `grantChannelModerator/revokeChannelModerator` (Kanal-Admin oder System-Admin)
+  - **PermissionHelper** (`lib/core/roles/permission_helper.dart`): Reine Funktionen – `canPostInChannel`, `canCreateAnnouncementChannel`, `canDeleteMessage`, `canMuteUser`, `canManageSystemAdmins`, `canManageChannelModerators`
+  - **DB v6-Migration**: Neue Tabellen `system_roles` (did, role, granted_by, granted_at) und `channel_roles` (channel_id, did, role, granted_by, granted_at)
+  - **GroupChannel.channelMode**: Neues Feld, serialisiert als `"channelMode"` im JSON-Blob; `GroupChannel.create()` akzeptiert `channelMode` Parameter
+  - **Nostr Kinds**: `roleAssignment = 31001` (System-Rollen), `channelRoleAssignment = 31002` (Kanal-Rollen)
+  - **UI – Kanal-Header**: Megafon-Icon + "Ankündigung"-Badge bei Announcement-Kanälen
+  - **UI – Eingabefeld**: Ausgegraut mit "Nur Admins können hier posten" in Announcement-Kanälen für nicht-berechtigte Nutzer
+  - **UI – Rollen-Badges**: Neben Absendernamen in Kanal-Nachrichten (Superadmin: Schild+Stern, Admin: Schild, Kanal-Admin: manage_accounts, Mod: verified_user)
+  - **UI – Kanal erstellen**: Kanal-Modus-Selektor (Diskussion/Ankündigung) nur sichtbar für System-Admin/Superadmin
+  - **UI – Einstellungen**: "Administration"-Sektion (nur für System-Admin/Superadmin sichtbar) mit Rollen-Badge, "System-Admins verwalten", "Superadmin übertragen" (mit doppelter Bestätigung)
+  - **AdminManagementScreen** (`lib/features/settings/admin_management_screen.dart`): Liste aller System-Admins, FAB zum Ernennen, "Entfernen"-Button mit Bestätigungsdialog
+  - **Init**: `RoleService.instance.init()` in `initServicesAfterIdentity()` nach DB-Öffnung
+  - Tests: 32 Tests in `test/services/role_service_test.dart`
+
 ## Aktueller Fokus
 >>> PHASE 1a: Fundament + Identität (in Fertigstellung) <<<
 

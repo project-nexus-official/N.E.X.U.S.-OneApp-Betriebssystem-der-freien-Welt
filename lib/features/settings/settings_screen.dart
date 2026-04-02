@@ -7,8 +7,11 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/contacts/contact_service.dart';
+import '../../core/identity/identity_service.dart';
+import '../../core/roles/role_enums.dart';
 import '../../core/storage/pod_database.dart';
 import '../../core/storage/retention_service.dart';
+import '../../services/role_service.dart';
 import '../invite/redeem_screen.dart';
 import '../onboarding/principles_content_screen.dart';
 import '../../services/notification_settings_service.dart';
@@ -18,6 +21,7 @@ import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/update_bottom_sheet.dart';
 import '../chat/chat_provider.dart';
 import '../contacts/widgets/trust_badge.dart';
+import 'admin_management_screen.dart';
 import 'nostr_settings_screen.dart';
 
 /// Top-level settings hub.
@@ -91,6 +95,8 @@ class SettingsScreen extends StatelessWidget {
             subtitle: const Text('Kommt bald – benötigt Datei-Picker'),
             enabled: false,
           ),
+          const Divider(height: 1),
+          const _AdminSection(),
           const Divider(height: 1),
           _SectionHeader('Info'),
           ListTile(
@@ -627,6 +633,181 @@ class _NotificationSectionState extends State<_NotificationSection> {
         ],
       ],
     );
+  }
+}
+
+// ── Admin section ─────────────────────────────────────────────────────────────
+
+/// Visible only for superadmin and system admins.
+class _AdminSection extends StatelessWidget {
+  const _AdminSection();
+
+  @override
+  Widget build(BuildContext context) {
+    final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+    final svc = RoleService.instance;
+    final role = svc.getSystemRole(myDid);
+
+    if (role == SystemRole.user) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader('Administration'),
+        // Role badge
+        ListTile(
+          leading: Icon(
+            role == SystemRole.superadmin
+                ? Icons.shield
+                : Icons.shield_outlined,
+            color: AppColors.gold,
+          ),
+          title: Text(
+            role == SystemRole.superadmin ? 'Superadmin' : 'System-Admin',
+            style: const TextStyle(color: AppColors.gold),
+          ),
+          subtitle: Text(
+            role == SystemRole.superadmin
+                ? 'Gründer-Rolle – Genesis-Phase'
+                : 'Ernannt vom Superadmin',
+            style: const TextStyle(fontSize: 12),
+          ),
+        ),
+        // Superadmin-only options
+        if (role == SystemRole.superadmin) ...[
+          ListTile(
+            leading: const Icon(Icons.manage_accounts, color: AppColors.gold),
+            title: const Text('System-Admins verwalten'),
+            subtitle: Text(
+              '${svc.systemAdmins.length} aktive Admin'
+              '${svc.systemAdmins.length == 1 ? "" : "s"}',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const AdminManagementScreen(),
+              ),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.swap_horiz, color: Colors.orange),
+            title: const Text(
+              'Superadmin übertragen',
+              style: TextStyle(color: Colors.orange),
+            ),
+            subtitle: const Text('Unwiderruflich in der Genesis-Phase'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _confirmTransfer(context, myDid),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _confirmTransfer(BuildContext context, String myDid) async {
+    final TextEditingController ctrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text(
+          'Superadmin übertragen?',
+          style: TextStyle(color: Colors.orange),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Diese Aktion ist IRREVERSIBEL in der Genesis-Phase.\n\n'
+              'Du verlierst alle Superadmin-Rechte sofort.',
+              style: TextStyle(color: AppColors.onDark),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: ctrl,
+              style: const TextStyle(color: AppColors.onDark, fontSize: 13),
+              decoration: InputDecoration(
+                labelText: 'DID des neuen Superadmins',
+                filled: true,
+                fillColor: AppColors.surfaceVariant,
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Abbrechen',
+                style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Übertragen'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    final newDid = ctrl.text.trim();
+    if (newDid.isEmpty || !context.mounted) return;
+
+    // Second confirmation
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Bist du sicher?',
+            style: TextStyle(color: Colors.orange)),
+        content: Text(
+          'Du überträgst die Superadmin-Rolle an:\n$newDid\n\n'
+          'Das kann nicht rückgängig gemacht werden.',
+          style: const TextStyle(color: AppColors.onDark),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Abbrechen',
+                style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Endgültig übertragen'),
+          ),
+        ],
+      ),
+    );
+
+    if (sure != true || !context.mounted) return;
+
+    try {
+      await RoleService.instance.transferSuperadmin(myDid, newDid);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Superadmin-Rolle übertragen.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Fehler: $e')),
+        );
+      }
+    }
   }
 }
 

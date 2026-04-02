@@ -48,5 +48,9 @@ app.*.map.json
 # Inno Setup installer output
 /installer/Output/
 
+# system.json holds the superadmin DID – the placeholder file is tracked,
+# but if you create a local copy with the real DID you can add it here:
+# assets/config/system.json
+
 # Claude Code auto-memory
 /memory/

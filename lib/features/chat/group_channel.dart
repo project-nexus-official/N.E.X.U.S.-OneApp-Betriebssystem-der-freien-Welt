@@ -1,5 +1,7 @@
 import 'dart:math';
 
+import '../../core/roles/role_enums.dart';
+
 /// A named group channel (e.g. #teneriffa) that multiple users can join.
 ///
 /// Channel IDs in the conversation layer use the format "#channelname"
@@ -27,6 +29,9 @@ class GroupChannel {
   final String nostrTag; // e.g. "nexus-channel-teneriffa"
   DateTime? joinedAt;
 
+  /// Posting mode: 'discussion' (all members) or 'announcement' (admins only).
+  final ChannelMode channelMode;
+
   /// DIDs of members who have been granted access (admin always first).
   List<String> members;
 
@@ -41,6 +46,7 @@ class GroupChannel {
     this.channelSecret,
     required this.nostrTag,
     this.joinedAt,
+    this.channelMode = ChannelMode.discussion,
     List<String>? members,
   }) : members = members ?? [];
 
@@ -56,6 +62,7 @@ class GroupChannel {
     required String createdBy,
     bool isPublic = true,
     bool isDiscoverable = true,
+    ChannelMode channelMode = ChannelMode.discussion,
   }) {
     final normalised = normaliseName(name);
     return GroupChannel(
@@ -69,6 +76,7 @@ class GroupChannel {
       channelSecret: isPublic ? null : _generateSecret(),
       nostrTag: nameToNostrTag(normalised),
       joinedAt: DateTime.now().toUtc(),
+      channelMode: channelMode,
       members: [createdBy],
     );
   }
@@ -79,6 +87,7 @@ class GroupChannel {
     bool? isDiscoverable,
     String? channelSecret,
     DateTime? joinedAt,
+    ChannelMode? channelMode,
     List<String>? members,
   }) =>
       GroupChannel(
@@ -92,6 +101,7 @@ class GroupChannel {
         channelSecret: channelSecret ?? this.channelSecret,
         nostrTag: nostrTag,
         joinedAt: joinedAt ?? this.joinedAt,
+        channelMode: channelMode ?? this.channelMode,
         members: members ?? List.from(this.members),
       );
 
@@ -141,6 +151,7 @@ class GroupChannel {
         if (channelSecret != null) 'channelSecret': channelSecret,
         'nostrTag': nostrTag,
         if (joinedAt != null) 'joinedAt': joinedAt!.millisecondsSinceEpoch,
+        'channelMode': channelMode.value,
         if (members.isNotEmpty) 'members': members,
       };
 
@@ -164,6 +175,7 @@ class GroupChannel {
                 isUtc: true,
               )
             : null,
+        channelMode: ChannelModeJson.fromString(json['channelMode'] as String?),
         members: (json['members'] as List<dynamic>?)
                 ?.map((e) => e as String)
                 .toList() ??

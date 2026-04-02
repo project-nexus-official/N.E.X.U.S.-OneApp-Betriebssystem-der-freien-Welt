@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/identity/identity_service.dart';
+import '../../core/roles/permission_helper.dart';
+import '../../core/roles/role_enums.dart';
+import '../../services/role_service.dart';
 import '../../shared/theme/app_theme.dart';
 import 'chat_provider.dart';
 import 'group_channel.dart';
@@ -22,6 +25,7 @@ class _CreateChannelScreenState extends State<CreateChannelScreen> {
   bool _creating = false;
   bool _isPublic = true;
   bool _isDiscoverable = true;
+  ChannelMode _channelMode = ChannelMode.discussion;
   String? _nameError;
 
   @override
@@ -64,6 +68,7 @@ class _CreateChannelScreenState extends State<CreateChannelScreen> {
       createdBy: myDid,
       isPublic: _isPublic,
       isDiscoverable: _isPublic ? true : _isDiscoverable,
+      channelMode: _channelMode,
     );
 
     await GroupChannelService.instance.createChannel(channel);
@@ -216,6 +221,63 @@ class _CreateChannelScreenState extends State<CreateChannelScreen> {
                 ),
               ),
             ],
+            // Channel mode selector – only visible for system admins/superadmin.
+            Builder(builder: (ctx) {
+              final myDid =
+                  IdentityService.instance.currentIdentity?.did ?? '';
+              if (!PermissionHelper.canCreateAnnouncementChannel(myDid)) {
+                return const SizedBox.shrink();
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 16),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceVariant,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                          color: AppColors.gold.withValues(alpha: 0.25)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                          child: Text(
+                            'Kanal-Modus',
+                            style: TextStyle(
+                                color: Colors.grey[500], fontSize: 11),
+                          ),
+                        ),
+                        _VisibilityOption(
+                          icon: Icons.forum,
+                          title: 'Diskussion',
+                          subtitle: 'Alle Mitglieder können Nachrichten senden',
+                          selected:
+                              _channelMode == ChannelMode.discussion,
+                          onTap: () => setState(
+                              () => _channelMode = ChannelMode.discussion),
+                          topRounded: true,
+                        ),
+                        const Divider(height: 1, color: AppColors.surface),
+                        _VisibilityOption(
+                          icon: Icons.campaign,
+                          title: 'Ankündigung',
+                          subtitle:
+                              'Nur Admins können posten – Mitglieder lesen nur',
+                          selected:
+                              _channelMode == ChannelMode.announcement,
+                          onTap: () => setState(
+                              () => _channelMode = ChannelMode.announcement),
+                          bottomRounded: true,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            }),
             const SizedBox(height: 24),
             // Preview of the channel name.
             ValueListenableBuilder<TextEditingValue>(

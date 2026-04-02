@@ -47,7 +47,7 @@ class PodDatabase {
 
     _db = await openDatabase(
       dbPath,
-      version: 5,
+      version: 6,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -172,6 +172,28 @@ class PodDatabase {
         value TEXT NOT NULL
       )
     ''');
+
+    // System-wide role assignments (superadmin → system_admin).
+    await db.execute('''
+      CREATE TABLE system_roles (
+        did        TEXT PRIMARY KEY,
+        role       TEXT NOT NULL,
+        granted_by TEXT NOT NULL,
+        granted_at INTEGER NOT NULL
+      )
+    ''');
+
+    // Channel-level role assignments (moderators per channel).
+    await db.execute('''
+      CREATE TABLE channel_roles (
+        channel_id TEXT NOT NULL,
+        did        TEXT NOT NULL,
+        role       TEXT NOT NULL,
+        granted_by TEXT NOT NULL,
+        granted_at INTEGER NOT NULL,
+        PRIMARY KEY (channel_id, did)
+      )
+    ''');
   }
 
   static Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -213,6 +235,27 @@ class PodDatabase {
       await db.execute(
         'ALTER TABLE pod_messages ADD COLUMN edited_body TEXT',
       );
+    }
+    if (oldVersion < 6) {
+      // Add system_roles and channel_roles tables for the role hierarchy.
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS system_roles (
+          did        TEXT PRIMARY KEY,
+          role       TEXT NOT NULL,
+          granted_by TEXT NOT NULL,
+          granted_at INTEGER NOT NULL
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS channel_roles (
+          channel_id TEXT NOT NULL,
+          did        TEXT NOT NULL,
+          role       TEXT NOT NULL,
+          granted_by TEXT NOT NULL,
+          granted_at INTEGER NOT NULL,
+          PRIMARY KEY (channel_id, did)
+        )
+      ''');
     }
   }
 
@@ -640,5 +683,78 @@ class PodDatabase {
       {'key': key, 'value': value},
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+  }
+
+  // ── System roles namespace ────────────────────────────────────────────────
+
+  Future<void> upsertSystemRole({
+    required String did,
+    required String roleName,
+    required String grantedBy,
+    required DateTime grantedAt,
+  }) async {
+    await _database.insert(
+      'system_roles',
+      {
+        'did': did,
+        'role': roleName,
+        'granted_by': grantedBy,
+        'granted_at': grantedAt.millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> deleteSystemRole(String did) async {
+    await _database.delete(
+      'system_roles',
+      where: 'did = ?',
+      whereArgs: [did],
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> listSystemRoles() async {
+    return _database.query('system_roles');
+  }
+
+  // ── Channel roles namespace ───────────────────────────────────────────────
+
+  Future<void> upsertChannelRole({
+    required String channelId,
+    required String did,
+    required String roleName,
+    required String grantedBy,
+    required DateTime grantedAt,
+  }) async {
+    await _database.insert(
+      'channel_roles',
+      {
+        'channel_id': channelId,
+        'did': did,
+        'role': roleName,
+        'granted_by': grantedBy,
+        'granted_at': grantedAt.millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> deleteChannelRole(String channelId, String did) async {
+    await _database.delete(
+      'channel_roles',
+      where: 'channel_id = ? AND did = ?',
+      whereArgs: [channelId, did],
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> listChannelRoles({String? channelId}) async {
+    if (channelId != null) {
+      return _database.query(
+        'channel_roles',
+        where: 'channel_id = ?',
+        whereArgs: [channelId],
+      );
+    }
+    return _database.query('channel_roles');
   }
 }

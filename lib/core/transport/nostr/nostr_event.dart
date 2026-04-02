@@ -31,6 +31,19 @@ class NostrKind {
   /// Each node publishes one of these every 30 s so peers can discover it.
   /// Relays keep only the latest event per pubkey+d-tag, which is efficient.
   static const int presence = 30078;
+
+  /// NEXUS role assignment event (system-level: superadmin → system_admin).
+  ///
+  /// Parameterized replaceable (Kind 31000+), signed by the superadmin's key.
+  /// d-tag: "nexus-role-{did}" — one event per assigned DID.
+  /// Content: JSON { "role": "systemAdmin|user", "granted_by": "...", "granted_at": 1234567890 }
+  static const int roleAssignment = 31001;
+
+  /// NEXUS channel-role assignment event (channel-level: admin → moderator).
+  ///
+  /// d-tag: "nexus-channel-role-{channelId}-{did}"
+  /// Content: JSON { "role": "channelModerator|channelMember", "channel_id": "...", "granted_by": "..." }
+  static const int channelRoleAssignment = 31002;
 }
 
 /// A NIP-01 Nostr event.

@@ -6,7 +6,10 @@ import 'package:provider/provider.dart';
 
 import '../../core/contacts/contact_service.dart';
 import '../../core/identity/identity_service.dart';
+import '../../core/roles/permission_helper.dart';
+import '../../core/roles/role_enums.dart';
 import '../../core/transport/nexus_message.dart';
+import '../../services/role_service.dart';
 import '../../shared/theme/app_theme.dart';
 import 'channel_access_service.dart';
 import 'channel_share_sheet.dart';
@@ -306,12 +309,45 @@ class _ChannelConversationScreenState
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                widget.channel.name,
-                style: const TextStyle(
-                  color: AppColors.gold,
-                  fontWeight: FontWeight.bold,
-                ),
+              Row(
+                children: [
+                  Icon(
+                    widget.channel.channelMode == ChannelMode.announcement
+                        ? Icons.campaign
+                        : Icons.tag,
+                    color: AppColors.gold,
+                    size: 16,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    widget.channel.name,
+                    style: const TextStyle(
+                      color: AppColors.gold,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  if (widget.channel.channelMode == ChannelMode.announcement) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.gold.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                            color: AppColors.gold.withValues(alpha: 0.4)),
+                      ),
+                      child: const Text(
+                        'Ankündigung',
+                        style: TextStyle(
+                          color: AppColors.gold,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
               Text(
                 widget.channel.isPublic ? 'Öffentlicher Kanal' : 'Privater Kanal',
@@ -358,8 +394,11 @@ class _ChannelConversationScreenState
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 12, vertical: 8),
                             itemCount: _messages.length,
-                            itemBuilder: (ctx, i) =>
-                                _ChannelMessageBubble(msg: _messages[i]),
+                            itemBuilder: (ctx, i) => _ChannelMessageBubble(
+                              msg: _messages[i],
+                              channelAdminDid: widget.channel.createdBy,
+                              channelId: widget.channel.conversationId,
+                            ),
                           );
                         },
                       ),
@@ -368,6 +407,13 @@ class _ChannelConversationScreenState
             controller: _textController,
             focusNode: _focusNode,
             onSend: _send,
+            channelName: widget.channel.name,
+            canPost: PermissionHelper.canPostInChannel(
+              channelId: widget.channel.conversationId,
+              did: IdentityService.instance.currentIdentity?.did ?? '',
+              channelMode: widget.channel.channelMode,
+              channelAdminDid: widget.channel.createdBy,
+            ),
           ),
         ],
       ),
@@ -378,25 +424,54 @@ class _ChannelConversationScreenState
 // ── Message bubble ─────────────────────────────────────────────────────────────
 
 class _ChannelMessageBubble extends StatelessWidget {
-  const _ChannelMessageBubble({required this.msg});
+  const _ChannelMessageBubble({required this.msg, this.channelAdminDid, this.channelId});
   final NexusMessage msg;
+  final String? channelAdminDid;
+  final String? channelId;
 
   @override
   Widget build(BuildContext context) {
     final senderName = ContactService.instance.getDisplayName(msg.fromDid);
+    final sysRole = RoleService.instance.getSystemRole(msg.fromDid);
+    final chRole = (channelId != null)
+        ? RoleService.instance.getChannelRole(
+            channelId!,
+            msg.fromDid,
+            channelAdminDid: channelAdminDid,
+          )
+        : null;
+
+    Widget? roleBadge;
+    if (sysRole == SystemRole.superadmin) {
+      roleBadge = const _RoleBadge(label: 'Superadmin', icon: Icons.shield);
+    } else if (sysRole == SystemRole.systemAdmin) {
+      roleBadge = const _RoleBadge(label: 'Admin', icon: Icons.shield_outlined);
+    } else if (chRole == ChannelRole.channelAdmin) {
+      roleBadge = const _RoleBadge(label: 'Kanal-Admin', icon: Icons.manage_accounts, small: true);
+    } else if (chRole == ChannelRole.channelModerator) {
+      roleBadge = const _RoleBadge(label: 'Mod', icon: Icons.verified_user_outlined, small: true);
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            senderName,
-            style: const TextStyle(
-              color: AppColors.gold,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
+          Row(
+            children: [
+              Text(
+                senderName,
+                style: const TextStyle(
+                  color: AppColors.gold,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (roleBadge != null) ...[
+                const SizedBox(width: 4),
+                roleBadge,
+              ],
+            ],
           ),
           const SizedBox(height: 2),
           Container(
@@ -436,14 +511,42 @@ class _InputBar extends StatelessWidget {
     required this.controller,
     required this.focusNode,
     required this.onSend,
+    required this.channelName,
+    this.canPost = true,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
   final VoidCallback onSend;
+  final String channelName;
+  final bool canPost;
 
   @override
   Widget build(BuildContext context) {
+    if (!canPost) {
+      return SafeArea(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            border: Border(top: BorderSide(color: AppColors.surfaceVariant)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.campaign, color: Colors.grey, size: 18),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Nur Admins können hier posten',
+                  style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return SafeArea(
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -480,9 +583,7 @@ class _InputBar extends StatelessWidget {
                       : TextInputAction.newline,
                   style: const TextStyle(color: AppColors.onDark),
                   decoration: InputDecoration(
-                    hintText: 'Nachricht an ${context
-                        .findAncestorWidgetOfExactType<ChannelConversationScreen>()
-                        ?.channel.name ?? 'Kanal'}…',
+                    hintText: 'Nachricht an $channelName…',
                     hintStyle: TextStyle(color: Colors.grey[600]),
                     filled: true,
                     fillColor: AppColors.surfaceVariant,
@@ -537,6 +638,48 @@ class _EmptyChannelHint extends StatelessWidget {
           Text(
             'Schreib die erste Nachricht in diesem Kanal!',
             style: TextStyle(color: Colors.grey, fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Role badge ─────────────────────────────────────────────────────────────────
+
+class _RoleBadge extends StatelessWidget {
+  const _RoleBadge({
+    required this.label,
+    required this.icon,
+    this.small = false,
+  });
+  final String label;
+  final IconData icon;
+  final bool small;
+
+  @override
+  Widget build(BuildContext context) {
+    final fontSize = small ? 9.0 : 10.0;
+    final iconSize = small ? 10.0 : 11.0;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: AppColors.gold.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: AppColors.gold.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: AppColors.gold, size: iconSize),
+          const SizedBox(width: 2),
+          Text(
+            label,
+            style: TextStyle(
+              color: AppColors.gold,
+              fontSize: fontSize,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ],
       ),
