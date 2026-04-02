@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
@@ -103,7 +105,7 @@ class _DesktopLayout extends StatelessWidget {
 
 // ── Mobile layout ─────────────────────────────────────────────────────────────
 
-class _MobileLayout extends StatelessWidget {
+class _MobileLayout extends StatefulWidget {
   final int currentIndex;
   final void Function(int) onNavigate;
   final Widget child;
@@ -115,21 +117,63 @@ class _MobileLayout extends StatelessWidget {
   });
 
   @override
+  State<_MobileLayout> createState() => _MobileLayoutState();
+}
+
+class _MobileLayoutState extends State<_MobileLayout> {
+  DateTime? _lastBackPress;
+
+  void _handleBackPress() {
+    // Not on Home tab → navigate to Home instead of exiting.
+    if (widget.currentIndex != 0) {
+      widget.onNavigate(0);
+      return;
+    }
+    // Already on Home tab → double-tap-to-exit pattern.
+    final now = DateTime.now();
+    if (_lastBackPress == null ||
+        now.difference(_lastBackPress!) > const Duration(seconds: 2)) {
+      _lastBackPress = now;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nochmal drücken um die App zu minimieren'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    // Second press within 2 s → move app to background (not close).
+    SystemNavigator.pop();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    final scaffold = Scaffold(
       drawer: Drawer(
         backgroundColor: AppColors.deepBlue,
         child: _DrawerContent(
-          currentIndex: currentIndex,
-          onNavigate: onNavigate,
+          currentIndex: widget.currentIndex,
+          onNavigate: widget.onNavigate,
           isPermanent: false,
         ),
       ),
-      body: child,
+      body: widget.child,
       bottomNavigationBar: _BottomNav(
-        currentIndex: currentIndex,
-        onNavigate: onNavigate,
+        currentIndex: widget.currentIndex,
+        onNavigate: widget.onNavigate,
       ),
+    );
+
+    // Only intercept the system back button on Android.
+    // iOS has no hardware back button; desktop uses window controls.
+    if (!Platform.isAndroid) return scaffold;
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _handleBackPress();
+      },
+      child: scaffold,
     );
   }
 }
