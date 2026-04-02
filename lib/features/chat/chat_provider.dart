@@ -572,6 +572,22 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       processedMsg = await _cacheVoiceAudio(processedMsg);
     }
 
+    // If the sender included their enc_key (signalling E2E capability) and this
+    // DM was not already marked as inner-encrypted, mark it now so the message
+    // info sheet shows "Ende-zu-Ende verschlüsselt" consistently with the E2E
+    // banner.  The first message in a key-exchange is plaintext body but still
+    // part of an E2E session.
+    if (!processedMsg.isBroadcast &&
+        encKeyFromMsg != null &&
+        processedMsg.metadata?['encrypted'] != true) {
+      processedMsg = processedMsg.copyWith(
+        metadata: {
+          ...?processedMsg.metadata,
+          'encrypted': true,
+        },
+      );
+    }
+
     cache.add(processedMsg);
 
     // Persist first, then notify so the DB query in notifyUpdate() finds the
