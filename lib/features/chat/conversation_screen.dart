@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' show Random, min;
 
+import 'package:flutter/foundation.dart' show compute;
+
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -1980,41 +1982,90 @@ class _TextContent extends StatelessWidget {
   }
 }
 
-class _ImageContent extends StatelessWidget {
+// Top-level so it can be passed to compute().
+Uint8List _decodeBase64Isolate(String b64) => base64Decode(b64);
+
+class _ImageContent extends StatefulWidget {
   const _ImageContent({required this.message});
+
   final NexusMessage message;
 
   @override
-  Widget build(BuildContext context) {
-    // Show thumbnail if available, fall back to full image
-    final thumbB64 = message.metadata?['thumbnail'] as String?;
-    final b64 = thumbB64 ?? message.body;
+  State<_ImageContent> createState() => _ImageContentState();
+}
 
+class _ImageContentState extends State<_ImageContent> {
+  Uint8List? _previewBytes;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPreview();
+  }
+
+  Future<void> _loadPreview() async {
+    // Prefer thumbnail; fall back to full image body.
+    final thumbB64 = widget.message.metadata?['thumbnail'] as String?;
+    final b64 = thumbB64 ?? widget.message.body;
+    try {
+      // Decode in a background isolate so the UI thread is never blocked.
+      final bytes = await compute(_decodeBase64Isolate, b64);
+      if (mounted) setState(() { _previewBytes = bytes; _loading = false; });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _openFullscreen() async {
     Uint8List? bytes;
     try {
-      bytes = base64Decode(b64);
+      bytes = await compute(_decodeBase64Isolate, widget.message.body);
     } catch (_) {}
+    if (bytes == null || !mounted) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _FullscreenImageScreen(bytes: bytes!),
+      ),
+    );
+  }
 
-    final time = _formatTime(message.timestamp.toLocal());
+  /// Calculates display height from image metadata aspect ratio,
+  /// clamped between 80 and 280 logical pixels.
+  double _displayHeight(double? imgW, double? imgH, double maxW) {
+    if (imgW != null && imgH != null && imgW > 0) {
+      return (maxW * imgH / imgW).clamp(80.0, 280.0);
+    }
+    return 180.0; // fallback when metadata is missing
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final imgW = (widget.message.metadata?['width'] as num?)?.toDouble();
+    final imgH = (widget.message.metadata?['height'] as num?)?.toDouble();
+    final time = _formatTime(widget.message.timestamp.toLocal());
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        ClipRRect(
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-          child: bytes != null
-              ? GestureDetector(
-                  onTap: () => _openFullscreen(context),
-                  child: Image.memory(
-                    bytes,
-                    fit: BoxFit.cover,
-                    width: double.infinity,
-                    height: 180,
-                    errorBuilder: (context, error, stack) =>
-                        const _BrokenImage(),
-                  ),
-                )
-              : const _BrokenImage(),
+        GestureDetector(
+          onTap: _openFullscreen,
+          child: ClipRRect(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final maxW = constraints.maxWidth.isFinite
+                    ? constraints.maxWidth
+                    : 250.0;
+                final displayH = _displayHeight(imgW, imgH, maxW);
+                return SizedBox(
+                  width: maxW,
+                  height: displayH,
+                  child: _buildContent(),
+                );
+              },
+            ),
+          ),
         ),
         Padding(
           padding: const EdgeInsets.only(right: 10, bottom: 6, top: 4),
@@ -2027,17 +2078,27 @@ class _ImageContent extends StatelessWidget {
     );
   }
 
-  void _openFullscreen(BuildContext context) {
-    Uint8List? bytes;
-    try {
-      bytes = base64Decode(message.body);
-    } catch (_) {}
-    if (bytes == null) return;
-
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => _FullscreenImageScreen(bytes: bytes!),
-      ),
+  Widget _buildContent() {
+    if (_loading) {
+      return const ColoredBox(
+        color: AppColors.surfaceVariant,
+        child: Center(
+          child: SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: AppColors.gold,
+            ),
+          ),
+        ),
+      );
+    }
+    if (_previewBytes == null) return const _BrokenImage();
+    return Image.memory(
+      _previewBytes!,
+      fit: BoxFit.cover,
+      errorBuilder: (context, error, stack) => const _BrokenImage(),
     );
   }
 
