@@ -5,7 +5,10 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/contacts/contact_service.dart';
+import '../../core/identity/identity_service.dart';
 import '../../core/transport/message_transport.dart';
+import '../../core/roles/role_enums.dart';
+import '../../services/role_service.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/identicon.dart';
 import '../contacts/contacts_screen.dart';
@@ -19,7 +22,6 @@ import 'conversation_service.dart';
 import 'channel_access_service.dart';
 import 'channel_requests_screen.dart';
 import 'create_channel_screen.dart';
-import '../../core/roles/role_enums.dart';
 import 'group_channel_service.dart';
 import 'join_channel_screen.dart';
 import 'message_search_screen.dart';
@@ -180,6 +182,15 @@ class _ConversationsScreenState extends State<ConversationsScreen>
   }
 
   Future<void> _deleteConversation(Conversation conv) async {
+    await context.read<ChatProvider>().deleteConversation(conv.id);
+    await _loadConversations();
+  }
+
+  /// Leaves a group channel (member action – only removes it for this user).
+  Future<void> _leaveChannel(Conversation conv) async {
+    try {
+      await GroupChannelService.instance.leaveChannel(conv.id);
+    } catch (_) {}
     await context.read<ChatProvider>().deleteConversation(conv.id);
     await _loadConversations();
   }
@@ -403,6 +414,7 @@ class _ConversationsScreenState extends State<ConversationsScreen>
                         conversations: _channelConversations,
                         onTap: _openConversation,
                         onDelete: _deleteConversation,
+                        onLeave: _leaveChannel,
                         pinnedId: '#nexus-global',
                       ),
               ],
@@ -420,11 +432,12 @@ class _ConversationsScreenState extends State<ConversationsScreen>
 
 // ── Conversation list ──────────────────────────────────────────────────────────
 
-class _ConversationList extends StatelessWidget {
+class _ConversationList extends StatefulWidget {
   const _ConversationList({
     required this.conversations,
     required this.onTap,
     required this.onDelete,
+    this.onLeave,
     this.pinnedId,
   });
 
@@ -432,36 +445,104 @@ class _ConversationList extends StatelessWidget {
   final void Function(Conversation) onTap;
   final Future<void> Function(Conversation) onDelete;
 
+  /// Called when a member leaves a channel (only remove for this user).
+  /// When null, the delete action is always used.
+  final Future<void> Function(Conversation)? onLeave;
+
   /// ID of a conversation that should show a pin indicator (always first).
   final String? pinnedId;
 
   @override
+  State<_ConversationList> createState() => _ConversationListState();
+}
+
+class _ConversationListState extends State<_ConversationList> {
+  late List<Conversation> _items;
+
+  @override
+  void initState() {
+    super.initState();
+    _items = List.from(widget.conversations);
+  }
+
+  @override
+  void didUpdateWidget(_ConversationList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Sync with parent list whenever it changes (e.g. after DB reload).
+    if (oldWidget.conversations != widget.conversations) {
+      setState(() => _items = List.from(widget.conversations));
+    }
+  }
+
+  /// Returns true if the current user may delete [conv] (admin action).
+  bool _isAdmin(Conversation conv) {
+    if (!conv.isGroup) return true; // DMs: always allow delete
+    final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+    if (RoleService.instance.isSystemAdmin(myDid)) return true;
+    final channel = GroupChannelService.instance.findByName(conv.id);
+    return channel?.createdBy == myDid;
+  }
+
+  @override
   Widget build(BuildContext context) {
     return ListView.separated(
-      itemCount: conversations.length,
-      separatorBuilder: (context, index) =>
+      itemCount: _items.length,
+      separatorBuilder: (_, __) =>
           const Divider(height: 1, indent: 72, color: AppColors.surfaceVariant),
       itemBuilder: (context, i) {
-        final conv = conversations[i];
-        final isPinned = pinnedId != null && conv.id == pinnedId;
+        final conv = _items[i];
+        final isPinned = widget.pinnedId != null && conv.id == widget.pinnedId;
+        final isAdmin = _isAdmin(conv);
+        // Channels: admin deletes for everyone; member only leaves.
+        final isDeleteAction = !conv.isGroup || isAdmin;
+        final bgColor =
+            isDeleteAction ? Colors.redAccent : Colors.orange.shade700;
+        final bgIcon =
+            isDeleteAction ? Icons.delete_outline : Icons.exit_to_app;
+
         return Dismissible(
           key: ValueKey(conv.id),
           direction: DismissDirection.endToStart,
           background: Container(
-            color: Colors.redAccent,
+            color: bgColor,
             alignment: Alignment.centerRight,
             padding: const EdgeInsets.only(right: 20),
-            child: const Icon(Icons.delete_outline, color: Colors.white),
+            child: Icon(bgIcon, color: Colors.white),
           ),
           confirmDismiss: (_) async {
+            final String title;
+            final String content;
+            final String confirmLabel;
+            if (!conv.isGroup) {
+              // DM
+              title = 'Konversation löschen?';
+              content =
+                  'Alle Nachrichten mit ${conv.peerPseudonym} werden '
+                  'unwiderruflich gelöscht.';
+              confirmLabel = 'Löschen';
+            } else if (isAdmin) {
+              // Channel admin: delete for everyone
+              title = 'Kanal löschen';
+              content =
+                  'Möchtest du ${conv.peerPseudonym} wirklich löschen? '
+                  'Alle Nachrichten gehen verloren.';
+              confirmLabel = 'Löschen';
+            } else {
+              // Channel member: leave only
+              title = 'Kanal verlassen';
+              content =
+                  'Möchtest du ${conv.peerPseudonym} verlassen? '
+                  'Du kannst dem Kanal später wieder beitreten.';
+              confirmLabel = 'Verlassen';
+            }
+
             return await showDialog<bool>(
               context: context,
               builder: (ctx) => AlertDialog(
                 backgroundColor: AppColors.surface,
-                title: const Text('Konversation löschen?'),
+                title: Text(title),
                 content: Text(
-                  'Alle Nachrichten mit ${conv.peerPseudonym} werden '
-                  'unwiderruflich gelöscht.',
+                  content,
                   style: const TextStyle(color: AppColors.onDark),
                 ),
                 actions: [
@@ -472,22 +553,31 @@ class _ConversationList extends StatelessWidget {
                   ),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.redAccent,
+                      backgroundColor: bgColor,
                       foregroundColor: Colors.white,
                     ),
                     onPressed: () => Navigator.pop(ctx, true),
-                    child: const Text('Löschen'),
+                    child: Text(confirmLabel),
                   ),
                 ],
               ),
             ) ??
                 false;
           },
-          onDismissed: (_) => onDelete(conv),
+          onDismissed: (_) {
+            // MUST remove from local list synchronously before any async work
+            // to prevent "dismissed Dismissible still in tree" crash.
+            setState(() => _items.removeAt(i));
+            if (isDeleteAction) {
+              widget.onDelete(conv);
+            } else {
+              widget.onLeave?.call(conv);
+            }
+          },
           child: _ConversationTile(
             conv: conv,
             isPinned: isPinned,
-            onTap: () => onTap(conv),
+            onTap: () => widget.onTap(conv),
           ),
         );
       },
