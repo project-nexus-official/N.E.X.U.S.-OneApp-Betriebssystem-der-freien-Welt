@@ -47,7 +47,7 @@ class PodDatabase {
 
     _db = await openDatabase(
       dbPath,
-      version: 6,
+      version: 7,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -194,6 +194,17 @@ class PodDatabase {
         PRIMARY KEY (channel_id, did)
       )
     ''');
+
+    // NIP-25 emoji reactions on messages.
+    await db.execute('''
+      CREATE TABLE message_reactions (
+        message_id   TEXT NOT NULL,
+        emoji        TEXT NOT NULL,
+        reactor_did  TEXT NOT NULL,
+        created_at   INTEGER NOT NULL,
+        PRIMARY KEY (message_id, emoji, reactor_did)
+      )
+    ''');
   }
 
   static Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -254,6 +265,17 @@ class PodDatabase {
           granted_by TEXT NOT NULL,
           granted_at INTEGER NOT NULL,
           PRIMARY KEY (channel_id, did)
+        )
+      ''');
+    }
+    if (oldVersion < 7) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS message_reactions (
+          message_id   TEXT NOT NULL,
+          emoji        TEXT NOT NULL,
+          reactor_did  TEXT NOT NULL,
+          created_at   INTEGER NOT NULL,
+          PRIMARY KEY (message_id, emoji, reactor_did)
         )
       ''');
     }
@@ -756,5 +778,53 @@ class PodDatabase {
       );
     }
     return _database.query('channel_roles');
+  }
+
+  // ── Reactions namespace ──────────────────────────────────────────────────
+
+  Future<void> upsertReaction({
+    required String messageId,
+    required String emoji,
+    required String reactorDid,
+  }) async {
+    await _database.insert(
+      'message_reactions',
+      {
+        'message_id': messageId,
+        'emoji': emoji,
+        'reactor_did': reactorDid,
+        'created_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> deleteReaction({
+    required String messageId,
+    required String emoji,
+    required String reactorDid,
+  }) async {
+    await _database.delete(
+      'message_reactions',
+      where: 'message_id = ? AND emoji = ? AND reactor_did = ?',
+      whereArgs: [messageId, emoji, reactorDid],
+    );
+  }
+
+  /// Returns reactions grouped by emoji: { '👍': ['did:key:...', ...] }
+  Future<Map<String, List<String>>> getReactionsForMessage(String messageId) async {
+    final rows = await _database.query(
+      'message_reactions',
+      where: 'message_id = ?',
+      whereArgs: [messageId],
+      orderBy: 'created_at ASC',
+    );
+    final result = <String, List<String>>{};
+    for (final row in rows) {
+      final emoji = row['emoji'] as String;
+      final did = row['reactor_did'] as String;
+      result.putIfAbsent(emoji, () => []).add(did);
+    }
+    return result;
   }
 }

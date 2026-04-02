@@ -301,6 +301,20 @@ class NostrTransport implements MessageTransport {
     print('[NOSTR] Published Kind-5 deletion for event: $messageId');
   }
 
+  /// Publishes a NIP-25 Kind-7 reaction for [messageId].
+  void publishReaction(String messageId, String emoji) {
+    if (_keys == null) return;
+    final event = NostrEvent.create(
+      keys: _keys!,
+      kind: NostrKind.reaction,
+      content: emoji,
+      tags: [
+        ['e', messageId],
+      ],
+    );
+    _relayManager.publish(event);
+  }
+
   // ── Sending ───────────────────────────────────────────────────────────────
 
   @override

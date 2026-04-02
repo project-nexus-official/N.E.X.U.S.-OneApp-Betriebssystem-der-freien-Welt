@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/roles/role_enums.dart';
 import '../../shared/theme/app_theme.dart';
 import 'channel_access_service.dart';
 import 'channel_conversation_screen.dart';
@@ -205,12 +206,18 @@ class _JoinChannelScreenState extends State<JoinChannelScreen> {
                   final joined =
                       GroupChannelService.instance.isJoined(ch.name);
                   final isPrivate = !ch.isPublic;
+                  final isAnnouncement =
+                      ch.channelMode == ChannelMode.announcement;
                   return ListTile(
                     onTap: joined ? () => _openChannel(ch) : null,
                     leading: CircleAvatar(
                       backgroundColor: AppColors.surfaceVariant,
                       child: Icon(
-                        isPrivate ? Icons.lock : Icons.tag,
+                        isPrivate
+                            ? Icons.lock
+                            : isAnnouncement
+                                ? Icons.campaign
+                                : Icons.tag,
                         color: AppColors.gold,
                         size: 18,
                       ),
@@ -239,6 +246,24 @@ class _JoinChannelScreenState extends State<JoinChannelScreen> {
                               'Privat',
                               style: TextStyle(
                                   color: Colors.grey, fontSize: 10),
+                            ),
+                          ),
+                        if (isAnnouncement)
+                          Container(
+                            margin: const EdgeInsets.only(left: 6),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: AppColors.gold.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(
+                                  color:
+                                      AppColors.gold.withValues(alpha: 0.4)),
+                            ),
+                            child: const Text(
+                              'Ankündigung',
+                              style: TextStyle(
+                                  color: AppColors.gold, fontSize: 10),
                             ),
                           ),
                       ],

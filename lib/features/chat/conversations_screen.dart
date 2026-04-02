@@ -19,6 +19,7 @@ import 'conversation_service.dart';
 import 'channel_access_service.dart';
 import 'channel_requests_screen.dart';
 import 'create_channel_screen.dart';
+import '../../core/roles/role_enums.dart';
 import 'group_channel_service.dart';
 import 'join_channel_screen.dart';
 import 'message_search_screen.dart';
@@ -645,8 +646,12 @@ class _Avatar extends StatelessWidget {
     }
     if (conv.isGroup) {
       final channel = GroupChannelService.instance.findByName(conv.id);
+      final isAnnouncement = channel?.channelMode == ChannelMode.announcement;
       final isPrivate = channel != null && !channel.isPublic;
-      return _CircleIcon(icon: isPrivate ? Icons.lock : Icons.tag);
+      if (isAnnouncement) {
+        return _CircleIcon(icon: isPrivate ? Icons.lock : Icons.campaign);
+      }
+      return _CircleIcon(icon: isPrivate ? Icons.lock : Icons.group);
     }
     if (conv.peerProfileImage != null) {
       // TODO: load from local file path when profile image caching is added.

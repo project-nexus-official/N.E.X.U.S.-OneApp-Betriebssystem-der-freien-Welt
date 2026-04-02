@@ -1285,6 +1285,140 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
+  /// Sends an image to a named group channel.
+  Future<void> sendImageToChannel(String channelName, Uint8List imageBytes) async {
+    final myDid = IdentityService.instance.currentIdentity?.did ?? 'unknown';
+    final name = channelName.startsWith('#') ? channelName : '#$channelName';
+
+    final (base64Full, base64Thumb, width, height) =
+        await compute(_processImage, imageBytes);
+
+    final msg = NexusMessage.create(
+      fromDid: myDid,
+      toDid: NexusMessage.broadcastDid,
+      type: NexusMessageType.image,
+      body: base64Full,
+      channel: name,
+      metadata: {
+        'width': width,
+        'height': height,
+        'thumbnail': base64Thumb,
+      },
+    );
+
+    await _manager.sendMessage(msg);
+
+    _conversationCache.putIfAbsent(name, () => []);
+    _conversationCache[name]!.add(msg);
+    await _persistMessage(name, msg);
+    ConversationService.instance.notifyUpdate();
+    notifyListeners();
+  }
+
+  /// Sends a voice message to a named group channel.
+  Future<void> sendVoiceToChannel(
+    String channelName,
+    String filePath,
+    int durationMs, {
+    NexusMessage? replyTo,
+    String? replyToSenderName,
+  }) async {
+    final myDid = IdentityService.instance.currentIdentity?.did ?? 'unknown';
+    final name = channelName.startsWith('#') ? channelName : '#$channelName';
+
+    final file = File(filePath);
+    if (!file.existsSync()) return;
+    final Uint8List audioBytes = await file.readAsBytes();
+    final audioBase64 = base64Encode(audioBytes);
+
+    Map<String, dynamic>? replyMeta;
+    if (replyTo != null) {
+      final isImg = replyTo.type == NexusMessageType.image;
+      final isVoice = replyTo.type == NexusMessageType.voice;
+      replyMeta = {
+        'reply_to_id': replyTo.id,
+        'reply_to_sender': replyToSenderName ?? replyTo.fromDid,
+        'reply_to_preview': isImg
+            ? 'Foto'
+            : isVoice
+                ? 'Sprachnachricht'
+                : replyTo.body.substring(0, replyTo.body.length.clamp(0, 100)),
+        if (isImg) 'reply_to_image': true,
+        if (isVoice) 'reply_to_voice': true,
+      };
+    }
+
+    final msg = NexusMessage.create(
+      fromDid: myDid,
+      toDid: NexusMessage.broadcastDid,
+      type: NexusMessageType.voice,
+      body: audioBase64,
+      channel: name,
+      metadata: {
+        'duration_ms': durationMs,
+        'audio_local_path': filePath,
+        ...?replyMeta,
+      },
+    );
+
+    await _manager.sendMessage(msg);
+
+    _conversationCache.putIfAbsent(name, () => []);
+    _conversationCache[name]!.add(msg);
+    await _persistMessage(name, msg);
+    ConversationService.instance.notifyUpdate();
+    notifyListeners();
+  }
+
+  /// Adds an emoji reaction to a channel message.
+  Future<void> addChannelReaction(String messageId, String emoji) async {
+    final myDid = IdentityService.instance.currentIdentity?.did ?? 'unknown';
+    await PodDatabase.instance.upsertReaction(
+      messageId: messageId,
+      emoji: emoji,
+      reactorDid: myDid,
+    );
+    _nostrTransport?.publishReaction(messageId, emoji);
+    notifyListeners();
+  }
+
+  /// Removes an emoji reaction from a channel message.
+  Future<void> removeChannelReaction(String messageId, String emoji) async {
+    final myDid = IdentityService.instance.currentIdentity?.did ?? 'unknown';
+    await PodDatabase.instance.deleteReaction(
+      messageId: messageId,
+      emoji: emoji,
+      reactorDid: myDid,
+    );
+    notifyListeners();
+  }
+
+  /// Loads reactions for a message.
+  Future<Map<String, List<String>>> getMessageReactions(String messageId) =>
+      PodDatabase.instance.getReactionsForMessage(messageId);
+
+  /// Sends a moderation report as a DM to the channel admin (or system admin fallback).
+  Future<void> reportChannelMessage({
+    required NexusMessage msg,
+    required String channelName,
+    required String channelAdminDid,
+    required String reason,
+    String? comment,
+  }) async {
+    final myDid = IdentityService.instance.currentIdentity?.did ?? 'unknown';
+    final reportData = {
+      'type': 'channel_report',
+      'channel': channelName,
+      'message_id': msg.id,
+      'sender_did': msg.fromDid,
+      'reason': reason,
+      if (comment != null && comment.isNotEmpty) 'comment': comment,
+      'reporter_did': myDid,
+      'ts': DateTime.now().millisecondsSinceEpoch,
+    };
+    await sendSystemDm(channelAdminDid, reportData);
+  }
+
   /// Deletes all messages in [conversationId] from cache and POD.
   Future<void> deleteConversation(String conversationId) async {
     _conversationCache.remove(conversationId);
