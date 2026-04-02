@@ -4,6 +4,10 @@ class AppColors {
   static const deepBlue = Color(0xFF0A1628);
   static const gold = Color(0xFFD4AF37);
   static const goldLight = Color(0xFFE8C84A);
+  /// Dark amber-gold used as the background for sent message bubbles.
+  /// Dark enough for white text and yellow emojis to be clearly visible,
+  /// while still reading as "gold-branded" (warm dark ochre).
+  static const sentBubble = Color(0xFF4A3C00);
   static const surface = Color(0xFF121F38);
   static const surfaceVariant = Color(0xFF1A2D4A);
   static const onDark = Color(0xFFE8EAF0);

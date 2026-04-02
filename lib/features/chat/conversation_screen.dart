@@ -1798,7 +1798,7 @@ class _MessageBubble extends StatelessWidget {
             maxWidth: MediaQuery.of(context).size.width * 0.75,
           ),
           decoration: BoxDecoration(
-            color: isMe ? AppColors.gold : AppColors.surfaceVariant,
+            color: isMe ? AppColors.sentBubble : AppColors.surfaceVariant,
             borderRadius: BorderRadius.only(
               topLeft: const Radius.circular(16),
               topRight: const Radius.circular(16),
@@ -1910,11 +1910,11 @@ class _TextContent extends StatelessWidget {
     final isEdited = message.metadata?['local_edited_body'] != null;
     final isFav = message.metadata?['local_favorite'] == true;
     final textStyle = TextStyle(
-      color: isMe ? AppColors.deepBlue : AppColors.onDark,
+      color: AppColors.onDark,
       fontSize: 15,
     );
     final metaColor =
-        isMe ? AppColors.deepBlue.withValues(alpha: 0.6) : Colors.grey;
+        isMe ? AppColors.onDark.withValues(alpha: 0.55) : Colors.grey;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -2157,10 +2157,10 @@ class _VoiceContent extends StatelessWidget {
             ? (position.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0)
             : 0.0;
 
-        final fgColor = isMe ? AppColors.deepBlue : AppColors.onDark;
-        final accentColor = isMe ? AppColors.deepBlue : AppColors.gold;
+        const fgColor = AppColors.onDark;
+        const accentColor = AppColors.gold;
         final muteColor = isMe
-            ? AppColors.deepBlue.withValues(alpha: 0.35)
+            ? AppColors.onDark.withValues(alpha: 0.4)
             : Colors.grey.shade600;
 
         return Padding(
