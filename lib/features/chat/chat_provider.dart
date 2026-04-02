@@ -621,7 +621,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
         if (_appInForeground) {
           // In-app banner
           InAppNotificationController.instance.show(InAppBannerData(
-            senderName: processedMsg.isBroadcast ? '#mesh' : senderName,
+            senderName: processedMsg.isBroadcast ? '#hotnews' : senderName,
             preview: preview,
             conversationId: convId,
             isBroadcast: processedMsg.isBroadcast,

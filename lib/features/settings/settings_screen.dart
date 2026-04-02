@@ -561,8 +561,8 @@ class _NotificationSectionState extends State<_NotificationSection> {
               : null,
         ),
         SwitchListTile(
-          secondary: const Icon(Icons.hub_outlined, color: AppColors.gold),
-          title: const Text('#mesh Broadcasts'),
+          secondary: const Icon(Icons.campaign_outlined, color: AppColors.gold),
+          title: const Text('#hotnews Ankündigungen'),
           value: _svc.broadcastEnabled,
           activeColor: AppColors.gold,
           onChanged: _svc.enabled

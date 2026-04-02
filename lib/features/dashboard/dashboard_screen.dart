@@ -292,7 +292,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
     return _FeatureCard(
       key: const Key('messages_card'),
-      icon: Icons.chat_bubble_outline,
+      icon: Icons.campaign,
       title: 'Nachrichten',
       subtitle: unread > 0 ? '$unread ungelesen' : 'Keine neuen Nachrichten',
       preview: latest != null

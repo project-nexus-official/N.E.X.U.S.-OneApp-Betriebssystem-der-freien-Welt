@@ -642,7 +642,7 @@ class _Avatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (conv.isBroadcast) {
-      return _CircleIcon(icon: Icons.hub);
+      return _CircleIcon(icon: Icons.campaign);
     }
     if (conv.isGroup) {
       final channel = GroupChannelService.instance.findByName(conv.id);

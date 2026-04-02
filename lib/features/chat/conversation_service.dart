@@ -90,7 +90,7 @@ class ConversationService {
           conversations.add(Conversation(
             id: convId,
             peerDid: NexusMessage.broadcastDid,
-            peerPseudonym: '#mesh',
+            peerPseudonym: '#hotnews',
             lastMessage: lastBody,
             lastMessageTime: lastTime,
             unreadCount: unread,
@@ -159,8 +159,8 @@ class ConversationService {
         Conversation(
           id: NexusMessage.broadcastDid,
           peerDid: NexusMessage.broadcastDid,
-          peerPseudonym: '#mesh',
-          lastMessage: 'Broadcast-Kanal für alle in Reichweite',
+          peerPseudonym: '#hotnews',
+          lastMessage: 'Offizielle Ankündigungen und Updates der Menschheitsfamilie',
           lastMessageTime: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
           isPinned: true,
         ),

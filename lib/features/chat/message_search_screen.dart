@@ -105,7 +105,7 @@ class _MessageSearchScreenState extends State<MessageSearchScreen> {
     if (convId == NexusMessage.broadcastDid) {
       screen = ConversationScreen(
         peerDid: NexusMessage.broadcastDid,
-        peerPseudonym: '#mesh',
+        peerPseudonym: '#hotnews',
         isBroadcast: true,
         scrollToMessageId: msgId,
       );
@@ -144,7 +144,7 @@ class _MessageSearchScreenState extends State<MessageSearchScreen> {
 
   String _convName(Map<String, dynamic> result) {
     final convId = result['conversation_id'] as String? ?? '';
-    if (convId == NexusMessage.broadcastDid) return '#mesh';
+    if (convId == NexusMessage.broadcastDid) return '#hotnews';
     final myDid = IdentityService.instance.currentIdentity?.did ?? '';
     final peerDid = _peerDidFromConvId(convId, myDid) ?? convId;
     final contact = ContactService.instance.findByDid(peerDid);

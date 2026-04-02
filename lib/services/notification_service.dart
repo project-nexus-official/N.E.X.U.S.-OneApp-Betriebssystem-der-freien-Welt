@@ -107,11 +107,11 @@ class NotificationService {
 
     final body = s.showPreview
         ? '$senderName: ${_truncate(messagePreview, 80)}'
-        : 'Neue #mesh Nachricht';
+        : 'Neue #hotnews Ankündigung';
 
     await _show(
       id: 1,
-      title: '#mesh',
+      title: '#hotnews',
       body: body,
       payload: 'broadcast',
       silent: s.silentMode,

@@ -13,12 +13,13 @@ import 'package:provider/provider.dart';
 
 import '../../core/contacts/contact_service.dart';
 import '../../core/crypto/encryption_keys.dart';
+import '../../core/identity/identity_service.dart';
 import '../../core/storage/retention_service.dart';
 import '../../core/transport/message_transport.dart';
 import '../../core/transport/nexus_message.dart';
 import '../../core/transport/nexus_peer.dart';
-import '../../core/identity/identity_service.dart';
 import '../../services/notification_service.dart';
+import '../../services/role_service.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/highlighted_text.dart';
 import '../contacts/contact_detail_screen.dart';
@@ -99,6 +100,13 @@ class _ConversationScreenState extends State<ConversationScreen> {
     final myDid = IdentityService.instance.currentIdentity?.did ?? '';
     final sorted = [widget.peerDid, myDid]..sort();
     return '${sorted[0]}:${sorted[1]}';
+  }
+
+  /// #hotnews is an announcement channel — only system-admins/superadmins may post.
+  bool get _canPostInHotnews {
+    if (!widget.isBroadcast) return true;
+    final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+    return RoleService.instance.isSystemAdmin(myDid);
   }
 
   bool get _isBleBleOnly {
@@ -1319,7 +1327,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                               Flexible(
                                 child: Text(
                                   widget.isBroadcast
-                                      ? '#mesh'
+                                      ? '#hotnews'
                                       : ContactService.instance
                                           .getDisplayName(widget.peerDid),
                                   overflow: TextOverflow.ellipsis,
@@ -1348,10 +1356,18 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                   fontSize: 11, color: AppColors.gold),
                             ),
                           if (widget.isBroadcast)
-                            const Text(
-                              'Broadcast-Kanal',
-                              style:
-                                  TextStyle(fontSize: 11, color: AppColors.gold),
+                            const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.campaign,
+                                    size: 12, color: AppColors.gold),
+                                SizedBox(width: 3),
+                                Text(
+                                  'Ankündigungskanal',
+                                  style: TextStyle(
+                                      fontSize: 11, color: AppColors.gold),
+                                ),
+                              ],
                             ),
                         ],
                       ),
@@ -1446,6 +1462,25 @@ class _ConversationScreenState extends State<ConversationScreen> {
             ),
             body: Column(
               children: [
+                // #hotnews announcement banner
+                if (widget.isBroadcast)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 5),
+                    color: AppColors.surfaceVariant,
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.campaign, size: 13, color: AppColors.gold),
+                        SizedBox(width: 6),
+                        Text(
+                          'Offizielle Ankündigungen der Menschheitsfamilie',
+                          style: TextStyle(
+                              fontSize: 11, color: AppColors.gold),
+                        ),
+                      ],
+                    ),
+                  ),
                 // E2E encryption banner
                 if (!widget.isBroadcast) _E2EBanner(peerDid: widget.peerDid),
                 // Key change warning
@@ -1508,19 +1543,44 @@ class _ConversationScreenState extends State<ConversationScreen> {
                     senderName: _replyToSenderName ?? '',
                     onCancel: _cancelReply,
                   ),
-                // Input bar
-                _InputBar(
-                  ctrl: _textCtrl,
-                  focus: _textFocus,
-                  onSend: _sendText,
-                  onEmojiToggle: _toggleEmojiPicker,
-                  onAttach: _pickAndSendImage,
-                  showEmojiIcon: !_showEmojiPicker,
-                  attachEnabled: !_isBleBleOnly && _editingMessage == null,
-                  onSendVoice: _sendVoice,
-                  voiceEnabled: !_isBleBleOnly && _editingMessage == null,
-                  isEditing: _editingMessage != null,
-                ),
+                // Input bar — locked for non-admins in #hotnews
+                if (!_canPostInHotnews)
+                  SafeArea(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        border: Border(
+                            top: BorderSide(color: AppColors.surfaceVariant)),
+                      ),
+                      child: Row(children: [
+                        const Icon(Icons.campaign,
+                            color: Colors.grey, size: 18),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Nur Admins können hier posten',
+                            style: TextStyle(
+                                color: Colors.grey[600], fontSize: 13),
+                          ),
+                        ),
+                      ]),
+                    ),
+                  )
+                else
+                  _InputBar(
+                    ctrl: _textCtrl,
+                    focus: _textFocus,
+                    onSend: _sendText,
+                    onEmojiToggle: _toggleEmojiPicker,
+                    onAttach: _pickAndSendImage,
+                    showEmojiIcon: !_showEmojiPicker,
+                    attachEnabled: !_isBleBleOnly && _editingMessage == null,
+                    onSendVoice: _sendVoice,
+                    voiceEnabled: !_isBleBleOnly && _editingMessage == null,
+                    isEditing: _editingMessage != null,
+                  ),
                 // Emoji picker panel
                 if (_showEmojiPicker)
                   SizedBox(
