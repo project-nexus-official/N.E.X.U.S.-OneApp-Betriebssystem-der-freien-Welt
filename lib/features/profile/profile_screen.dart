@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nexus_oneapp/core/contacts/contact_service.dart';
 import 'package:nexus_oneapp/core/crypto/encryption_keys.dart';
@@ -202,13 +204,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _exportData() async {
+    _snack('Exportiere Daten…');
     try {
       final blob = await PodDatabase.instance.exportEncrypted();
-      await Clipboard.setData(ClipboardData(text: blob));
-      _snack('Export in Zwischenablage kopiert');
+
+      // Write to a file in the app documents directory – avoids the
+      // ~1 MB Android clipboard limit (TransactionTooLargeException).
+      final dir = await getApplicationDocumentsDirectory();
+      final now = DateTime.now();
+      final dateStr =
+          '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
+      final file = File('${dir.path}/nexus_backup_$dateStr.nexus');
+      await file.writeAsString(blob);
+
       await _markExported();
+
+      if (!mounted) return;
+
+      // Open the native share sheet so the user can send the file
+      // via Telegram, email, cloud storage, etc.
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: 'application/octet-stream')],
+        subject: 'NEXUS OneApp Backup $dateStr',
+      );
     } catch (e) {
-      _snack('Export fehlgeschlagen: $e');
+      if (mounted) _snack('Export fehlgeschlagen: $e');
     }
   }
 
