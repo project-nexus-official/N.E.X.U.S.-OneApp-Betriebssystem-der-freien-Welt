@@ -12,6 +12,7 @@ import 'package:nexus_oneapp/core/identity/profile_service.dart';
 import 'package:nexus_oneapp/features/chat/conversation_service.dart';
 import 'package:nexus_oneapp/features/dashboard/node_counter_service.dart';
 import 'package:nexus_oneapp/services/role_service.dart';
+import 'package:nexus_oneapp/features/dorfplatz/feed_service.dart';
 import 'package:nexus_oneapp/core/router.dart';
 import 'package:nexus_oneapp/core/storage/pod_database.dart';
 import 'package:nexus_oneapp/core/storage/retention_service.dart';
@@ -180,6 +181,8 @@ Future<void> initServicesAfterIdentity() async {
     NodeCounterService.instance.init();
     // Load role hierarchy (superadmin DID + system admins from DB).
     await RoleService.instance.init();
+    // Load Dorfplatz feed (posts + mutes from DB).
+    await FeedService.instance.load();
     // Initialize X25519 encryption keys.
     try {
       final ed25519Bytes =

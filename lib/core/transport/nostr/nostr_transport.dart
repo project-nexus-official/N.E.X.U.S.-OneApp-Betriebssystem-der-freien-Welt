@@ -86,6 +86,14 @@ class NostrTransport implements MessageTransport {
   Stream<Map<String, dynamic>> get onChannelAnnounced =>
       _channelAnnouncedController.stream;
 
+  final _feedPostController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
+  /// Emits a raw FeedPost data map when a Kind-1/nexus-dorfplatz event arrives.
+  Stream<Map<String, dynamic>> get onFeedPost => _feedPostController.stream;
+
+  String? _feedSubId;
+
   StreamSubscription<NostrEvent>? _eventSub;
   Timer? _presenceTimer;
   Timer? _metadataRefreshTimer;
@@ -221,6 +229,7 @@ class NostrTransport implements MessageTransport {
     if (_channelDiscoverySubId != null) {
       _relayManager.closeSubscription(_channelDiscoverySubId!);
     }
+    if (_feedSubId != null) _relayManager.closeSubscription(_feedSubId!);
     for (final subId in _channelSubIds.values) {
       _relayManager.closeSubscription(subId);
     }
@@ -344,6 +353,24 @@ class NostrTransport implements MessageTransport {
       ],
     );
     _relayManager.publish(event);
+  }
+
+  /// Publishes a Dorfplatz feed event (Kind-1 post, Kind-6 repost, Kind-7
+  /// reaction, Kind-5 deletion) and returns the assigned Nostr event ID.
+  ///
+  /// Returns null if keys are not yet initialised.
+  String? publishFeedEvent(
+      int kind, String content, List<List<String>> tags) {
+    if (_keys == null) return null;
+    final event = NostrEvent.create(
+      keys: _keys!,
+      kind: kind,
+      content: content,
+      tags: tags,
+    );
+    _relayManager.publish(event);
+    print('[NOSTR] Feed Kind-$kind published: ${event.id.substring(0, 8)}…');
+    return event.id;
   }
 
   // ── Sending ───────────────────────────────────────────────────────────────
@@ -712,6 +739,15 @@ class NostrTransport implements MessageTransport {
       '#t': ['nexus-channel'],
     });
     print('[NOSTR] Channel discovery sub: $_channelDiscoverySubId');
+
+    // Dorfplatz feed posts (Kind-1 with nexus-dorfplatz tag), last 7 days.
+    if (_feedSubId != null) _relayManager.closeSubscription(_feedSubId!);
+    _feedSubId = _relayManager.subscribe({
+      'kinds': [NostrKind.textNote, NostrKind.repost],
+      '#t': ['nexus-dorfplatz'],
+      'since': nowSeconds - 7 * 86400,
+    });
+    print('[NOSTR] Feed sub: $_feedSubId');
   }
 
   void _onRelayEvent(NostrEvent event) {
@@ -723,13 +759,34 @@ class NostrTransport implements MessageTransport {
       case NostrKind.encryptedDm:
         _handleDm(event);
       case NostrKind.textNote:
-        _handleBroadcast(event);
+        if (event.tagValues('t').contains('nexus-dorfplatz')) {
+          _handleFeedPost(event);
+        } else {
+          _handleBroadcast(event);
+        }
+      case NostrKind.repost:
+        _handleFeedPost(event);
       case NostrKind.channelCreate:
         _handleChannelCreateEvent(event);
       case NostrKind.channelMessage:
         _handleChannelMessageEvent(event);
       case NostrKind.presence:
         _handlePresenceEvent(event);
+    }
+  }
+
+  void _handleFeedPost(NostrEvent event) {
+    if (_keys == null) return;
+    if (event.pubkey == _keys!.publicKeyHex) return; // own event, already stored
+    try {
+      final data = jsonDecode(event.content) as Map<String, dynamic>;
+      _feedPostController.add({
+        ...data,
+        'nostrEventId': event.id,
+        '_nostrPubkey': event.pubkey,
+      });
+    } catch (e) {
+      print('[NOSTR] Feed post parse FAILED: $e');
     }
   }
 

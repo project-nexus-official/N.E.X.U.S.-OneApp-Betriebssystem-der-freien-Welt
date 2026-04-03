@@ -22,6 +22,7 @@ import '../chat/conversation.dart';
 import '../chat/conversation_service.dart';
 import '../chat/group_channel_service.dart';
 import '../contacts/contacts_screen.dart';
+import '../dorfplatz/feed_service.dart';
 import '../governance/governance_screen.dart';
 import 'node_counter_service.dart';
 
@@ -79,6 +80,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   StreamSubscription<UpdateInfo?>? _updateSub;
 
   StreamSubscription<List<ContactRequest>>? _requestSub;
+  StreamSubscription<void>? _feedSub;
 
   // Dismissed for this session only – reappears on next cold start.
   bool _principlesReminderDismissed = false;
@@ -127,6 +129,10 @@ class _DashboardScreenState extends State<DashboardScreen>
     _requestSub = ContactRequestService.instance.stream.listen((_) {
       if (mounted) setState(() {});
     });
+
+    _feedSub = FeedService.instance.stream.listen((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   Future<void> _loadConversations() async {
@@ -141,6 +147,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     _nodeCountSub?.cancel();
     _updateSub?.cancel();
     _requestSub?.cancel();
+    _feedSub?.cancel();
     super.dispose();
   }
 
@@ -380,12 +387,22 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildDorfplatzCard(BuildContext context) {
+    final postCount = FeedService.instance.totalPostCount;
+    final subtitle = postCount == 0
+        ? 'Noch keine Beiträge'
+        : '$postCount ${postCount == 1 ? 'Beitrag' : 'Beiträge'} im Feed';
+    final preview = FeedService.instance.allPosts.isNotEmpty
+        ? FeedService.instance.allPosts.first.content.isNotEmpty
+            ? FeedService.instance.allPosts.first.content
+            : null
+        : null;
     return _FeatureCard(
       key: const Key('dorfplatz_card'),
       icon: Icons.park,
       title: 'Dorfplatz',
-      subtitle: 'Bald verfügbar',
-      preview: 'Gemeinsam, ohne Algorithmus, ohne Konzern.',
+      subtitle: subtitle,
+      preview: preview ?? 'Gemeinsam, ohne Algorithmus, ohne Konzern.',
+      badgeCount: postCount > 0 ? postCount : null,
       onTap: () => context.go('/dorfplatz'),
     );
   }

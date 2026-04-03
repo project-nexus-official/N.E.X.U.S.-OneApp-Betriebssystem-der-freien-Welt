@@ -20,6 +20,9 @@ class NostrKind {
   /// NIP-09 deletion request (Kind 5).
   static const int deletion = 5;
 
+  /// NIP-18 repost (Kind 6).
+  static const int repost = 6;
+
   /// NIP-25 reaction (Kind 7).
   static const int reaction = 7;
 

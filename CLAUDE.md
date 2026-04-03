@@ -329,6 +329,20 @@ Phase 2: Care-System + Sphären-Plugins
   - GovernanceScreen AppBar: "Agora — Politik & Demokratie"
   - Desktop-Sidebar: Dorfplatz statt Governance; Care aus Sphären entfernt (in Asklepios integriert)
 
+- **Dorfplatz – Sozialer Feed (komplett)**:
+  - **Datenmodell** (`lib/features/dorfplatz/feed_post.dart`): `FeedVisibility` (contacts/cell/public), `PollOption`, `Poll`, `LinkPreview`, `FeedPost`, `FeedComment`, `generateFeedId()` (UUID v4)
+  - **DB v9-Migration**: Neue Tabellen `feed_posts` (id, author_did, visibility, created_at, nostr_event_id, enc, is_deleted), `feed_comments` (id, post_id, author_did, created_at, enc, is_deleted), `feed_mutes` (author_did, muted_at)
+  - **PodDatabase v9**: `insertFeedPost`, `updateFeedPost`, `softDeleteFeedPost`, `listFeedPosts` (limit/offset/authorDid), `countFeedPosts`, `insertFeedComment`, `softDeleteFeedComment`, `listFeedComments`, `muteAuthor`, `unmuteAuthor`, `getMutedAuthors`
+  - **FeedService** (`lib/features/dorfplatz/feed_service.dart`): Singleton; `load()`, `createPost()`, `getPostsForTab()`, `loadMore()`, `getPostsByAuthor()`, `handleIncomingPost()`, `deletePost()`, `editPost()` (24h-Fenster); `getComments()`, `addComment()`, `deleteComment()`; `getReactions()`/`toggleReaction()` (reuse message_reactions table); `voteInPoll()`; `muteAuthor()`/`unmuteAuthor()`; `stream` (Broadcast); `totalPostCount`
+  - **Nostr-Integration**: `publishFeedEvent()` in NostrTransport; Kind-1 (Text-Posts), Kind-6 (NIP-18 Reposts), Kind-7 (NIP-25 Reactions), Kind-5 (NIP-09 Deletion); Feed-Subscription auf `#nexus-dorfplatz` Tag; `onFeedPost` Stream; ChatProvider verdrahtet `FeedService` mit Publisher + Incoming-Handler
+  - **FeedPostCard** (`lib/features/dorfplatz/feed_post_card.dart`): `_Header` (Identicon, Pseudonym, Zeitstempel, Sichtbarkeits-Icon, Drei-Punkte-Menü), `_RepostIndicator`, `_ContentText` (expandierbar, max 5 Zeilen), `_ImageGrid` (1/2/4+ Bilder), `_PollWidget` (Abstimmung + Ergebnis-Balken), `_LinkPreviewCard`, `_Footer` (Emoji-Picker, Reaktions-Badges, Kommentar-Zähler)
+  - **DorfplatzScreen** (`lib/features/dorfplatz/dorfplatz_screen.dart`): 3-Tab-Layout (Kontakte | Meine Zelle | Entdecken), FAB → CreatePostScreen, Pull-to-Refresh, Pagination (20 Posts), Post-Menü (Bearbeiten/Löschen/Repost/Stumm-schalten)
+  - **CreatePostScreen** (`lib/features/dorfplatz/create_post_screen.dart`): Autor-Zeile, Sichtbarkeits-Selector (BottomSheet), Textfeld (autofocus), Bild-Picker (max 4, JPEG-Komprimierung 1024px/75%), Umfrage-Editor (2–6 Optionen, Mehrfachauswahl, Ablaufdatum), Repost-Formular; "Posten"-Button (gold, disabled wenn leer)
+  - **PostDetailScreen** (`lib/features/dorfplatz/post_detail_screen.dart`): Vollständiger Post + verschachtelter Kommentarbaum (max 3 Ebenen, goldene Einrücklinie), Antwort-Banner, fixiertes Kommentar-Eingabefeld, eigene Kommentare löschbar
+  - **Dashboard**: Dorfplatz-Karte zeigt Post-Zähler und Preview des neuesten Beitrags; lauscht auf `FeedService.stream`
+  - **Init**: `FeedService.instance.load()` in `initServicesAfterIdentity()` in `main.dart`
+  - Tests: 31 Tests in `test/features/dorfplatz/feed_service_test.dart`
+
 ## Aktueller Fokus
 >>> PHASE 1a: Fundament + Identität (in Fertigstellung) <<<
 

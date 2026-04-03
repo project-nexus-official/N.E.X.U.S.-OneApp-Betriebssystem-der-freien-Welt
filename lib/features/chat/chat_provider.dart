@@ -35,6 +35,7 @@ import 'channel_access_service.dart';
 import 'conversation_service.dart';
 import 'group_channel.dart';
 import 'group_channel_service.dart';
+import '../dorfplatz/feed_service.dart';
 
 /// ViewModel for the chat feature.
 ///
@@ -172,6 +173,12 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
         localPseudonym: identity.pseudonym,
       );
       _manager.registerTransport(_nostrTransport!);
+
+      // Wire FeedService to the Nostr transport for publishing and receiving.
+      FeedService.instance.setNostrPublisher((kind, content, tags) =>
+          _nostrTransport?.publishFeedEvent(kind, content, tags));
+      _nostrTransport!.onFeedPost.listen(
+          (data) => FeedService.instance.handleIncomingPost(data));
 
       // Subscribe to events before starting
       _msgSub = _manager.onMessageReceived.listen((msg) => _onMessageReceived(msg));

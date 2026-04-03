@@ -47,7 +47,7 @@ class PodDatabase {
 
     _db = await openDatabase(
       dbPath,
-      version: 8,
+      version: 9,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -217,6 +217,39 @@ class PodDatabase {
         enc          TEXT NOT NULL
       )
     ''');
+
+    // Dorfplatz social feed posts.
+    await db.execute('''
+      CREATE TABLE feed_posts (
+        id             TEXT PRIMARY KEY,
+        author_did     TEXT NOT NULL,
+        visibility     TEXT NOT NULL DEFAULT 'contacts',
+        created_at     INTEGER NOT NULL,
+        nostr_event_id TEXT,
+        enc            TEXT NOT NULL,
+        is_deleted     INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+
+    // Dorfplatz comments on feed posts.
+    await db.execute('''
+      CREATE TABLE feed_comments (
+        id                TEXT PRIMARY KEY,
+        post_id           TEXT NOT NULL,
+        author_did        TEXT NOT NULL,
+        created_at        INTEGER NOT NULL,
+        enc               TEXT NOT NULL,
+        is_deleted        INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+
+    // Authors muted by the local user (hidden from feed).
+    await db.execute('''
+      CREATE TABLE feed_mutes (
+        author_did TEXT PRIMARY KEY,
+        muted_at   INTEGER NOT NULL
+      )
+    ''');
   }
 
   static Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -300,6 +333,35 @@ class PodDatabase {
           status       TEXT NOT NULL DEFAULT 'pending',
           received_at  INTEGER NOT NULL,
           enc          TEXT NOT NULL
+        )
+      ''');
+    }
+    if (oldVersion < 9) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS feed_posts (
+          id             TEXT PRIMARY KEY,
+          author_did     TEXT NOT NULL,
+          visibility     TEXT NOT NULL DEFAULT 'contacts',
+          created_at     INTEGER NOT NULL,
+          nostr_event_id TEXT,
+          enc            TEXT NOT NULL,
+          is_deleted     INTEGER NOT NULL DEFAULT 0
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS feed_comments (
+          id                TEXT PRIMARY KEY,
+          post_id           TEXT NOT NULL,
+          author_did        TEXT NOT NULL,
+          created_at        INTEGER NOT NULL,
+          enc               TEXT NOT NULL,
+          is_deleted        INTEGER NOT NULL DEFAULT 0
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS feed_mutes (
+          author_did TEXT PRIMARY KEY,
+          muted_at   INTEGER NOT NULL
         )
       ''');
     }
@@ -903,6 +965,141 @@ class PodDatabase {
       );
     }
     return _database.query('channel_roles');
+  }
+
+  // ── Feed posts namespace ─────────────────────────────────────────────────
+
+  Future<void> insertFeedPost(Map<String, dynamic> data) async {
+    final id = data['id'] as String;
+    // Deduplicate by id
+    final exists = await _database.rawQuery(
+      'SELECT 1 FROM feed_posts WHERE id = ? LIMIT 1', [id]);
+    if (exists.isNotEmpty) return;
+
+    final enc = await PodEncryption.encrypt(jsonEncode(data), _key);
+    await _database.insert('feed_posts', {
+      'id': id,
+      'author_did': data['authorDid'] as String,
+      'visibility': data['visibility'] as String? ?? 'contacts',
+      'created_at': data['createdAt'] as int,
+      if (data['nostrEventId'] != null) 'nostr_event_id': data['nostrEventId'],
+      'enc': enc,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
+
+  Future<void> updateFeedPost(String id, Map<String, dynamic> data) async {
+    final enc = await PodEncryption.encrypt(jsonEncode(data), _key);
+    await _database.update('feed_posts', {
+      'enc': enc,
+      if (data['nostrEventId'] != null) 'nostr_event_id': data['nostrEventId'],
+    }, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> softDeleteFeedPost(String id) async {
+    await _database.update('feed_posts', {'is_deleted': 1},
+        where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Returns feed posts ordered by created_at DESC.
+  /// Optionally filter by [authorDid] or [visibility].
+  Future<List<Map<String, dynamic>>> listFeedPosts({
+    int limit = 20,
+    int offset = 0,
+    String? authorDid,
+    List<String>? visibilities,
+  }) async {
+    final where = <String>['is_deleted = 0'];
+    final args = <dynamic>[];
+    if (authorDid != null) {
+      where.add('author_did = ?');
+      args.add(authorDid);
+    }
+    if (visibilities != null && visibilities.isNotEmpty) {
+      final placeholders = List.filled(visibilities.length, '?').join(', ');
+      where.add('visibility IN ($placeholders)');
+      args.addAll(visibilities);
+    }
+    final rows = await _database.query(
+      'feed_posts',
+      where: where.join(' AND '),
+      whereArgs: args.isEmpty ? null : args,
+      orderBy: 'created_at DESC',
+      limit: limit,
+      offset: offset,
+    );
+    final result = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      try {
+        final plain = await PodEncryption.decrypt(row['enc'] as String, _key);
+        result.add(jsonDecode(plain) as Map<String, dynamic>);
+      } catch (_) {}
+    }
+    return result;
+  }
+
+  Future<int> countFeedPosts() async {
+    final rows = await _database.rawQuery(
+      'SELECT COUNT(*) AS cnt FROM feed_posts WHERE is_deleted = 0');
+    return (rows.first['cnt'] as int?) ?? 0;
+  }
+
+  // ── Feed comments namespace ───────────────────────────────────────────────
+
+  Future<void> insertFeedComment(Map<String, dynamic> data) async {
+    final id = data['id'] as String;
+    final exists = await _database.rawQuery(
+      'SELECT 1 FROM feed_comments WHERE id = ? LIMIT 1', [id]);
+    if (exists.isNotEmpty) return;
+
+    final enc = await PodEncryption.encrypt(jsonEncode(data), _key);
+    await _database.insert('feed_comments', {
+      'id': id,
+      'post_id': data['postId'] as String,
+      'author_did': data['authorDid'] as String,
+      'created_at': data['createdAt'] as int,
+      'enc': enc,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
+
+  Future<void> softDeleteFeedComment(String id) async {
+    await _database.update('feed_comments', {'is_deleted': 1},
+        where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<List<Map<String, dynamic>>> listFeedComments(String postId) async {
+    final rows = await _database.query(
+      'feed_comments',
+      where: 'post_id = ? AND is_deleted = 0',
+      whereArgs: [postId],
+      orderBy: 'created_at ASC',
+    );
+    final result = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      try {
+        final plain = await PodEncryption.decrypt(row['enc'] as String, _key);
+        result.add(jsonDecode(plain) as Map<String, dynamic>);
+      } catch (_) {}
+    }
+    return result;
+  }
+
+  // ── Feed mutes namespace ─────────────────────────────────────────────────
+
+  Future<void> muteAuthor(String authorDid) async {
+    await _database.insert('feed_mutes', {
+      'author_did': authorDid,
+      'muted_at': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
+
+  Future<void> unmuteAuthor(String authorDid) async {
+    await _database.delete('feed_mutes',
+        where: 'author_did = ?', whereArgs: [authorDid]);
+  }
+
+  Future<List<String>> getMutedAuthors() async {
+    final rows = await _database.query('feed_mutes');
+    return rows.map((r) => r['author_did'] as String).toList();
   }
 
   // ── Reactions namespace ──────────────────────────────────────────────────
