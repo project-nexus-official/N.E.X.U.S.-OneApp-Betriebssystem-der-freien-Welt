@@ -91,6 +91,15 @@ class GroupChannelService {
     }
   }
 
+  /// Replaces the stored channel with [updated] and persists it.
+  Future<void> updateChannel(GroupChannel updated) async {
+    final idx = _joined.indexWhere((c) => c.id == updated.id);
+    if (idx < 0) return;
+    _joined[idx] = updated;
+    await PodDatabase.instance.upsertChannel(updated.id, updated.toJson());
+    _joinedController.add(joinedChannels);
+  }
+
   /// Updates the member list of a joined channel and persists it.
   Future<void> updateMembers(String name, List<String> newMembers) async {
     final n = GroupChannel.normaliseName(name);

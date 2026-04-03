@@ -83,27 +83,31 @@ class GroupChannel {
 
   /// Creates a copy with optional field overrides.
   GroupChannel copyWith({
+    String? name,
+    String? description,
     bool? isPublic,
     bool? isDiscoverable,
     String? channelSecret,
     DateTime? joinedAt,
     ChannelMode? channelMode,
     List<String>? members,
-  }) =>
-      GroupChannel(
-        id: id,
-        name: name,
-        description: description,
-        createdBy: createdBy,
-        createdAt: createdAt,
-        isPublic: isPublic ?? this.isPublic,
-        isDiscoverable: isDiscoverable ?? this.isDiscoverable,
-        channelSecret: channelSecret ?? this.channelSecret,
-        nostrTag: nostrTag,
-        joinedAt: joinedAt ?? this.joinedAt,
-        channelMode: channelMode ?? this.channelMode,
-        members: members ?? List.from(this.members),
-      );
+  }) {
+    final newName = name ?? this.name;
+    return GroupChannel(
+      id: id,
+      name: newName,
+      description: description ?? this.description,
+      createdBy: createdBy,
+      createdAt: createdAt,
+      isPublic: isPublic ?? this.isPublic,
+      isDiscoverable: isDiscoverable ?? this.isDiscoverable,
+      channelSecret: channelSecret ?? this.channelSecret,
+      nostrTag: name != null ? nameToNostrTag(newName) : nostrTag,
+      joinedAt: joinedAt ?? this.joinedAt,
+      channelMode: channelMode ?? this.channelMode,
+      members: members ?? List.from(this.members),
+    );
+  }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 

@@ -26,6 +26,9 @@ class NostrKind {
   /// NIP-28 channel creation (Kind 40).
   static const int channelCreate = 40;
 
+  /// NIP-28 channel metadata update (Kind 41).
+  static const int channelMetadata = 41;
+
   /// NIP-28 channel message (Kind 42).
   static const int channelMessage = 42;
 

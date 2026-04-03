@@ -19,7 +19,9 @@ import '../../core/transport/nexus_message.dart';
 import '../../services/role_service.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/linkified_text.dart';
+import '../../shared/widgets/peer_avatar.dart';
 import 'channel_access_service.dart';
+import 'channel_admin_screen.dart';
 import 'channel_share_sheet.dart';
 import 'chat_provider.dart';
 import 'conversation_screen.dart';
@@ -46,6 +48,9 @@ class _ChannelConversationScreenState
   final _focusNode = FocusNode();
   final _picker = ImagePicker();
 
+  // Mutable local copy so admin edits update the header immediately.
+  late GroupChannel _channel;
+
   List<NexusMessage> _messages = [];
   bool _loading = true;
   bool _showEmojiPicker = false;
@@ -60,11 +65,12 @@ class _ChannelConversationScreenState
   @override
   void initState() {
     super.initState();
-    ConversationService.instance.markAsRead(widget.channel.conversationId);
+    _channel = widget.channel;
+    ConversationService.instance.markAsRead(_channel.conversationId);
     _loadMessages();
     context
         .read<ChatProvider>()
-        .setActiveConversation(widget.channel.conversationId);
+        .setActiveConversation(_channel.conversationId);
   }
 
   @override
@@ -79,7 +85,7 @@ class _ChannelConversationScreenState
   Future<void> _loadMessages() async {
     final msgs = await context
         .read<ChatProvider>()
-        .getMessages(widget.channel.conversationId);
+        .getMessages(_channel.conversationId);
     if (mounted) {
       setState(() {
         _messages = List.from(msgs);
@@ -92,7 +98,7 @@ class _ChannelConversationScreenState
   Future<void> _refreshMessages() async {
     final msgs = await context
         .read<ChatProvider>()
-        .getMessages(widget.channel.conversationId);
+        .getMessages(_channel.conversationId);
     if (mounted) {
       setState(() => _messages = List.from(msgs));
       _scrollToBottom();
@@ -113,10 +119,10 @@ class _ChannelConversationScreenState
       IdentityService.instance.currentIdentity?.did ?? '';
 
   bool get _canPost => PermissionHelper.canPostInChannel(
-        channelId: widget.channel.conversationId,
+        channelId: _channel.conversationId,
         did: _myDid,
-        channelMode: widget.channel.channelMode,
-        channelAdminDid: widget.channel.createdBy,
+        channelMode: _channel.channelMode,
+        channelAdminDid: _channel.createdBy,
       );
 
   Future<void> _send() async {
@@ -133,7 +139,7 @@ class _ChannelConversationScreenState
     }
     final provider = context.read<ChatProvider>();
     await provider.sendToChannel(
-      widget.channel.name,
+      _channel.name,
       text,
       extraMeta: _buildReplyMeta(reply, replyName),
     );
@@ -184,7 +190,7 @@ class _ChannelConversationScreenState
     if (!mounted) return;
     await context
         .read<ChatProvider>()
-        .sendImageToChannel(widget.channel.name, bytes);
+        .sendImageToChannel(_channel.name, bytes);
     await _refreshMessages();
   }
 
@@ -198,7 +204,7 @@ class _ChannelConversationScreenState
       });
     }
     await context.read<ChatProvider>().sendVoiceToChannel(
-          widget.channel.name,
+          _channel.name,
           filePath,
           durationMs,
           replyTo: reply,
@@ -273,7 +279,7 @@ class _ChannelConversationScreenState
     setState(() => _editingMessage = null);
     await context
         .read<ChatProvider>()
-        .editMessage(msg, widget.channel.conversationId, newBody);
+        .editMessage(msg, _channel.conversationId, newBody);
     await _refreshMessages();
   }
 
@@ -287,13 +293,13 @@ class _ChannelConversationScreenState
     final isFav = msg.metadata?['local_favorite'] == true;
     final canPost = _canPost;
     final canDelete = PermissionHelper.canDeleteMessage(
-      channelId: widget.channel.conversationId,
+      channelId: _channel.conversationId,
       messageSenderDid: msg.fromDid,
       requesterDid: myDid,
-      channelAdminDid: widget.channel.createdBy,
+      channelAdminDid: _channel.createdBy,
     );
     final isDiscussion =
-        widget.channel.channelMode == ChannelMode.discussion;
+        _channel.channelMode == ChannelMode.discussion;
     final canReply = isDiscussion || canPost;
 
     final hasLink = _extractLink(msg.body) != null;
@@ -395,7 +401,7 @@ class _ChannelConversationScreenState
               onTap: () async {
                 Navigator.pop(ctx);
                 await provider.toggleFavorite(
-                    msg, widget.channel.conversationId);
+                    msg, _channel.conversationId);
                 await _refreshMessages();
               },
             ),
@@ -638,7 +644,7 @@ class _ChannelConversationScreenState
               onPressed: () async {
                 Navigator.pop(ctx);
                 await provider.deleteMessageLocally(
-                    msg, widget.channel.conversationId);
+                    msg, _channel.conversationId);
                 await _refreshMessages();
               },
               child: const Text('Löschen'),
@@ -668,7 +674,7 @@ class _ChannelConversationScreenState
             onPressed: () async {
               Navigator.pop(ctx);
               await provider.deleteMessageLocally(
-                  msg, widget.channel.conversationId);
+                  msg, _channel.conversationId);
               await _refreshMessages();
             },
             child: const Text('Für mich löschen',
@@ -681,7 +687,7 @@ class _ChannelConversationScreenState
             onPressed: () async {
               Navigator.pop(ctx);
               await provider.deleteMessageLocally(
-                  msg, widget.channel.conversationId);
+                  msg, _channel.conversationId);
               provider.publishNostrDeletion(msg.id);
               await _refreshMessages();
             },
@@ -780,8 +786,8 @@ class _ChannelConversationScreenState
                           .read<ChatProvider>()
                           .reportChannelMessage(
                             msg: msg,
-                            channelName: widget.channel.name,
-                            channelAdminDid: widget.channel.createdBy,
+                            channelName: _channel.name,
+                            channelAdminDid: _channel.createdBy,
                             reason: selectedReason!,
                             comment: commentCtrl.text.trim(),
                           );
@@ -813,13 +819,13 @@ class _ChannelConversationScreenState
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (_) => ChannelShareSheet(channel: widget.channel),
+      builder: (_) => ChannelShareSheet(channel: _channel),
     );
   }
 
   String _channelTypeLabel() {
-    final isPublic = widget.channel.isPublic;
-    final mode = widget.channel.channelMode;
+    final isPublic = _channel.isPublic;
+    final mode = _channel.channelMode;
     if (mode == ChannelMode.announcement) {
       return isPublic ? 'Öffentlicher Kanal' : 'Privater Kanal';
     } else {
@@ -829,12 +835,12 @@ class _ChannelConversationScreenState
 
   void _showChannelInfo() {
     final myDid = _myDid;
-    final isAdmin = widget.channel.createdBy == myDid;
-    final isPrivate = !widget.channel.isPublic;
-    final members = widget.channel.members;
+    final isAdmin = _channel.createdBy == myDid;
+    final isPrivate = !_channel.isPublic;
+    final members = _channel.members;
     final pendingCount = isAdmin
         ? ChannelAccessService.instance.pendingRequests
-            .where((r) => r.channelName == widget.channel.name)
+            .where((r) => r.channelName == _channel.name)
             .length
         : 0;
 
@@ -859,15 +865,15 @@ class _ChannelConversationScreenState
                   size: 20,
                 ),
                 const SizedBox(width: 8),
-                Text(widget.channel.name,
+                Text(_channel.name,
                     style: const TextStyle(
                         color: AppColors.gold,
                         fontSize: 20,
                         fontWeight: FontWeight.bold)),
               ]),
-              if (widget.channel.description.isNotEmpty) ...[
+              if (_channel.description.isNotEmpty) ...[
                 const SizedBox(height: 8),
-                Text(widget.channel.description,
+                Text(_channel.description,
                     style: const TextStyle(color: AppColors.onDark)),
               ],
               const SizedBox(height: 4),
@@ -939,7 +945,7 @@ class _ChannelConversationScreenState
       context: context,
       builder: (ctx) => _ContactPickerDialog(
         contacts: contacts
-            .where((c) => !widget.channel.members.contains(c.did))
+            .where((c) => !_channel.members.contains(c.did))
             .toList(),
       ),
     );
@@ -950,7 +956,7 @@ class _ChannelConversationScreenState
     final provider = context.read<ChatProvider>();
     for (final did in selected) {
       await ChannelAccessService.instance.sendInvitation(
-        widget.channel,
+        _channel,
         did,
         provider.sendSystemDm,
       );
@@ -970,7 +976,7 @@ class _ChannelConversationScreenState
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surface,
-        title: Text('${widget.channel.name} verlassen?'),
+        title: Text('${_channel.name} verlassen?'),
         content: const Text(
           'Du verlässt diesen Kanal. Du kannst ihm jederzeit wieder beitreten.',
           style: TextStyle(color: AppColors.onDark),
@@ -993,8 +999,30 @@ class _ChannelConversationScreenState
     );
 
     if (confirmed == true && mounted) {
-      await GroupChannelService.instance.leaveChannel(widget.channel.name);
+      await GroupChannelService.instance.leaveChannel(_channel.name);
       if (mounted) Navigator.of(context).pop();
+    }
+  }
+
+  // ── Admin screen ─────────────────────────────────────────────────────────
+
+  Future<void> _openAdminScreen() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => ChangeNotifierProvider.value(
+          value: context.read<ChatProvider>(),
+          child: ChannelAdminScreen(channel: _channel),
+        ),
+      ),
+    );
+    if (!mounted) return;
+    // Refresh channel from service (admin may have updated metadata).
+    final fresh = GroupChannelService.instance.findByName(_channel.name);
+    if (fresh == null) {
+      // Channel was deleted — pop back to conversations list.
+      Navigator.of(context).pop();
+    } else {
+      setState(() => _channel = fresh);
     }
   }
 
@@ -1026,18 +1054,18 @@ class _ChannelConversationScreenState
               children: [
                 Row(children: [
                   Icon(
-                    widget.channel.channelMode == ChannelMode.announcement
+                    _channel.channelMode == ChannelMode.announcement
                         ? Icons.campaign
                         : Icons.group,
                     color: AppColors.gold,
                     size: 16,
                   ),
                   const SizedBox(width: 4),
-                  Text(widget.channel.name,
+                  Text(_channel.name,
                       style: const TextStyle(
                           color: AppColors.gold,
                           fontWeight: FontWeight.bold)),
-                  if (widget.channel.channelMode ==
+                  if (_channel.channelMode ==
                       ChannelMode.announcement) ...[
                     const SizedBox(width: 6),
                     Container(
@@ -1066,6 +1094,12 @@ class _ChannelConversationScreenState
             ),
           ),
           actions: [
+            if (_myDid == _channel.createdBy)
+              IconButton(
+                icon: const Icon(Icons.settings),
+                tooltip: 'Kanal verwalten',
+                onPressed: _openAdminScreen,
+              ),
             IconButton(
               icon: const Icon(Icons.share),
               tooltip: 'Kanal teilen',
@@ -1087,7 +1121,7 @@ class _ChannelConversationScreenState
                     : Consumer<ChatProvider>(
                         builder: (context2, provider, _) {
                           provider
-                              .getMessages(widget.channel.conversationId)
+                              .getMessages(_channel.conversationId)
                               .then((msgs) {
                             if (mounted &&
                                 msgs.length != _messages.length) {
@@ -1098,16 +1132,20 @@ class _ChannelConversationScreenState
                                       (_) => _scrollToBottom());
                             }
                           });
+                          final myDid = _myDid;
                           return ListView.builder(
                             controller: _scrollController,
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 8),
+                                horizontal: 8, vertical: 8),
                             itemCount: _messages.length,
                             itemBuilder: (ctx, i) =>
                                 _ChannelMessageBubble(
                               msg: _messages[i],
-                              channelAdminDid: widget.channel.createdBy,
-                              channelId: widget.channel.conversationId,
+                              previousMsg:
+                                  i > 0 ? _messages[i - 1] : null,
+                              myDid: myDid,
+                              channelAdminDid: _channel.createdBy,
+                              channelId: _channel.conversationId,
                               onLongPress: () =>
                                   _showMessageMenu(_messages[i]),
                               onReactionToggle: (emoji) =>
@@ -1135,7 +1173,7 @@ class _ChannelConversationScreenState
             onAttach: _pickAndSendImage,
             showEmojiIcon: !_showEmojiPicker,
             onSendVoice: _sendVoice,
-            channelName: widget.channel.name,
+            channelName: _channel.name,
             canPost: _canPost,
             isEditing: _editingMessage != null,
           ),
@@ -1184,11 +1222,33 @@ class _ChannelConversationScreenState
   }
 }
 
+// ── Deterministic sender colour ───────────────────────────────────────────────
+
+Color _senderColor(String did) {
+  final hash =
+      did.codeUnits.fold(0, (h, c) => (h * 31 + c) & 0xFFFFFFFF);
+  const palette = [
+    Color(0xFF80CBC4), // teal
+    Color(0xFF81D4FA), // light blue
+    Color(0xFFA5D6A7), // green
+    Color(0xFFFFCC80), // amber
+    Color(0xFFCE93D8), // purple
+    Color(0xFFF48FB1), // pink
+    Color(0xFFFFAB91), // deep orange
+    Color(0xFFB0BEC5), // blue-grey
+    Color(0xFF80DEEA), // cyan
+    Color(0xFFDCE775), // lime
+  ];
+  return palette[hash % palette.length];
+}
+
 // ── Message bubble ────────────────────────────────────────────────────────────
 
 class _ChannelMessageBubble extends StatelessWidget {
   const _ChannelMessageBubble({
     required this.msg,
+    this.previousMsg,
+    required this.myDid,
     this.channelAdminDid,
     this.channelId,
     required this.onLongPress,
@@ -1196,14 +1256,20 @@ class _ChannelMessageBubble extends StatelessWidget {
   });
 
   final NexusMessage msg;
+  final NexusMessage? previousMsg;
+  final String myDid;
   final String? channelAdminDid;
   final String? channelId;
   final VoidCallback onLongPress;
   final void Function(String emoji) onReactionToggle;
 
-  @override
-  Widget build(BuildContext context) {
-    final senderName = ContactService.instance.getDisplayName(msg.fromDid);
+  bool get _isMe => msg.fromDid == myDid;
+
+  /// True when this message starts a new sender group.
+  bool get _isFirstInGroup =>
+      previousMsg == null || previousMsg!.fromDid != msg.fromDid;
+
+  Widget? _roleBadge() {
     final sysRole = RoleService.instance.getSystemRole(msg.fromDid);
     final chRole = (channelId != null)
         ? RoleService.instance.getChannelRole(
@@ -1213,109 +1279,163 @@ class _ChannelMessageBubble extends StatelessWidget {
           )
         : null;
 
-    Widget? roleBadge;
     if (sysRole == SystemRole.superadmin) {
-      roleBadge = const _RoleBadge(label: 'Superadmin', icon: Icons.shield);
+      return const _RoleBadge(label: 'Superadmin', icon: Icons.shield);
     } else if (sysRole == SystemRole.systemAdmin) {
-      roleBadge =
-          const _RoleBadge(label: 'Admin', icon: Icons.shield_outlined);
+      return const _RoleBadge(
+          label: 'Admin', icon: Icons.shield_outlined);
     } else if (chRole == ChannelRole.channelAdmin) {
-      roleBadge = const _RoleBadge(
+      return const _RoleBadge(
           label: 'Kanal-Admin',
           icon: Icons.manage_accounts,
           small: true);
     } else if (chRole == ChannelRole.channelModerator) {
-      roleBadge = const _RoleBadge(
+      return const _RoleBadge(
           label: 'Mod',
           icon: Icons.verified_user_outlined,
           small: true);
     }
+    return null;
+  }
 
-    final hasReply = msg.metadata?['reply_to_id'] != null;
+  @override
+  Widget build(BuildContext context) {
+    final isMe = _isMe;
+    final firstInGroup = _isFirstInGroup;
+    final contact = ContactService.instance.findByDid(msg.fromDid);
 
-    return GestureDetector(
+    // ── Bubble shape: flatten top-left corner when continuing same sender ──
+    final radius = BorderRadius.only(
+      topLeft: Radius.circular(isMe || !firstInGroup ? 12 : 4),
+      topRight: Radius.circular(!isMe || !firstInGroup ? 12 : 4),
+      bottomLeft: const Radius.circular(12),
+      bottomRight: const Radius.circular(12),
+    );
+
+    final bubbleColor =
+        isMe ? AppColors.sentBubble : AppColors.surfaceVariant;
+
+    final bubble = GestureDetector(
       onLongPress: onLongPress,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Container(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.75,
+        ),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: bubbleColor,
+          borderRadius: radius,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            // Sender name + role
-            Row(children: [
-              Text(senderName,
-                  style: const TextStyle(
-                      color: AppColors.gold,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600)),
-              if (roleBadge != null) ...[
-                const SizedBox(width: 4),
-                roleBadge,
-              ],
-            ]),
-            const SizedBox(height: 2),
             // Reply quote
-            if (hasReply)
-              Container(
-                margin: const EdgeInsets.only(bottom: 4),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  border: const Border(
-                      left:
-                          BorderSide(color: AppColors.gold, width: 3)),
-                  color: AppColors.surfaceVariant,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      msg.metadata?['reply_to_sender'] as String? ??
-                          '…',
-                      style: const TextStyle(
-                          color: AppColors.gold,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600),
-                    ),
-                    Text(
-                      msg.metadata?['reply_to_image'] == true
-                          ? '📷 Foto'
-                          : msg.metadata?['reply_to_voice'] == true
-                              ? '🎤 Sprachnachricht'
-                              : msg.metadata?['reply_to_preview']
-                                      as String? ??
-                                  '',
-                      style: const TextStyle(
-                          color: Colors.grey, fontSize: 11),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-            // Message bubble
-            Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: AppColors.surfaceVariant,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: _buildContent(context),
-            ),
-            // Timestamp
+            if (msg.metadata?['reply_to_id'] != null)
+              _ReplyQuote(msg: msg),
+            // Content
+            _buildContent(context),
+            // Timestamp inside bubble, bottom-right
             const SizedBox(height: 2),
-            Text(
-              _formatTime(msg.timestamp),
-              style: TextStyle(color: Colors.grey[600], fontSize: 11),
-            ),
-            // Reactions
-            _ReactionsRow(
-              messageId: msg.id,
-              onToggle: onReactionToggle,
+            Align(
+              alignment: Alignment.bottomRight,
+              child: Text(
+                _formatTime(msg.timestamp),
+                style: TextStyle(
+                    color: AppColors.onDark.withValues(alpha: 0.45),
+                    fontSize: 10),
+              ),
             ),
           ],
         ),
+      ),
+    );
+
+    final reactions = _ReactionsRow(
+      messageId: msg.id,
+      onToggle: onReactionToggle,
+    );
+
+    if (isMe) {
+      // Own message: right-aligned, no avatar, no sender name
+      return Padding(
+        padding: EdgeInsets.only(
+          top: firstInGroup ? 6 : 2,
+          bottom: 2,
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [bubble, reactions],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Other's message: avatar + sender name + bubble
+    final senderName =
+        ContactService.instance.getDisplayName(msg.fromDid);
+    final badge = _roleBadge();
+
+    return Padding(
+      padding: EdgeInsets.only(
+        top: firstInGroup ? 6 : 2,
+        bottom: 2,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          // Avatar column (32px wide, always reserved)
+          SizedBox(
+            width: 36,
+            child: firstInGroup
+                ? PeerAvatar(
+                    did: msg.fromDid,
+                    profileImage: contact?.profileImage,
+                    size: 32,
+                  )
+                : const SizedBox.shrink(),
+          ),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Sender name + role badge (only first in group)
+                if (firstInGroup)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4, bottom: 2),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          senderName,
+                          style: TextStyle(
+                            color: _senderColor(msg.fromDid),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (badge != null) ...[
+                          const SizedBox(width: 4),
+                          badge,
+                        ],
+                      ],
+                    ),
+                  ),
+                bubble,
+                reactions,
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1354,6 +1474,50 @@ class _ChannelMessageBubble extends StatelessWidget {
     final h = t.hour.toString().padLeft(2, '0');
     final m = t.minute.toString().padLeft(2, '0');
     return '$h:$m';
+  }
+}
+
+// ── Reply quote (inside bubble) ───────────────────────────────────────────────
+
+class _ReplyQuote extends StatelessWidget {
+  const _ReplyQuote({required this.msg});
+  final NexusMessage msg;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        border:
+            const Border(left: BorderSide(color: AppColors.gold, width: 3)),
+        color: Colors.black26,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            msg.metadata?['reply_to_sender'] as String? ?? '…',
+            style: const TextStyle(
+                color: AppColors.gold,
+                fontSize: 11,
+                fontWeight: FontWeight.w600),
+          ),
+          Text(
+            msg.metadata?['reply_to_image'] == true
+                ? '📷 Foto'
+                : msg.metadata?['reply_to_voice'] == true
+                    ? '🎤 Sprachnachricht'
+                    : msg.metadata?['reply_to_preview'] as String? ?? '',
+            style: const TextStyle(color: Colors.grey, fontSize: 11),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
   }
 }
 
