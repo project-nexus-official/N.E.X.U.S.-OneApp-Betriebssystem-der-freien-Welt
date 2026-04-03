@@ -22,6 +22,7 @@ import '../chat/conversation.dart';
 import '../chat/conversation_service.dart';
 import '../chat/group_channel_service.dart';
 import '../contacts/contacts_screen.dart';
+import '../governance/governance_screen.dart';
 import 'node_counter_service.dart';
 
 // ── Top-level helpers (exported for testing) ─────────────────────────────────
@@ -257,6 +258,8 @@ class _DashboardScreenState extends State<DashboardScreen>
             const SizedBox(height: 12),
             _buildGovernanceCard(context),
             const SizedBox(height: 12),
+            _buildDorfplatzCard(context),
+            const SizedBox(height: 12),
             _buildInviteCard(context),
             const SizedBox(height: 16),
             _buildComingSoonRow(),
@@ -282,6 +285,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             _buildChannelsCard(context),
             _buildContactsCard(context),
             _buildGovernanceCard(context),
+            _buildDorfplatzCard(context),
           ]),
         ),
       ),
@@ -367,10 +371,22 @@ class _DashboardScreenState extends State<DashboardScreen>
     return _FeatureCard(
       key: const Key('governance_card'),
       icon: Icons.how_to_vote_outlined,
-      title: 'Governance',
-      subtitle: 'Governance kommt bald',
-      preview: 'Hier werdet ihr gemeinsam Entscheidungen treffen.',
-      onTap: () => context.go('/governance'),
+      title: 'Agora — Politik & Demokratie',
+      subtitle: 'Hier werdet ihr gemeinsam Entscheidungen treffen.',
+      onTap: () => Navigator.of(context, rootNavigator: true).push(
+        MaterialPageRoute<void>(builder: (_) => const GovernanceScreen()),
+      ),
+    );
+  }
+
+  Widget _buildDorfplatzCard(BuildContext context) {
+    return _FeatureCard(
+      key: const Key('dorfplatz_card'),
+      icon: Icons.park,
+      title: 'Dorfplatz',
+      subtitle: 'Bald verfügbar',
+      preview: 'Gemeinsam, ohne Algorithmus, ohne Konzern.',
+      onTap: () => context.go('/dorfplatz'),
     );
   }
 

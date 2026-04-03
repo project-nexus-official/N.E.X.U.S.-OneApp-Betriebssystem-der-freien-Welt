@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../chat/chat_provider.dart';
 import '../chat/join_channel_screen.dart';
 import '../contacts/contacts_screen.dart';
+import '../governance/governance_screen.dart';
 import '../settings/settings_screen.dart';
 
 /// A single entry in the Entdecken grid.
@@ -40,34 +41,16 @@ const _mainTiles = <_TileItem>[
     route: '/join-channels',
   ),
   _TileItem(
-    icon: Icons.shopping_cart,
-    iconColor: Color(0xFFFF9800),
-    label: 'Marktplatz',
-    comingSoonPhase: 'Phase 1c',
-  ),
-  _TileItem(
-    icon: Icons.handshake,
-    iconColor: Color(0xFF4CAF50),
-    label: 'Care',
-    comingSoonPhase: 'Phase 2',
-  ),
-  _TileItem(
-    icon: Icons.how_to_vote,
-    iconColor: AppColors.gold,
-    label: 'Agora – Politik',
-    route: '/governance',
-  ),
-  _TileItem(
-    icon: Icons.campaign,
-    iconColor: Color(0xFF9C27B0),
-    label: 'Schwarzes Brett',
-    comingSoonPhase: 'Phase 1a',
-  ),
-  _TileItem(
     icon: Icons.group_work,
     iconColor: Color(0xFF00BCD4),
     label: 'Meine Zelle',
     comingSoonPhase: 'Phase 2',
+  ),
+  _TileItem(
+    icon: Icons.shopping_cart,
+    iconColor: Color(0xFFFF9800),
+    label: 'Marktplatz',
+    comingSoonPhase: 'Phase 1c',
   ),
   _TileItem(
     icon: Icons.settings,
@@ -79,9 +62,15 @@ const _mainTiles = <_TileItem>[
 
 const _sphaereTiles = <_TileItem>[
   _TileItem(
+    icon: Icons.how_to_vote,
+    iconColor: AppColors.gold,
+    label: 'Agora\nPolitik & Demokratie',
+    route: '/agora',
+  ),
+  _TileItem(
     icon: Icons.medical_services,
     iconColor: Color(0xFFF44336),
-    label: 'Asklepios\nGesundheit',
+    label: 'Asklepios\nGesundheit & Fürsorge',
     comingSoonPhase: 'Phase 3',
   ),
   _TileItem(
@@ -136,6 +125,12 @@ class DiscoverScreen extends StatelessWidget {
             child: const JoinChannelScreen(),
           ),
         ),
+      );
+      return;
+    }
+    if (tile.route == '/agora') {
+      Navigator.of(context, rootNavigator: true).push(
+        MaterialPageRoute<void>(builder: (_) => const GovernanceScreen()),
       );
       return;
     }

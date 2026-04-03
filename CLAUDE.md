@@ -181,7 +181,7 @@ Phase 2: Care-System + Sphären-Plugins
 
 - **Dashboard – Startbildschirm (komplett)**:
   - `DashboardScreen` ist der neue Default-Startbildschirm (Route `/home`, Index 0)
-  - Navigation umstrukturiert: **Home · Chat · Governance · Entdecken · Profil** (Wallet-Tab entfernt)
+  - Navigation umstrukturiert: **Home · Chat · Dorfplatz · Entdecken · Profil** (Governance- und Wallet-Tab entfernt)
   - Wallet-Route (`/wallet`) bleibt im ShellRoute für zukünftige Nutzung erhalten
   - App startet auf `/home` statt `/chat`; Onboarding-Redirect → `/home`
   - **Header**: Zeitabhängige Begrüßung ("Guten Morgen/Tag/Abend, [Pseudonym]") + Datum auf Deutsch
@@ -189,9 +189,10 @@ Phase 2: Care-System + Sphären-Plugins
     - Mini-Radar-Animation (150px, `_MiniRadarPainter` mit `dart:math` sin/cos)
     - "Lokal: X Peers" (BLE/LAN) | "NEXUS-Netzwerk: X Nodes" unten
     - Tipp → öffnet vollen `RadarScreen` (rootNavigator)
-  - **Feature-Karten**: Nachrichten, Kanäle, Kontakte, Governance
+  - **Feature-Karten**: Nachrichten, Kanäle, Kontakte, Agora, Dorfplatz
     - Jede Karte: Icon-Kreis (gold), Titel, Status-Subtitle, optionale Preview, Badge
-    - Governance-Karte: Platzhalter-Text "Hier werdet ihr gemeinsam Entscheidungen treffen."
+    - Agora-Karte: Titel "Agora — Politik & Demokratie", Tipp → GovernanceScreen (rootNavigator push)
+    - Dorfplatz-Karte: Titel "Dorfplatz", Subtitle "Bald verfügbar", Tipp → `/dorfplatz` Tab
   - **Coming-Soon-Karten** (halbe Breite, 2er-Reihe, ausgegraut):
     - Wallet · Marktplatz — kein onTap, Opacity 0.45
   - **Responsive**: Mobile = volle Breite; Desktop ≥800px = 2-Spalten-Grid für Feature-Karten
@@ -315,6 +316,18 @@ Phase 2: Care-System + Sphären-Plugins
   - **Router**: `/contact-requests` → `ContactRequestsScreen`, `/contact-requests/sent` → `SentRequestsScreen`
   - **Init**: `ContactRequestService.instance.load()` in `initServicesAfterIdentity()` nach `ContactService.instance.load()`
   - Tests: 28 Tests in `test/features/contacts/contact_request_test.dart`
+
+- **Navigation-Restrukturierung (komplett)**:
+  - Bottom-Navigation: **Home · Chat · Dorfplatz · Entdecken · Profil**
+  - Governance-Tab entfernt; Agora-Screen (`GovernanceScreen`) weiterhin erreichbar via Dashboard-Karte und Entdecken → Sphären (rootNavigator push, keine Bottom-Nav)
+  - `DorfplatzScreen` (`lib/features/dorfplatz/dorfplatz_screen.dart`): Platzhalter-Screen, Route `/dorfplatz` im ShellRoute
+  - Route `/governance` außerhalb ShellRoute (kein Bottom-Nav, für Deep-Link-Kompatibilität)
+  - **Entdecken-Hub** neu strukturiert:
+    - Obere Kacheln (5): Kontakte · Kanäle · Meine Zelle (Phase 2) · Marktplatz (Phase 1c) · Einstellungen
+    - Entfernt: Care, Agora-Politik, Schwarzes Brett
+    - Sphären-Sektion (5): Agora (aktiv, gold, → GovernanceScreen) · Asklepios (Gesundheit & Fürsorge, Phase 3) · Paideia (Phase 3) · Demeter (Phase 3) · Hestia (Phase 3)
+  - GovernanceScreen AppBar: "Agora — Politik & Demokratie"
+  - Desktop-Sidebar: Dorfplatz statt Governance; Care aus Sphären entfernt (in Asklepios integriert)
 
 ## Aktueller Fokus
 >>> PHASE 1a: Fundament + Identität (in Fertigstellung) <<<

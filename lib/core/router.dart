@@ -7,6 +7,7 @@ import 'package:nexus_oneapp/features/contacts/qr_scanner_screen.dart';
 import 'package:nexus_oneapp/features/contacts/sent_requests_screen.dart';
 import 'package:nexus_oneapp/features/dashboard/dashboard_screen.dart';
 import 'package:nexus_oneapp/features/discover/discover_screen.dart';
+import 'package:nexus_oneapp/features/dorfplatz/dorfplatz_screen.dart';
 import 'package:nexus_oneapp/features/governance/governance_screen.dart';
 import 'package:nexus_oneapp/features/onboarding/onboarding_screen.dart';
 import 'package:nexus_oneapp/features/invite/invite_screen.dart';
@@ -69,6 +70,12 @@ final router = GoRouter(
       path: '/principles/commitment',
       builder: (context, state) => const PrinciplesCommitmentScreen(),
     ),
+    // Agora (Governance) – outside ShellRoute, no bottom nav.
+    // Accessible via Dashboard card and Entdecken → Sphären.
+    GoRoute(
+      path: '/governance',
+      builder: (context, state) => const GovernanceScreen(),
+    ),
     // Settings – outside ShellRoute so it appears as a full-screen page
     // without the bottom navigation bar.
     GoRoute(
@@ -128,8 +135,8 @@ final router = GoRouter(
           },
         ),
         GoRoute(
-          path: '/governance',
-          builder: (context, state) => const GovernanceScreen(),
+          path: '/dorfplatz',
+          builder: (context, state) => const DorfplatzScreen(),
         ),
         GoRoute(
           path: '/discover',
@@ -154,8 +161,8 @@ final router = GoRouter(
 int _indexForLocation(String path) {
   if (path.startsWith('/home')) return 0;
   if (path.startsWith('/chat')) return 1;
-  if (path.startsWith('/governance')) return 2;
+  if (path.startsWith('/dorfplatz')) return 2;
   if (path.startsWith('/discover')) return 3;
   if (path.startsWith('/profile')) return 4;
-  return 0; // default to /home (covers /wallet etc.)
+  return 0; // default to /home (covers /wallet, /governance etc.)
 }

@@ -20,7 +20,7 @@ const double _kSidebarWidth = 280;
 /// - Level 1: Bottom nav (5 tabs) on mobile/tablet; permanent sidebar on desktop
 /// - Level 2: Drawer for secondary destinations, actions and settings
 ///
-/// Tab order:  0 Home · 1 Chat · 2 Governance · 3 Entdecken · 4 Profil
+/// Tab order:  0 Home · 1 Chat · 2 Dorfplatz · 3 Entdecken · 4 Profil
 class NexusScaffold extends StatelessWidget {
   final Widget child;
   final int currentIndex;
@@ -38,7 +38,7 @@ class NexusScaffold extends StatelessWidget {
       case 1:
         context.go('/chat');
       case 2:
-        context.go('/governance');
+        context.go('/dorfplatz');
       case 3:
         context.go('/discover');
       case 4:
@@ -203,9 +203,9 @@ class _BottomNav extends StatelessWidget {
           label: 'Chat',
         ),
         NavigationDestination(
-          icon: Icon(Icons.how_to_vote_outlined),
-          selectedIcon: Icon(Icons.how_to_vote),
-          label: 'Governance',
+          icon: Icon(Icons.park),
+          selectedIcon: Icon(Icons.park),
+          label: 'Dorfplatz',
         ),
         NavigationDestination(
           icon: Icon(Icons.explore_outlined),
@@ -349,8 +349,8 @@ class _DrawerContent extends StatelessWidget {
             onTap: () => _go(context, 1),
           ),
           _DrawerNavItem(
-            icon: Icons.how_to_vote_outlined,
-            label: 'Governance',
+            icon: Icons.park,
+            label: 'Dorfplatz',
             selected: currentIndex == 2,
             onTap: () => _go(context, 2),
           ),
@@ -389,8 +389,7 @@ class _DrawerContent extends StatelessWidget {
             ),
           ),
           _DrawerComingSoonItem(icon: Icons.shopping_cart_outlined, label: 'Marktplatz'),
-          _DrawerComingSoonItem(icon: Icons.handshake_outlined, label: 'Care'),
-          _DrawerComingSoonItem(icon: Icons.medical_services_outlined, label: 'Asklepios – Gesundheit'),
+          _DrawerComingSoonItem(icon: Icons.medical_services_outlined, label: 'Asklepios – Gesundheit & Fürsorge'),
           _DrawerComingSoonItem(icon: Icons.school_outlined, label: 'Paideia – Bildung'),
           _DrawerComingSoonItem(icon: Icons.eco_outlined, label: 'Demeter – Ernährung'),
           _DrawerComingSoonItem(icon: Icons.home_outlined, label: 'Hestia – Wohnen'),
