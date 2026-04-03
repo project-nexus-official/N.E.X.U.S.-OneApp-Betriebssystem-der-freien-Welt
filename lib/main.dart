@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:nexus_oneapp/core/contacts/contact_service.dart';
+import 'package:nexus_oneapp/services/contact_request_service.dart';
 import 'package:nexus_oneapp/core/crypto/encryption_keys.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
 import 'package:nexus_oneapp/core/identity/profile_service.dart';
@@ -164,6 +165,7 @@ Future<void> initServicesAfterIdentity() async {
     await ProfileService.instance.load(identity.pseudonym);
     await ContactService.instance.load();
     debugPrint('[NEXUS] Contacts loaded: ${ContactService.instance.contacts.length}');
+    await ContactRequestService.instance.load();
     await ConversationService.instance.load();
     await RetentionService.instance.load();
     RetentionService.instance.runCleanup(); // fire-and-forget

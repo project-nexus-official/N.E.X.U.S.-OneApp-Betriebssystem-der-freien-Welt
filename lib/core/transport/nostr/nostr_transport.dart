@@ -110,6 +110,9 @@ class NostrTransport implements MessageTransport {
   /// The Nostr keypair for this node (available after [start]).
   NostrKeys? get keys => _keys;
 
+  /// The local Nostr public key as a lowercase hex string, or null before [start].
+  String? get localNostrPubkeyHex => _keys?.publicKeyHex;
+
   /// Current geohash (set by [ChatProvider] after location is obtained).
   String? currentGeohash;
 

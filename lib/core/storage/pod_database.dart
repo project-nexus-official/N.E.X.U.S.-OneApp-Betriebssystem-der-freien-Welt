@@ -47,7 +47,7 @@ class PodDatabase {
 
     _db = await openDatabase(
       dbPath,
-      version: 7,
+      version: 8,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -205,6 +205,18 @@ class PodDatabase {
         PRIMARY KEY (message_id, emoji, reactor_did)
       )
     ''');
+
+    // Contact requests (incoming and outgoing).
+    await db.execute('''
+      CREATE TABLE contact_requests (
+        id           TEXT PRIMARY KEY,
+        from_did     TEXT NOT NULL,
+        is_sent      INTEGER NOT NULL DEFAULT 0,
+        status       TEXT NOT NULL DEFAULT 'pending',
+        received_at  INTEGER NOT NULL,
+        enc          TEXT NOT NULL
+      )
+    ''');
   }
 
   static Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -276,6 +288,18 @@ class PodDatabase {
           reactor_did  TEXT NOT NULL,
           created_at   INTEGER NOT NULL,
           PRIMARY KEY (message_id, emoji, reactor_did)
+        )
+      ''');
+    }
+    if (oldVersion < 8) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS contact_requests (
+          id           TEXT PRIMARY KEY,
+          from_did     TEXT NOT NULL,
+          is_sent      INTEGER NOT NULL DEFAULT 0,
+          status       TEXT NOT NULL DEFAULT 'pending',
+          received_at  INTEGER NOT NULL,
+          enc          TEXT NOT NULL
         )
       ''');
     }
@@ -636,6 +660,95 @@ class PodDatabase {
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  // ── Contact requests namespace ────────────────────────────────────────────
+
+  /// Inserts or replaces a contact request record.
+  ///
+  /// [id], [from_did], [is_sent], [status] and [received_at] are stored as
+  /// plain columns for fast filtering.  The full [data] map is encrypted and
+  /// stored in the [enc] column.
+  Future<void> upsertContactRequest(
+      String id, Map<String, dynamic> data) async {
+    final enc = await PodEncryption.encrypt(jsonEncode(data), _key);
+    await _database.insert(
+      'contact_requests',
+      {
+        'id': id,
+        'from_did': data['fromDid'] as String? ?? '',
+        'is_sent': (data['isSent'] as bool? ?? false) ? 1 : 0,
+        'status': data['status'] as String? ?? 'pending',
+        'received_at': data['receivedAt'] as int? ??
+            DateTime.now().millisecondsSinceEpoch,
+        'enc': enc,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// Returns all contact request rows, decrypted.
+  Future<List<Map<String, dynamic>>> listContactRequests() async {
+    final rows = await _database.query(
+      'contact_requests',
+      orderBy: 'received_at DESC',
+    );
+    final result = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      try {
+        final plain =
+            await PodEncryption.decrypt(row['enc'] as String, _key);
+        final data = jsonDecode(plain) as Map<String, dynamic>;
+        // Merge unencrypted index columns so callers always get them.
+        result.add({
+          'id': row['id'],
+          'from_did': row['from_did'],
+          'is_sent': row['is_sent'],
+          'status': row['status'],
+          'received_at': row['received_at'],
+          ...data,
+        });
+      } catch (_) {}
+    }
+    return result;
+  }
+
+  /// Updates the [status] and optional [decidedAt] timestamp for a request.
+  Future<void> updateContactRequestStatus(
+      String id, String status, DateTime? decidedAt) async {
+    await _database.update(
+      'contact_requests',
+      {
+        'status': status,
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+
+    // Also update the enc blob so the full data stays consistent.
+    final rows = await _database.query(
+      'contact_requests',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (rows.isEmpty) return;
+    try {
+      final plain =
+          await PodEncryption.decrypt(rows.first['enc'] as String, _key);
+      final data = jsonDecode(plain) as Map<String, dynamic>;
+      data['status'] = status;
+      if (decidedAt != null) {
+        data['decidedAt'] = decidedAt.millisecondsSinceEpoch;
+      }
+      final enc = await PodEncryption.encrypt(jsonEncode(data), _key);
+      await _database.update(
+        'contact_requests',
+        {'enc': enc, 'status': status},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    } catch (_) {}
   }
 
   // ── Export / Import ───────────────────────────────────────────────────────

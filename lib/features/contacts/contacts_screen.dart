@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexus_oneapp/core/contacts/contact.dart';
@@ -5,8 +7,11 @@ import 'package:nexus_oneapp/core/contacts/contact_service.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
 import 'package:nexus_oneapp/shared/widgets/peer_avatar.dart';
 
+import '../../services/contact_request_service.dart';
 import '../invite/invite_screen.dart';
 import 'contact_detail_screen.dart';
+import 'contact_request.dart';
+import 'contact_requests_screen.dart';
 import 'manual_key_input_dialog.dart';
 import 'widgets/trust_badge.dart';
 
@@ -29,16 +34,27 @@ class _ContactsScreenState extends State<ContactsScreen> {
   TrustLevel? _filter; // null = show all
   bool _showSearch = false;
   final _searchCtrl = TextEditingController();
+  StreamSubscription<List<ContactRequest>>? _requestSub;
+  int _pendingRequestCount = 0;
 
   @override
   void initState() {
     super.initState();
     _reload();
+    _pendingRequestCount = ContactRequestService.instance.pendingCount;
+    _requestSub = ContactRequestService.instance.stream.listen((_) {
+      if (mounted) {
+        setState(() {
+          _pendingRequestCount = ContactRequestService.instance.pendingCount;
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
     _searchCtrl.dispose();
+    _requestSub?.cancel();
     super.dispose();
   }
 
@@ -171,6 +187,30 @@ class _ContactsScreenState extends State<ContactsScreen> {
               )
             : const Text('Kontakte'),
         actions: [
+          // Contact requests badge button
+          if (_pendingRequestCount > 0)
+            Badge(
+              label: Text('$_pendingRequestCount'),
+              child: IconButton(
+                icon: const Icon(Icons.person_add_alt_1),
+                tooltip: 'Kontaktanfragen',
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const ContactRequestsScreen(),
+                  ),
+                ),
+              ),
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.person_add_alt_1),
+              tooltip: 'Kontaktanfragen',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const ContactRequestsScreen(),
+                ),
+              ),
+            ),
           IconButton(
             icon: Icon(_showSearch ? Icons.close : Icons.search),
             onPressed: () {

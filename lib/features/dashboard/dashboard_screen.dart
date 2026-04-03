@@ -7,6 +7,8 @@ import 'package:provider/provider.dart';
 
 import '../../core/contacts/contact_service.dart';
 import '../../core/identity/profile_service.dart';
+import '../../services/contact_request_service.dart';
+import '../contacts/contact_request.dart';
 import '../../core/transport/message_transport.dart';
 import '../../services/invite_service.dart';
 import '../invite/invite_screen.dart';
@@ -75,6 +77,8 @@ class _DashboardScreenState extends State<DashboardScreen>
   UpdateInfo? _updateInfo;
   StreamSubscription<UpdateInfo?>? _updateSub;
 
+  StreamSubscription<List<ContactRequest>>? _requestSub;
+
   // Dismissed for this session only – reappears on next cold start.
   bool _principlesReminderDismissed = false;
 
@@ -118,6 +122,10 @@ class _DashboardScreenState extends State<DashboardScreen>
     });
     // Start background checks (respects 6-hour rate limit).
     UpdateService.instance.startPeriodicCheck();
+
+    _requestSub = ContactRequestService.instance.stream.listen((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   Future<void> _loadConversations() async {
@@ -131,6 +139,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     _convSub?.cancel();
     _nodeCountSub?.cancel();
     _updateSub?.cancel();
+    _requestSub?.cancel();
     super.dispose();
   }
 
@@ -330,17 +339,24 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Widget _buildContactsCard(BuildContext context) {
     final contacts = ContactService.instance.contacts;
+    final requestCount = ContactRequestService.instance.pendingCount;
     return Consumer<ChatProvider>(
       builder: (context, chat, _) {
         final onlineCount = chat.peers
             .where((p) => contacts.any((c) => c.did == p.did))
             .length;
+        final subtitleParts = ['${contacts.length} Kontakte'];
+        if (onlineCount > 0) subtitleParts.add('$onlineCount online');
+        if (requestCount > 0) {
+          subtitleParts.add(
+              '$requestCount Anfrage${requestCount == 1 ? '' : 'n'}');
+        }
         return _FeatureCard(
           key: const Key('contacts_card'),
           icon: Icons.people_outline,
           title: 'Kontakte',
-          subtitle: '${contacts.length} Kontakte'
-              '${onlineCount > 0 ? ', $onlineCount online' : ''}',
+          subtitle: subtitleParts.join(', '),
+          badgeCount: requestCount > 0 ? requestCount : null,
           onTap: () => _openContacts(context),
         );
       },

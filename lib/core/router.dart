@@ -1,8 +1,10 @@
 import 'package:go_router/go_router.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
 import 'package:nexus_oneapp/features/chat/conversations_screen.dart';
+import 'package:nexus_oneapp/features/contacts/contact_requests_screen.dart';
 import 'package:nexus_oneapp/features/contacts/contacts_screen.dart';
 import 'package:nexus_oneapp/features/contacts/qr_scanner_screen.dart';
+import 'package:nexus_oneapp/features/contacts/sent_requests_screen.dart';
 import 'package:nexus_oneapp/features/dashboard/dashboard_screen.dart';
 import 'package:nexus_oneapp/features/discover/discover_screen.dart';
 import 'package:nexus_oneapp/features/governance/governance_screen.dart';
@@ -82,6 +84,15 @@ final router = GoRouter(
     GoRoute(
       path: '/qr-scanner',
       builder: (context, state) => const QrScannerScreen(),
+    ),
+    // Contact requests – outside ShellRoute (full-screen, no bottom nav)
+    GoRoute(
+      path: '/contact-requests',
+      builder: (context, state) => const ContactRequestsScreen(),
+    ),
+    GoRoute(
+      path: '/contact-requests/sent',
+      builder: (context, state) => const SentRequestsScreen(),
     ),
     // Invite – outside ShellRoute (full-screen, no bottom nav)
     GoRoute(

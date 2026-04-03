@@ -294,6 +294,28 @@ Phase 2: Care-System + Sphären-Plugins
   - **Init**: `RoleService.instance.init()` in `initServicesAfterIdentity()` nach DB-Öffnung
   - Tests: 32 Tests in `test/services/role_service_test.dart`
 
+- **Kontaktanfrage-System (komplett)**:
+  - **ContactRequest** Modell (`lib/features/contacts/contact_request.dart`): id, fromDid, fromPseudonym, fromPublicKey, fromNostrPubkey, message (max 500 Zeichen), receivedAt, status (pending/accepted/rejected/ignored), decidedAt, isSent; `generateId()` (UUID v4), JSON-Serialisierung
+  - **DB v8-Migration**: Neue Tabelle `contact_requests` (id, from_did, is_sent, status, received_at, enc); `upsertContactRequest()`, `listContactRequests()`, `updateContactRequestStatus()` in PodDatabase
+  - **ContactRequestService** Singleton (`lib/services/contact_request_service.dart`):
+    - `load()`: Lädt alle Anfragen aus DB
+    - `sendRequest()`: Sendet Anfrage mit Rate-Limit (max 10/Tag via SharedPrefs `nexus_cr_today_count/date`) und 30-Tage-Cooldown nach Ablehnung/Ignorieren; doppelte Anfragen an selbe DID werden abgefangen
+    - `handleIncomingRequest()`: Verarbeitet eingehende `contact_request`-Nachrichten; ignoriert blockierte Absender und aktive Cooldowns; de-dupliziert mehrfache Anfragen
+    - `handleAcceptance()`: Verarbeitet `contact_request_accepted`-Nachrichten; fügt Kontakt hinzu und markiert Anfrage als angenommen
+    - `acceptRequest()`: Nimmt Anfrage an, fügt Kontakt via `addContactFn` hinzu, sendet Bestätigung via `sendConfirmFn`
+    - `rejectRequest()` / `ignoreRequest()`: Stille Ablehnung/Ignorieren (kein Feedback an Absender)
+    - `stream`: Broadcast-Stream für Live-Updates
+  - **Chat-Integration**: `_onMessageReceived` in ChatProvider routet `contact_request` und `contact_request_accepted` Typen; `sendContactRequest()` und `acceptContactRequest()` Methoden in ChatProvider
+  - **Nostr-Getter**: `NostrTransport.localNostrPubkeyHex` Getter hinzugefügt
+  - **_ContactRequestGateScreen** (in `conversation_screen.dart`): Wird angezeigt wenn Peer nur `discovered`-Status hat oder unbekannt ist; zeigt Formular zum Senden einer Anfrage (mit Vorstellungstext, max 500 Zeichen) oder "Ausstehend"-Ansicht nach Versand; reagiert live auf Status-Änderungen via StreamBuilder
+  - **ContactRequestsScreen** (`lib/features/contacts/contact_requests_screen.dart`): Eingehende Anfragen mit Identicon, Pseudonym, Nachricht, Datum; "Annehmen" (grün) / "Ablehnen" (rot) / Swipe-to-Dismiss (Ignorieren)
+  - **SentRequestsScreen** (`lib/features/contacts/sent_requests_screen.dart`): Gesendete Anfragen mit Status-Chip (Angenommen/Ausstehend); zeigt nie Ablehnung/Ignorieren
+  - **ContactsScreen**: Badge-Button mit Zähler für offene Anfragen in AppBar (person_add_alt_1-Icon)
+  - **DashboardScreen**: Kontakte-Karte zeigt Anfragen-Zähler im Subtitle und als Badge; lauscht auf `ContactRequestService.stream`
+  - **Router**: `/contact-requests` → `ContactRequestsScreen`, `/contact-requests/sent` → `SentRequestsScreen`
+  - **Init**: `ContactRequestService.instance.load()` in `initServicesAfterIdentity()` nach `ContactService.instance.load()`
+  - Tests: 28 Tests in `test/features/contacts/contact_request_test.dart`
+
 ## Aktueller Fokus
 >>> PHASE 1a: Fundament + Identität (in Fertigstellung) <<<
 

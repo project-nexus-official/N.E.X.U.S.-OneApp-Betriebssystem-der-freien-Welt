@@ -12,8 +12,11 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/contacts/contact_service.dart';
+import '../../core/contacts/contact.dart';
 import '../../core/crypto/encryption_keys.dart';
 import '../../core/identity/identity_service.dart';
+import '../../services/contact_request_service.dart';
+import '../contacts/contact_request.dart';
 import '../../core/storage/retention_service.dart';
 import '../../core/transport/message_transport.dart';
 import '../../core/transport/nexus_message.dart';
@@ -95,6 +98,19 @@ class _ConversationScreenState extends State<ConversationScreen> {
   // Stored reference to ChatProvider so we can safely call it in dispose().
   ChatProvider? _chatProvider;
 
+  // ── Contact request gate ──────────────────────────────────────────────────
+  StreamSubscription<List<ContactRequest>>? _requestSub;
+  StreamSubscription<void>? _contactsSub;
+
+  /// True when the peer is unknown / only discovered and a contact request
+  /// must be sent before chatting.
+  bool get _needsContactRequest {
+    if (widget.isBroadcast) return false;
+    final contact = ContactService.instance.findByDid(widget.peerDid);
+    return contact == null ||
+        contact.trustLevel == TrustLevel.discovered;
+  }
+
   String get _convId {
     if (widget.isBroadcast) return NexusMessage.broadcastDid;
     final myDid = IdentityService.instance.currentIdentity?.did ?? '';
@@ -122,6 +138,13 @@ class _ConversationScreenState extends State<ConversationScreen> {
     _loadMessages();
     _loadRetention();
     _scrollCtrl.addListener(_onScroll);
+    // Listen for contact request status changes (e.g. when request accepted).
+    _requestSub = ContactRequestService.instance.stream.listen((_) {
+      if (mounted) setState(() {});
+    });
+    _contactsSub = ContactService.instance.contactsChanged.listen((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -146,6 +169,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
     _searchCtrl.dispose();
     _searchDebounce?.cancel();
     _searchHighlight.dispose();
+    _requestSub?.cancel();
+    _contactsSub?.cancel();
     super.dispose();
   }
 
@@ -1271,6 +1296,14 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Show the contact request gate when the peer is not yet a proper contact.
+    if (_needsContactRequest) {
+      return _ContactRequestGateScreen(
+        peerDid: widget.peerDid,
+        peerPseudonym: widget.peerPseudonym,
+      );
+    }
+
     return Consumer<ChatProvider>(
       builder: (context, provider, _) {
         // Refresh when new messages arrive
@@ -3253,4 +3286,267 @@ class _SearchHighlight {
   const _SearchHighlight({this.matchIds = const {}, this.currentId});
   final Set<String> matchIds;
   final String? currentId;
+}
+
+// ── Contact-request gate ──────────────────────────────────────────────────────
+
+/// Shown instead of the normal chat when the peer is not yet a confirmed contact.
+///
+/// Allows the user to send a contact request with an intro message, and shows a
+/// "pending" view once the request has been sent.
+class _ContactRequestGateScreen extends StatefulWidget {
+  const _ContactRequestGateScreen({
+    required this.peerDid,
+    required this.peerPseudonym,
+  });
+
+  final String peerDid;
+  final String peerPseudonym;
+
+  @override
+  State<_ContactRequestGateScreen> createState() =>
+      _ContactRequestGateScreenState();
+}
+
+class _ContactRequestGateScreenState
+    extends State<_ContactRequestGateScreen> {
+  final _messageCtrl = TextEditingController();
+  bool _sending = false;
+  String? _error;
+
+  bool get _hasSentRequest =>
+      ContactRequestService.instance.hasSentRequestTo(widget.peerDid);
+
+  @override
+  void dispose() {
+    _messageCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _sendRequest() async {
+    final text = _messageCtrl.text.trim();
+    setState(() {
+      _sending = true;
+      _error = null;
+    });
+
+    final provider = context.read<ChatProvider>();
+    final err = await provider.sendContactRequest(widget.peerDid, text);
+
+    if (!mounted) return;
+    if (err != null) {
+      setState(() {
+        _sending = false;
+        _error = err;
+      });
+    } else {
+      setState(() => _sending = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<ContactRequest>>(
+      stream: ContactRequestService.instance.stream,
+      initialData: const [],
+      builder: (context, _) {
+        return Scaffold(
+          appBar: AppBar(title: Text(widget.peerPseudonym)),
+          body: _hasSentRequest ? _buildPendingView() : _buildRequestForm(),
+        );
+      },
+    );
+  }
+
+  Widget _buildPendingView() {
+    return Padding(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.hourglass_empty,
+              color: AppColors.gold, size: 64),
+          const SizedBox(height: 24),
+          const Text(
+            'Anfrage ausstehend',
+            style: TextStyle(
+              color: AppColors.gold,
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Du hast ${widget.peerPseudonym} eine Kontaktanfrage gesendet. '
+            'Sobald sie angenommen wird, könnt ihr chatten.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.grey),
+          ),
+          const SizedBox(height: 24),
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const _SentRequestsProxy(),
+                ),
+              );
+            },
+            child: const Text(
+              'Gesendete Anfragen',
+              style: TextStyle(color: AppColors.gold),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRequestForm() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SizedBox(height: 24),
+          const Icon(Icons.person_add_alt_1,
+              color: AppColors.gold, size: 56),
+          const SizedBox(height: 20),
+          Text(
+            'Du bist noch nicht mit ${widget.peerPseudonym} verbunden.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+                color: AppColors.onDark,
+                fontSize: 16,
+                fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Die Person entscheidet ob sie deine Anfrage annimmt. '
+            'Erst danach könnt ihr chatten.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey, fontSize: 13),
+          ),
+          const SizedBox(height: 24),
+          TextField(
+            controller: _messageCtrl,
+            maxLength: 500,
+            maxLines: 4,
+            minLines: 3,
+            decoration: const InputDecoration(
+              hintText: 'Stell dich kurz vor…',
+              hintStyle: TextStyle(color: Colors.grey),
+              border: OutlineInputBorder(),
+              enabledBorder: OutlineInputBorder(
+                borderSide: BorderSide(color: Colors.grey),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderSide: BorderSide(color: AppColors.gold),
+              ),
+              counterStyle: TextStyle(color: Colors.grey),
+            ),
+            style: const TextStyle(color: AppColors.onDark),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _error!,
+              style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+              textAlign: TextAlign.center,
+            ),
+          ],
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: _sending ? null : _sendRequest,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.gold,
+              foregroundColor: AppColors.deepBlue,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+            child: _sending
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                        color: AppColors.deepBlue, strokeWidth: 2),
+                  )
+                : const Text(
+                    'Kontaktanfrage senden',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Proxy widget that lazily imports SentRequestsScreen without circular deps.
+class _SentRequestsProxy extends StatelessWidget {
+  const _SentRequestsProxy();
+
+  @override
+  Widget build(BuildContext context) {
+    // Import inline to avoid adding a top-level import for a rarely used screen.
+    return const _SentRequestsInline();
+  }
+}
+
+// Inline minimal sent-requests view accessible from the gate.
+class _SentRequestsInline extends StatelessWidget {
+  const _SentRequestsInline();
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<ContactRequest>>(
+      stream: ContactRequestService.instance.stream,
+      initialData: ContactRequestService.instance.sentRequests,
+      builder: (context, snap) {
+        final sent = ContactRequestService.instance.sentRequests;
+        return Scaffold(
+          appBar: AppBar(title: const Text('Gesendete Anfragen')),
+          body: sent.isEmpty
+              ? const Center(
+                  child: Text('Keine gesendeten Anfragen',
+                      style: TextStyle(color: Colors.grey)))
+              : ListView.builder(
+                  itemCount: sent.length,
+                  itemBuilder: (_, i) {
+                    final req = sent[i];
+                    final chipColor = switch (req.status) {
+                      ContactRequestStatus.accepted => Colors.green,
+                      ContactRequestStatus.pending => Colors.orange,
+                      _ => Colors.grey,
+                    };
+                    final chipLabel = switch (req.status) {
+                      ContactRequestStatus.accepted => 'Angenommen',
+                      ContactRequestStatus.pending => 'Ausstehend',
+                      _ => 'Unbekannt',
+                    };
+                    return ListTile(
+                      leading: const Icon(Icons.person_outline,
+                          color: AppColors.gold),
+                      title: Text(req.fromPseudonym.isNotEmpty
+                          ? req.fromPseudonym
+                          : req.fromDid),
+                      subtitle: Text(
+                        req.message,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.grey),
+                      ),
+                      trailing: Chip(
+                        label: Text(chipLabel,
+                            style:
+                                const TextStyle(fontSize: 11, color: Colors.white)),
+                        backgroundColor: chipColor,
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    );
+                  },
+                ),
+        );
+      },
+    );
+  }
 }

@@ -28,6 +28,7 @@ import '../../core/transport/nostr/nostr_keys.dart';
 import '../../core/transport/nostr/nostr_transport.dart';
 import '../../core/transport/transport_manager.dart';
 import '../../services/background_service.dart';
+import '../../services/contact_request_service.dart';
 import '../../services/notification_service.dart';
 import '../../shared/widgets/notification_banner.dart';
 import 'channel_access_service.dart';
@@ -547,6 +548,27 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       return; // never store system messages in the conversation cache
     }
 
+    // ── Contact request routing ──────────────────────────────────────────────
+    final msgType = processedMsg.metadata?['type'] as String?;
+    if (msgType == 'contact_request') {
+      await ContactRequestService.instance.handleIncomingRequest(processedMsg);
+      return;
+    }
+    if (msgType == 'contact_request_accepted') {
+      await ContactRequestService.instance.handleAcceptance(
+        processedMsg,
+        addContactFn: (did, pseudonym, encKey, nostrPubkey) async {
+          await ContactService.instance.addContactFromQr(
+            did: did,
+            pseudonym: pseudonym,
+            encryptionPublicKey: encKey.isNotEmpty ? encKey : null,
+            nostrPubkey: nostrPubkey.isNotEmpty ? nostrPubkey : null,
+          );
+        },
+      );
+      return;
+    }
+
     final myDid = IdentityService.instance.currentIdentity?.did ?? '';
 
     // Determine conversation ID:
@@ -713,6 +735,90 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       debugPrint('[CHAT] Voice audio cache failed: $e');
       return msg;
     }
+  }
+
+  // ── Contact requests ──────────────────────────────────────────────────────
+
+  /// Sends a contact request to [toDid] with [introMessage].
+  ///
+  /// Returns `null` on success, or a localised error message on failure.
+  Future<String?> sendContactRequest(
+      String toDid, String introMessage) async {
+    final identity = IdentityService.instance.currentIdentity;
+    if (identity == null) return 'Keine Identität';
+    final myDid = identity.did;
+    final myPseudonym = identity.pseudonym;
+    final myPublicKey =
+        EncryptionKeys.instance.publicKeyHex ?? '';
+    final myNostrPubkey = _nostrTransport?.localNostrPubkeyHex ?? '';
+
+    return ContactRequestService.instance.sendRequest(
+      toDid,
+      introMessage,
+      myDid: myDid,
+      myPseudonym: myPseudonym,
+      myPublicKey: myPublicKey,
+      myNostrPubkey: myNostrPubkey,
+      sendFn: (req) async {
+        final meta = <String, dynamic>{
+          'type': 'contact_request',
+          'contact_request_data': {
+            'fromPublicKey': req.fromPublicKey,
+            'fromNostrPubkey': req.fromNostrPubkey,
+            'message': req.message,
+          },
+          if (myPublicKey.isNotEmpty) 'enc_key': myPublicKey,
+        };
+        final msg = NexusMessage.create(
+          fromDid: myDid,
+          toDid: toDid,
+          body: req.message,
+          metadata: meta,
+        );
+        await _manager.sendMessage(msg, recipientDid: toDid);
+      },
+    );
+  }
+
+  /// Accepts an incoming contact request by [requestId] and sends a
+  /// confirmation DM back to the requester.
+  Future<void> acceptContactRequest(String requestId) async {
+    final identity = IdentityService.instance.currentIdentity;
+    if (identity == null) return;
+    final myDid = identity.did;
+    final myPseudonym = identity.pseudonym;
+    final myPublicKey =
+        EncryptionKeys.instance.publicKeyHex ?? '';
+    final myNostrPubkey = _nostrTransport?.localNostrPubkeyHex ?? '';
+
+    await ContactRequestService.instance.acceptRequest(
+      requestId,
+      addContactFn: (did, pseudonym, encKey, nostrPubkey) async {
+        await ContactService.instance.addContactFromQr(
+          did: did,
+          pseudonym: pseudonym,
+          encryptionPublicKey: encKey.isNotEmpty ? encKey : null,
+          nostrPubkey: nostrPubkey.isNotEmpty ? nostrPubkey : null,
+        );
+      },
+      sendConfirmFn: (req) async {
+        final meta = <String, dynamic>{
+          'type': 'contact_request_accepted',
+          'contact_request_data': {
+            'fromPublicKey': myPublicKey,
+            'fromNostrPubkey': myNostrPubkey,
+          },
+          if (myPublicKey.isNotEmpty) 'enc_key': myPublicKey,
+        };
+        final msg = NexusMessage.create(
+          fromDid: myDid,
+          toDid: req.fromDid,
+          body: myPseudonym,
+          metadata: meta,
+        );
+        await _manager.sendMessage(msg, recipientDid: req.fromDid);
+      },
+    );
   }
 
   // ── Sending ────────────────────────────────────────────────────────────────
