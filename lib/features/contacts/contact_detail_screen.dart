@@ -12,6 +12,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../features/chat/chat_provider.dart';
+import '../../features/chat/conversation_screen.dart';
 
 import 'screens/key_verification_screen.dart';
 import 'widgets/trust_badge.dart';
@@ -573,9 +574,17 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
                     const Icon(Icons.chat_bubble_outline, color: AppColors.gold),
                 title: const Text('Nachricht senden'),
                 onTap: () {
-                  // Pop back – caller (ContactsScreen or ConversationsScreen)
-                  // handles navigation to chat.
-                  Navigator.of(context).pop({'action': 'chat', 'did': _contact.did});
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => ChangeNotifierProvider.value(
+                        value: context.read<ChatProvider>(),
+                        child: ConversationScreen(
+                          peerDid: _contact.did,
+                          peerPseudonym: _contact.pseudonym,
+                        ),
+                      ),
+                    ),
+                  );
                 },
               ),
               const Divider(height: 1, indent: 56, color: AppColors.surfaceVariant),

@@ -14,7 +14,10 @@ import 'widgets/trust_badge.dart';
 ///
 /// Accessible from the drawer menu (rootNavigator push, no bottom nav).
 class ContactsScreen extends StatefulWidget {
-  const ContactsScreen({super.key});
+  const ContactsScreen({super.key, this.onContactSelected});
+
+  /// When set, tapping a contact calls this instead of opening ContactDetailScreen.
+  final void Function(Contact)? onContactSelected;
 
   @override
   State<ContactsScreen> createState() => _ContactsScreenState();
@@ -70,6 +73,10 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   void _openDetail(Contact contact) async {
+    if (widget.onContactSelected != null) {
+      widget.onContactSelected!(contact);
+      return;
+    }
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (_) => ContactDetailScreen(did: contact.did),

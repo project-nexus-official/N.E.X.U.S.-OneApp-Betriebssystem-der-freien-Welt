@@ -155,7 +155,27 @@ class _ConversationsScreenState extends State<ConversationsScreen>
 
   void _openContacts() {
     Navigator.of(context, rootNavigator: true).push(
-      MaterialPageRoute<void>(builder: (_) => const ContactsScreen()),
+      MaterialPageRoute<void>(
+        builder: (_) => ChangeNotifierProvider.value(
+          value: context.read<ChatProvider>(),
+          child: ContactsScreen(
+            onContactSelected: (contact) {
+              Navigator.of(context, rootNavigator: true).pop();
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => ChangeNotifierProvider.value(
+                    value: context.read<ChatProvider>(),
+                    child: ConversationScreen(
+                      peerDid: contact.did,
+                      peerPseudonym: contact.pseudonym,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
     );
   }
 
