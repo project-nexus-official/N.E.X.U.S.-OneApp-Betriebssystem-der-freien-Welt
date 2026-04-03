@@ -246,6 +246,38 @@ class UserProfile {
         ),
       );
 
+  /// Returns a flat map of all non-private, non-null/non-empty fields for
+  /// inclusion in the Nostr Kind-0 `nexus_profile` block.
+  ///
+  /// This is the single place that controls which fields are transmitted.
+  /// Adding a new [ProfileField] to [UserProfile] + calling [addIf] here is
+  /// all that is needed to have it published and displayed automatically.
+  Map<String, dynamic> toNexusKind0() {
+    final result = <String, dynamic>{};
+
+    void addIf<T>(String key, ProfileField<T> field) {
+      if (field.visibility == VisibilityLevel.private) return;
+      final v = field.value;
+      if (v == null) return;
+      if (v is String && v.isEmpty) return;
+      if (v is List && (v as List).isEmpty) return;
+      result[key] = v;
+    }
+
+    // Standard fields already sent as top-level Kind-0 keys — skip here.
+    // addIf('pseudonym', pseudonym);  // → "name"
+    // addIf('profileImage', profileImage);  // → "picture"
+    // addIf('bio', bio);  // → "about"
+
+    addIf('languages', languages);
+    addIf('realName', realName);
+    addIf('location', location);
+    addIf('skills', skills);
+    // Future fields: just add addIf('fieldKey', fieldName) here.
+
+    return result;
+  }
+
   /// Returns the subset of profile data visible to a viewer with the given
   /// [allowedLevels] set (derived from the viewer's TrustLevel).
   ///

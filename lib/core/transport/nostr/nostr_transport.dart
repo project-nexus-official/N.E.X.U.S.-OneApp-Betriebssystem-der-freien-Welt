@@ -1,13 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
 
 import 'package:cryptography/cryptography.dart' show AesCbc, MacAlgorithm,
     SecretKey, SecretBox, Mac;
 
 import '../../../core/contacts/contact_service.dart';
 import '../../../core/identity/profile_service.dart';
+import '../../../features/profile/profile_image_service.dart';
 import '../message_transport.dart';
 import '../nexus_message.dart';
 import '../nexus_peer.dart';
@@ -426,24 +430,44 @@ class NostrTransport implements MessageTransport {
     await _sendPresenceAnnouncement();
   }
 
-  /// Publishes a Kind-0 (NIP-01) metadata event with our own display name.
+  /// Publishes a Kind-0 (NIP-01) metadata event with our own display name
+  /// and, if set, profile picture as a base64 data URL.
   ///
   /// Relays store only the latest kind-0 per pubkey, so contacts can fetch it
   /// at any time to learn our pseudonym even without a live presence event.
   Future<void> _publishMetadata() async {
     if (_keys == null) return;
     final name = _effectivePseudonym;
+    final imagePath =
+        ProfileService.instance.currentProfile?.profileImage.value;
+    debugPrint('[Nostr] _publishMetadata called  name=$name  imagePath=$imagePath');
+    final pictureDataUrl =
+        await ProfileImageService.instance.toBase64DataUrl(imagePath);
+
+    final profile = ProfileService.instance.currentProfile;
+    final bio = profile?.bio.value;
+    final content = <String, dynamic>{
+      'name': name,
+      'about': (bio != null && bio.isNotEmpty) ? bio : 'DID: $localDid',
+    };
+    if (pictureDataUrl != null) content['picture'] = pictureDataUrl;
+
+    // Generic NEXUS profile block – all non-private, non-empty fields.
+    final nexusFields = profile?.toNexusKind0() ?? {};
+    if (nexusFields.isNotEmpty) content['nexus_profile'] = nexusFields;
+
+    debugPrint('[Kind0-Send] about=${content["about"]}');
+    debugPrint('[Nostr] picture field present: ${content.containsKey("picture")}  '
+        'length: ${(content["picture"] as String?)?.length ?? 0}');
+
     final event = NostrEvent.create(
       keys: _keys!,
       kind: NostrKind.metadata,
-      content: jsonEncode({
-        'name': name,
-        'about': 'DID: $localDid',
-      }),
+      content: jsonEncode(content),
       tags: [],
     );
     _relayManager.publish(event);
-    print('[NOSTR] Published Kind-0 metadata (name: $name)');
+    debugPrint('[Nostr] Kind-0 event published: ${event.id}');
   }
 
   /// Publishes a Kind 30078 presence announcement so other nodes can find us.
@@ -472,6 +496,26 @@ class NostrTransport implements MessageTransport {
       tags: tags,
     );
     _relayManager.publish(event);
+  }
+
+  /// Actively fetches the latest Kind-0 metadata for a single contact's
+  /// Nostr pubkey.  The relay will return the newest stored kind-0 event,
+  /// which is then processed by the existing [_handleMetadataEvent] handler.
+  /// The subscription is closed after [timeout] (default 5 s).
+  void fetchContactMetadata(
+    String nostrPubkey, {
+    Duration timeout = const Duration(seconds: 5),
+  }) {
+    if (_state != TransportState.connected) return;
+    debugPrint('[Nostr] Active Kind-0 fetch for pubkey=${nostrPubkey.substring(0, 8)}…');
+    final subId = _relayManager.subscribe({
+      'kinds': [NostrKind.metadata],
+      'authors': [nostrPubkey],
+    });
+    Future.delayed(timeout, () {
+      _relayManager.closeSubscription(subId);
+      debugPrint('[Nostr] Kind-0 fetch sub closed: $subId');
+    });
   }
 
   /// Re-subscribes to Kind-0 for all known contacts.
@@ -819,11 +863,16 @@ class NostrTransport implements MessageTransport {
       final name = (data['name'] as String?)?.trim() ?? '';
       final displayName = (data['display_name'] as String?)?.trim() ?? '';
       final resolved = displayName.isNotEmpty ? displayName : name;
+      final picture = data['picture'] as String?;
+      final about = (data['about'] as String?)?.trim();
+      final website = (data['website'] as String?)?.trim();
+      final nip05 = (data['nip05'] as String?)?.trim();
 
-      print('[NOSTR] Kind-0 received: pubkey=${event.pubkey.substring(0, 8)}… '
-          'name="$name" display_name="$displayName"');
-
-      if (resolved.isEmpty) return;
+      debugPrint('[Kind0-Recv] pubkey=${event.pubkey.substring(0, 8)}');
+      debugPrint('[Kind0-Recv] about=${data["about"]}');
+      debugPrint('[Kind0-Recv] raw content=$data');
+      debugPrint('[Nostr] picture field in event: ${data.containsKey("picture")}  '
+          'length: ${picture?.length ?? 0}');
 
       // Resolve the DID for this Nostr pubkey via the reverse map.
       final did = _didToNostrPubkey.entries
@@ -832,17 +881,70 @@ class NostrTransport implements MessageTransport {
           .firstOrNull;
 
       if (did != null) {
-        final oldName =
-            ContactService.instance.findByDid(did)?.pseudonym ?? '?';
-        print('[NOSTR] Kind-0 updating contact: did=…${did.length > 8 ? did.substring(did.length - 8) : did} '
-            '"$oldName" → "$resolved"');
-        ContactService.instance.updatePseudonymIfBetter(did, resolved);
+        debugPrint('[Nostr] Kind-0 resolved DID: …${did.length > 8 ? did.substring(did.length - 8) : did}');
+        if (resolved.isNotEmpty) {
+          final oldName =
+              ContactService.instance.findByDid(did)?.pseudonym ?? '?';
+          debugPrint('[Nostr] Kind-0 updating contact: "$oldName" → "$resolved"');
+          ContactService.instance.updatePseudonymIfBetter(did, resolved);
+        }
+        // Save about/website/nip05 if present.
+        // Skip the "DID: did:key:…" placeholder we inject ourselves.
+        final aboutClean = (about != null &&
+                !about.startsWith('DID: did:key:') &&
+                !about.startsWith('DID: did:web:'))
+            ? about
+            : null;
+        if (aboutClean != null || website != null || nip05 != null) {
+          ContactService.instance.updateMetadataFields(
+            did,
+            about: aboutClean,
+            website: website,
+            nip05: nip05,
+          );
+        }
+
+        // Generic NEXUS profile block (languages, realName, location, skills, …).
+        final nexusProfile = data['nexus_profile'];
+        if (nexusProfile is Map<String, dynamic> && nexusProfile.isNotEmpty) {
+          debugPrint('[Kind0-Recv] nexus_profile keys: ${nexusProfile.keys.toList()}');
+          ContactService.instance.updateNexusProfile(did, nexusProfile);
+        }
+        // Save profile picture if provided and the cached file is missing.
+        if (picture != null && picture.isNotEmpty) {
+          final contact = ContactService.instance.findByDid(did);
+          _savePeerPicture(did, picture, contact?.profileImage);
+        }
       } else {
-        print('[NOSTR] Kind-0 DID not found for pubkey: '
-            '${event.pubkey.substring(0, 8)}… '
+        debugPrint('[Nostr] Kind-0 DID not found for pubkey: ${event.pubkey}  '
             '(known mappings: ${_didToNostrPubkey.length})');
       }
     } catch (_) {}
+  }
+
+  /// Saves a peer's profile picture (base64 data URL or HTTPS URL) to a local
+  /// file and updates the contact record.  Runs asynchronously to avoid
+  /// blocking the event handler.
+  void _savePeerPicture(
+      String did, String picture, String? existingPath) {
+    // Skip only if the cached file actually exists on disk.
+    if (existingPath != null && File(existingPath).existsSync()) {
+      debugPrint('[Nostr] _savePeerPicture: already cached at $existingPath, skip');
+      return;
+    }
+
+    if (picture.startsWith('data:')) {
+      // Embedded base64 image – decode and save locally.
+      ProfileImageService.instance.saveFromBase64(picture).then((path) {
+        if (path != null) {
+          ContactService.instance.updateProfileImage(did, path);
+          debugPrint('[Nostr] Saved peer picture to $path  '
+              'did=…${did.length > 8 ? did.substring(did.length - 8) : did}');
+        }
+      }).catchError((_) {});
+    }
+    // HTTPS URLs are intentionally not downloaded here (no http dependency in
+    // the transport layer).  A future enhancement could add a download step.
   }
 
   void _learnPeer(

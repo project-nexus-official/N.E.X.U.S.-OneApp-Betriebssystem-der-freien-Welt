@@ -21,7 +21,7 @@ import '../../core/transport/nexus_peer.dart';
 import '../../services/notification_service.dart';
 import '../../services/role_service.dart';
 import '../../shared/theme/app_theme.dart';
-import '../../shared/widgets/highlighted_text.dart';
+import '../../shared/widgets/linkified_text.dart';
 import '../contacts/contact_detail_screen.dart';
 import '../contacts/widgets/trust_badge.dart';
 import 'chat_provider.dart';
@@ -1982,13 +1982,11 @@ class _TextContent extends StatelessWidget {
         crossAxisAlignment:
             isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
-          highlightQuery.isNotEmpty
-              ? HighlightedText(
-                  text: message.body,
-                  query: highlightQuery,
-                  style: textStyle,
-                )
-              : Text(message.body, style: textStyle),
+          LinkifiedText(
+            text: message.body,
+            query: highlightQuery,
+            style: textStyle,
+          ),
           const SizedBox(height: 2),
           Row(
             mainAxisSize: MainAxisSize.min,

@@ -1,11 +1,9 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexus_oneapp/core/contacts/contact.dart';
 import 'package:nexus_oneapp/core/contacts/contact_service.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
-import 'package:nexus_oneapp/shared/widgets/identicon.dart';
+import 'package:nexus_oneapp/shared/widgets/peer_avatar.dart';
 
 import '../invite/invite_screen.dart';
 import 'contact_detail_screen.dart';
@@ -309,12 +307,7 @@ class _ContactTile extends StatelessWidget {
 
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      leading: ClipOval(
-        child: Identicon(
-          bytes: utf8.encode(contact.did),
-          size: 48,
-        ),
-      ),
+      leading: PeerAvatar(did: contact.did, profileImage: contact.profileImage),
       title: Row(
         children: [
           Expanded(

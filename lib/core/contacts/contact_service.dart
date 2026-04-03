@@ -315,6 +315,77 @@ class ContactService {
     _contactsChangedController.add(null);
   }
 
+  /// Merges [fields] into the contact's [nexusProfile] map and persists.
+  /// Only entries with non-null, non-empty values are written; existing keys
+  /// not present in [fields] are left unchanged (additive merge).
+  Future<void> updateNexusProfile(
+      String did, Map<String, dynamic> fields) async {
+    final contact = _findByDid(did);
+    if (contact == null) return;
+    bool changed = false;
+    for (final entry in fields.entries) {
+      final v = entry.value;
+      if (v == null) continue;
+      if (v is String && v.isEmpty) continue;
+      if (v is List && v.isEmpty) continue;
+      if (contact.nexusProfile[entry.key] == v) continue;
+      contact.nexusProfile[entry.key] = v;
+      changed = true;
+    }
+    if (!changed) return;
+    await _persist(contact);
+    _contactsChangedController.add(null);
+  }
+
+  /// Updates the Nostr Kind-0 metadata fields (about, website, nip05)
+  /// for a contact.  Only non-null arguments overwrite existing values.
+  Future<void> updateMetadataFields(
+    String did, {
+    String? about,
+    String? website,
+    String? nip05,
+  }) async {
+    final contact = _findByDid(did);
+    if (contact == null) return;
+    bool changed = false;
+    if (about != null && about.isNotEmpty && contact.about != about) {
+      contact.about = about;
+      changed = true;
+    }
+    if (website != null && website.isNotEmpty && contact.website != website) {
+      contact.website = website;
+      changed = true;
+    }
+    if (nip05 != null && nip05.isNotEmpty && contact.nip05 != nip05) {
+      contact.nip05 = nip05;
+      changed = true;
+    }
+    if (!changed) return;
+    await _persist(contact);
+    _contactsChangedController.add(null);
+  }
+
+  /// Updates the locally cached profile image path for a contact.
+  /// Called when a Kind-0 event arrives with a `picture` field.
+  Future<void> updateProfileImage(String did, String? localPath) async {
+    debugPrint('[Contact] updateProfileImage called for did=…'
+        '${did.length > 8 ? did.substring(did.length - 8) : did}  '
+        'path=$localPath');
+    final contact = _findByDid(did);
+    if (contact == null) {
+      debugPrint('[Contact] updateProfileImage: contact not found');
+      return;
+    }
+    if (contact.profileImage == localPath) {
+      debugPrint('[Contact] updateProfileImage: path unchanged, skip');
+      return;
+    }
+    contact.profileImage = localPath;
+    await _persist(contact);
+    debugPrint('[Contact] updateProfileImage: saved to path=$localPath');
+    _contactsChangedController.add(null);
+  }
+
   /// Returns true when [value] is just the tail fragment of [did] (i.e. was
   /// generated as a fallback, not supplied by the peer themselves).
   bool _isDidFragment(String value, String did) {

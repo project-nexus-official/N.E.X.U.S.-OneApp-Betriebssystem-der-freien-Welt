@@ -86,6 +86,17 @@ class Contact {
   String? previousEncryptionPublicKey; // for key-change warning
   String? nostrPubkey; // Nostr public key hex (32 bytes = 64 hex chars)
 
+  // ── Nostr Kind-0 metadata fields (received via relay) ─────────────────────
+  String? about;   // bio / description from Kind-0 "about"
+  String? website; // website URL from Kind-0 "website"
+  String? nip05;   // verified Nostr address from Kind-0 "nip05"
+
+  /// Generic NEXUS profile fields received via Kind-0 `nexus_profile` block.
+  /// Keys match [UserProfile] field names (e.g. "realName", "location",
+  /// "languages", "skills").  New fields added to [UserProfile] are stored
+  /// here automatically without any schema change.
+  Map<String, dynamic> nexusProfile;
+
   Contact({
     required this.did,
     required this.pseudonym,
@@ -99,7 +110,11 @@ class Contact {
     this.encryptionPublicKey,
     this.previousEncryptionPublicKey,
     this.nostrPubkey,
-  });
+    this.about,
+    this.website,
+    this.nip05,
+    Map<String, dynamic>? nexusProfile,
+  }) : nexusProfile = nexusProfile ?? {};
 
   Map<String, dynamic> toJson() => {
         'did': did,
@@ -114,6 +129,10 @@ class Contact {
         'encryptionPublicKey': encryptionPublicKey,
         'previousEncryptionPublicKey': previousEncryptionPublicKey,
         'nostrPubkey': nostrPubkey,
+        'about': about,
+        'website': website,
+        'nip05': nip05,
+        'nexusProfile': nexusProfile.isEmpty ? null : nexusProfile,
       };
 
   factory Contact.fromJson(Map<String, dynamic> json) => Contact(
@@ -132,6 +151,10 @@ class Contact {
         encryptionPublicKey: json['encryptionPublicKey'] as String?,
         previousEncryptionPublicKey: json['previousEncryptionPublicKey'] as String?,
         nostrPubkey: json['nostrPubkey'] as String?,
+        about: json['about'] as String?,
+        website: json['website'] as String?,
+        nip05: json['nip05'] as String?,
+        nexusProfile: (json['nexusProfile'] as Map<String, dynamic>?) ?? {},
       );
 
   static DateTime _parseDate(dynamic v) {

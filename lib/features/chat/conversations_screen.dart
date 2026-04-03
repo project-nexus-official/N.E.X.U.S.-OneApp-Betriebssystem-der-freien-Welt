@@ -10,7 +10,7 @@ import '../../core/transport/message_transport.dart';
 import '../../core/roles/role_enums.dart';
 import '../../services/role_service.dart';
 import '../../shared/theme/app_theme.dart';
-import '../../shared/widgets/identicon.dart';
+import '../../shared/widgets/peer_avatar.dart';
 import '../contacts/contacts_screen.dart';
 import '../contacts/widgets/trust_badge.dart';
 import 'channel_conversation_screen.dart';
@@ -182,16 +182,18 @@ class _ConversationsScreenState extends State<ConversationsScreen>
   }
 
   Future<void> _deleteConversation(Conversation conv) async {
-    await context.read<ChatProvider>().deleteConversation(conv.id);
+    if (conv.isGroup) {
+      // Group channel: must remove from group_channels DB + memory + Nostr.
+      await context.read<ChatProvider>().leaveOrDeleteChannel(conv.id);
+    } else {
+      await context.read<ChatProvider>().deleteConversation(conv.id);
+    }
     await _loadConversations();
   }
 
   /// Leaves a group channel (member action – only removes it for this user).
   Future<void> _leaveChannel(Conversation conv) async {
-    try {
-      await GroupChannelService.instance.leaveChannel(conv.id);
-    } catch (_) {}
-    await context.read<ChatProvider>().deleteConversation(conv.id);
+    await context.read<ChatProvider>().leaveOrDeleteChannel(conv.id);
     await _loadConversations();
   }
 
@@ -743,11 +745,7 @@ class _Avatar extends StatelessWidget {
       }
       return _CircleIcon(icon: isPrivate ? Icons.lock : Icons.group);
     }
-    if (conv.peerProfileImage != null) {
-      // TODO: load from local file path when profile image caching is added.
-    }
-    final didBytes = conv.peerDid.codeUnits;
-    return ClipOval(child: Identicon(bytes: didBytes, size: 48));
+    return PeerAvatar(did: conv.peerDid, profileImage: conv.peerProfileImage);
   }
 }
 

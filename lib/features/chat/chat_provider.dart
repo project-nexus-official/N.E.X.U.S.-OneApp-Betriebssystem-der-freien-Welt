@@ -85,6 +85,15 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// so peers see the update without waiting for the next heartbeat.
   Future<void> republishIdentity() => _nostrTransport?.republishMetadata() ?? Future.value();
 
+  /// Actively fetches the latest Kind-0 metadata from Nostr relays for [did].
+  /// No-op if the contact has no known Nostr pubkey or Nostr is not connected.
+  void fetchContactMetadata(String did) {
+    final contact = ContactService.instance.findByDid(did);
+    final pubkey = contact?.nostrPubkey;
+    if (pubkey == null || pubkey.isEmpty) return;
+    _nostrTransport?.fetchContactMetadata(pubkey);
+  }
+
   List<NexusPeer> get peers => _manager.peers;
 
   // Per-conversation cached messages
@@ -1440,6 +1449,33 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     _conversationCache.remove(conversationId);
     _cacheLoadedFromDb.remove(conversationId);
     await ConversationService.instance.deleteConversation(conversationId);
+    notifyListeners();
+  }
+
+  /// Fully removes a group channel for this user: removes it from
+  /// [GroupChannelService] (DB + memory), stops the Nostr subscription,
+  /// and deletes all local messages.
+  ///
+  /// Used for both the admin "delete channel" and member "leave channel"
+  /// actions so every exit path cleans up all three layers.
+  Future<void> leaveOrDeleteChannel(String channelName) async {
+    final channel = GroupChannelService.instance.findByName(channelName);
+    final nostrTag = channel?.nostrTag;
+
+    // 1. Remove from group_channels DB + _joined in-memory list.
+    try {
+      await GroupChannelService.instance.leaveChannel(channelName);
+    } catch (_) {}
+
+    // 2. Stop Nostr subscription so the relay stops delivering messages.
+    if (nostrTag != null) {
+      _nostrTransport?.unsubscribeFromChannel(nostrTag);
+    }
+
+    // 3. Delete all local messages for this channel.
+    _conversationCache.remove(channelName);
+    _cacheLoadedFromDb.remove(channelName);
+    await ConversationService.instance.deleteConversation(channelName);
     notifyListeners();
   }
 

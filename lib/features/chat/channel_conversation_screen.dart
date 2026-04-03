@@ -18,6 +18,7 @@ import '../../core/storage/pod_database.dart';
 import '../../core/transport/nexus_message.dart';
 import '../../services/role_service.dart';
 import '../../shared/theme/app_theme.dart';
+import '../../shared/widgets/linkified_text.dart';
 import 'channel_access_service.dart';
 import 'channel_share_sheet.dart';
 import 'chat_provider.dart';
@@ -1341,8 +1342,10 @@ class _ChannelMessageBubble extends StatelessWidget {
     } else if (msg.type == NexusMessageType.voice) {
       return _VoiceBubble(message: msg);
     } else {
-      return Text(msg.body,
-          style: const TextStyle(color: AppColors.onDark));
+      return LinkifiedText(
+        text: msg.body,
+        style: const TextStyle(color: AppColors.onDark),
+      );
     }
   }
 

@@ -1,13 +1,17 @@
-import 'dart:convert';
+import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:nexus_oneapp/core/contacts/contact.dart';
 import 'package:nexus_oneapp/core/contacts/contact_service.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
-import 'package:nexus_oneapp/core/identity/profile.dart';
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
-import 'package:nexus_oneapp/shared/widgets/identicon.dart';
+import 'package:nexus_oneapp/shared/widgets/peer_avatar.dart';
+import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../../features/chat/chat_provider.dart';
 
 import 'screens/key_verification_screen.dart';
 import 'widgets/trust_badge.dart';
@@ -27,11 +31,20 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
   bool _notFound = false;
   final _notesCtrl = TextEditingController();
   bool _editingNotes = false;
+  StreamSubscription<void>? _contactsSub;
 
   @override
   void initState() {
     super.initState();
     _load();
+    // Reload when ContactService updates (e.g. after Kind-0 fetch completes).
+    _contactsSub = ContactService.instance.contactsChanged.listen((_) => _load());
+    // Actively fetch fresh Kind-0 metadata from Nostr relays.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<ChatProvider>().fetchContactMetadata(widget.did);
+      }
+    });
   }
 
   void _load() {
@@ -49,6 +62,7 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
 
   @override
   void dispose() {
+    _contactsSub?.cancel();
     _notesCtrl.dispose();
     super.dispose();
   }
@@ -258,6 +272,9 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
       );
     }
 
+    debugPrint('[ContactDetail] contact.about=${_contact.about}  '
+        'website=${_contact.website}  nip05=${_contact.nip05}');
+
     final myDid = IdentityService.instance.currentIdentity?.did ?? '';
     final shortDid = _contact.did.length > 20
         ? '${_contact.did.substring(0, 10)}…${_contact.did.substring(_contact.did.length - 8)}'
@@ -308,11 +325,10 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
             padding: const EdgeInsets.symmetric(vertical: 28),
             child: Column(
               children: [
-                ClipOval(
-                  child: Identicon(
-                    bytes: utf8.encode(_contact.did),
-                    size: 80,
-                  ),
+                PeerAvatar(
+                  did: _contact.did,
+                  profileImage: _contact.profileImage,
+                  size: 80,
                 ),
                 const SizedBox(height: 12),
                 Text(
@@ -501,42 +517,8 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
           const SizedBox(height: 8),
 
           // ── Visible profile fields ───────────────────────────────────────
-          _SectionHeader('FREIGEGEBENE PROFILFELDER'),
-          _InfoCard(
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Als ${_contact.trustLevel.label} siehst du:',
-                      style: const TextStyle(
-                        color: Colors.grey,
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    ..._contact.trustLevel.allowedVisibility.map((v) => Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.check_circle_outline,
-                                  size: 14, color: Colors.greenAccent),
-                              const SizedBox(width: 6),
-                              Text(
-                                v.label,
-                                style: const TextStyle(
-                                    color: AppColors.onDark, fontSize: 13),
-                              ),
-                            ],
-                          ),
-                        )),
-                  ],
-                ),
-              ),
-            ],
-          ),
+          _SectionHeader('PROFILINFOS'),
+          _ProfileFieldsCard(contact: _contact),
 
           const SizedBox(height: 8),
 
@@ -664,6 +646,136 @@ class _InfoCard extends StatelessWidget {
     return Container(
       color: AppColors.surface,
       child: Column(children: children),
+    );
+  }
+}
+
+/// German labels for known nexus_profile field keys.
+/// Add new entries here when new fields are added to [UserProfile].
+const _kNexusFieldLabels = <String, String>{
+  'realName':  'KLARNAME',
+  'location':  'STANDORT',
+  'languages': 'SPRACHEN',
+  'skills':    'FÄHIGKEITEN',
+};
+
+/// Shows the contact's Kind-0 metadata fields (about, website, nip05,
+/// and generic nexus_profile fields like realName, location, languages, skills).
+class _ProfileFieldsCard extends StatelessWidget {
+  const _ProfileFieldsCard({required this.contact});
+  final Contact contact;
+
+  /// Converts a profile field value to a displayable string.
+  String _format(dynamic value) {
+    if (value is List) return value.join(', ');
+    return value.toString();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fields = <Widget>[];
+
+    if (contact.about != null && contact.about!.isNotEmpty) {
+      fields.add(_FieldTile(label: 'BIO', value: contact.about!));
+    }
+
+    if (contact.website != null && contact.website!.isNotEmpty) {
+      fields.add(_FieldTile(
+        label: 'WEBSITE',
+        value: contact.website!,
+        onTap: () async {
+          final uri = Uri.tryParse(contact.website!);
+          if (uri != null && await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          }
+        },
+        isLink: true,
+      ));
+    }
+
+    if (contact.nip05 != null && contact.nip05!.isNotEmpty) {
+      fields.add(_FieldTile(label: 'NOSTR-ADRESSE', value: contact.nip05!));
+    }
+
+    // Generic nexus_profile fields – automatically includes any future fields.
+    for (final entry in contact.nexusProfile.entries) {
+      final v = entry.value;
+      if (v == null) continue;
+      final display = _format(v);
+      if (display.isEmpty) continue;
+      final label = _kNexusFieldLabels[entry.key]
+          ?? entry.key.toUpperCase(); // fallback for unknown future fields
+      fields.add(_FieldTile(label: label, value: display));
+    }
+
+    if (fields.isEmpty) {
+      return Container(
+        color: AppColors.surface,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: const Text(
+          'Dieser Kontakt hat keine weiteren Profilinfos geteilt.',
+          style: TextStyle(color: Colors.grey, fontSize: 13),
+        ),
+      );
+    }
+
+    return Container(
+      color: AppColors.surface,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: fields
+            .expand((w) => [w, const Divider(height: 1, indent: 16, color: AppColors.surfaceVariant)])
+            .toList()
+          ..removeLast(), // remove trailing divider
+      ),
+    );
+  }
+}
+
+class _FieldTile extends StatelessWidget {
+  const _FieldTile({
+    required this.label,
+    required this.value,
+    this.onTap,
+    this.isLink = false,
+  });
+
+  final String label;
+  final String value;
+  final VoidCallback? onTap;
+  final bool isLink;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(
+                color: AppColors.gold,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 1.2,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: TextStyle(
+                color: isLink ? const Color(0xFF64B5F6) : AppColors.onDark,
+                fontSize: 14,
+                decoration: isLink ? TextDecoration.underline : null,
+                decorationColor: isLink ? const Color(0xFF64B5F6) : null,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
