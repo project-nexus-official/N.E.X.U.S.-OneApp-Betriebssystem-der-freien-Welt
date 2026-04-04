@@ -480,6 +480,12 @@ class _FeedListState extends State<_FeedList>
         },
         child: ListView.builder(
           controller: _scrollCtrl,
+          // Pre-render 600 px above/below viewport to reduce build jank.
+          cacheExtent: 600,
+          // Keep-alive wrapping adds per-item overhead; disable it.
+          addAutomaticKeepAlives: false,
+          // RepaintBoundary is already the default but we make it explicit.
+          addRepaintBoundaries: true,
           // Limit in-memory list to 50 posts for smooth performance.
           itemCount: widget.posts.length.clamp(0, 50) + (_loadingMore ? 1 : 0),
           itemBuilder: (ctx, i) {
@@ -490,12 +496,14 @@ class _FeedListState extends State<_FeedList>
               );
             }
             final post = widget.posts[i];
-            return FeedPostCard(
-              key: ValueKey(post.id),
-              post: post,
-              onTap: () => widget.onTap(post),
-              onCommentTap: () => widget.onCommentTap(post),
-              onMenuTap: () => widget.onMenuTap(post),
+            return RepaintBoundary(
+              child: FeedPostCard(
+                key: ValueKey(post.id),
+                post: post,
+                onTap: () => widget.onTap(post),
+                onCommentTap: () => widget.onCommentTap(post),
+                onMenuTap: () => widget.onMenuTap(post),
+              ),
             );
           },
         ),

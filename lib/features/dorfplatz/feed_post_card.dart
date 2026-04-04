@@ -47,6 +47,14 @@ class FeedPostCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: AppColors.onDark.withValues(alpha: 0.08),
+          width: 1,
+        ),
+      ),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(16),
@@ -726,6 +734,13 @@ class _FooterState extends State<_Footer> {
   void initState() {
     super.initState();
     _loadData();
+  }
+
+  @override
+  void didUpdateWidget(_Footer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Only reload if the post changed (avoids spurious DB reads on parent rebuild).
+    if (oldWidget.post.id != widget.post.id) _loadData();
   }
 
   Future<void> _loadData() async {
