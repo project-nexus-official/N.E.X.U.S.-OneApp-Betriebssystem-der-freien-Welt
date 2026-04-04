@@ -43,6 +43,7 @@ class ConversationScreen extends StatefulWidget {
     this.isBroadcast = false,
     this.peer,
     this.scrollToMessageId,
+    this.initialDraftText,
   });
 
   final String peerDid;
@@ -57,6 +58,9 @@ class ConversationScreen extends StatefulWidget {
   /// When set (e.g. from global search), scroll to and highlight this message
   /// after loading the conversation.
   final String? scrollToMessageId;
+
+  /// When set, pre-populates the message input field with this text.
+  final String? initialDraftText;
 
   @override
   State<ConversationScreen> createState() => _ConversationScreenState();
@@ -139,6 +143,11 @@ class _ConversationScreenState extends State<ConversationScreen> {
     _loadMessages();
     _loadRetention();
     _scrollCtrl.addListener(_onScroll);
+    if (widget.initialDraftText != null) {
+      _textCtrl.text = widget.initialDraftText!;
+      _textCtrl.selection =
+          TextSelection.collapsed(offset: _textCtrl.text.length);
+    }
     // Listen for contact request status changes (e.g. when request accepted).
     _requestSub = ContactRequestService.instance.stream.listen((_) {
       if (mounted) setState(() {});

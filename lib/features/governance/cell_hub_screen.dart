@@ -3,10 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
+import '../../core/contacts/contact_service.dart';
+import '../../core/config/system_config.dart';
 import '../../core/identity/identity_service.dart';
 import '../../core/roles/permission_helper.dart';
 import '../../core/utils/geohash.dart';
 import '../../shared/theme/app_theme.dart';
+import '../chat/conversation_screen.dart';
 import 'cell.dart';
 import 'cell_member.dart';
 import 'cell_service.dart';
@@ -85,6 +88,36 @@ class _CellHubScreenState extends State<CellHubScreen> {
     );
   }
 
+  void _requestCellCreation(BuildContext context) {
+    final superadminDid = SystemConfig.instance.superadminDid;
+    if (superadminDid == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Kontaktiere einen Admin über den Chat, um eine Zelle zu gründen.'),
+          backgroundColor: Colors.blueGrey,
+        ),
+      );
+      return;
+    }
+    final myPseudonym =
+        IdentityService.instance.currentIdentity?.pseudonym ?? '';
+    final adminName =
+        ContactService.instance.getDisplayName(superadminDid);
+    final prefill =
+        'Hallo, ich möchte eine Zelle gründen. Kannst du mir dabei helfen? '
+        '(Anfrage von $myPseudonym)';
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ConversationScreen(
+          peerDid: superadminDid,
+          peerPseudonym: adminName,
+          initialDraftText: prefill,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final myCells = CellService.instance.myCells;
@@ -106,12 +139,23 @@ class _CellHubScreenState extends State<CellHubScreen> {
               icon: const Icon(Icons.add),
               label: const Text('Zelle gründen'),
             )
-          : null,
+          : FloatingActionButton.extended(
+              onPressed: () => _requestCellCreation(context),
+              backgroundColor: AppColors.surface,
+              foregroundColor: AppColors.gold,
+              icon: const Icon(Icons.mail_outline),
+              label: const Text('Zellgründung anfragen'),
+            ),
       body: myCells.isEmpty
           ? _EmptyState(
               onCreateTap: canCreate ? _openCreate : null,
+              onRequestCreate: () => _requestCellCreation(context),
+              canCreate: canCreate,
               myGeohash: _myGeohash,
               gpsUnavailable: _gpsUnavailable,
+              selectedCategory: _selectedCategory,
+              onCategoryChanged: (cat) =>
+                  setState(() => _selectedCategory = cat),
             )
           : _FilledState(
               myCells: myCells,
@@ -121,6 +165,8 @@ class _CellHubScreenState extends State<CellHubScreen> {
                   setState(() => _selectedCategory = cat),
               onCellTap: _openCell,
               onCreateTap: canCreate ? _openCreate : null,
+              onRequestCreate: () => _requestCellCreation(context),
+              canCreate: canCreate,
               myGeohash: _myGeohash,
               gpsUnavailable: _gpsUnavailable,
             ),
@@ -132,18 +178,37 @@ class _CellHubScreenState extends State<CellHubScreen> {
 
 class _EmptyState extends StatelessWidget {
   final VoidCallback? onCreateTap;
+  final VoidCallback onRequestCreate;
+  final bool canCreate;
   final String? myGeohash;
   final bool gpsUnavailable;
+  final String selectedCategory;
+  final ValueChanged<String> onCategoryChanged;
+
   const _EmptyState({
     required this.onCreateTap,
+    required this.onRequestCreate,
+    required this.canCreate,
     required this.myGeohash,
     required this.gpsUnavailable,
+    required this.selectedCategory,
+    required this.onCategoryChanged,
   });
 
   @override
   Widget build(BuildContext context) {
     final discovered = CellService.instance.discoveredCells;
     final nearby = _nearbyCells(discovered, myGeohash);
+    final allCategories = ['Alle', ...cellCategories];
+    final thematic = discovered
+        .where((c) => c.cellType == CellType.thematic)
+        .toList();
+    final filteredThematic = selectedCategory == 'Alle'
+        ? thematic
+        : thematic
+            .where((c) => c.category == selectedCategory)
+            .toList();
+    final recommended = _recommendedCells(discovered);
 
     return CustomScrollView(
       slivers: [
@@ -176,29 +241,107 @@ class _EmptyState extends StatelessWidget {
           ),
         ),
 
-        // Nearby section
+        // Nearby section (GPS-based)
         _NearbySection(
           nearbyCells: nearby,
           myGeohash: myGeohash,
           gpsUnavailable: gpsUnavailable,
         ),
 
-        if (discovered.isNotEmpty) ...[
-          _SectionHeader(title: 'Entdeckte Zellen'),
+        // Recommended: cells where contacts are members
+        if (recommended.isNotEmpty) ...[
+          _SectionHeader(title: 'Empfohlen für dich'),
           SliverList(
             delegate: SliverChildBuilderDelegate(
-              (context, i) => _DiscoveredCellTile(cell: discovered[i]),
-              childCount: discovered.length,
+              (context, i) => _DiscoveredCellTile(cell: recommended[i]),
+              childCount: recommended.length,
             ),
           ),
         ],
+
+        // Thematic cells with category chips + search
+        _SectionHeader(title: 'Thematische Zellen'),
+        SliverToBoxAdapter(
+          child: SizedBox(
+            height: 44,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: allCategories.length,
+              itemBuilder: (context, i) {
+                final cat = allCategories[i];
+                final selected = cat == selectedCategory;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: Text(cat),
+                    selected: selected,
+                    onSelected: (_) => onCategoryChanged(cat),
+                    selectedColor: AppColors.gold,
+                    labelStyle: TextStyle(
+                      color: selected ? Colors.black : AppColors.onDark,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    backgroundColor: AppColors.surface,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      side: BorderSide(
+                        color: selected
+                            ? AppColors.gold
+                            : AppColors.surfaceVariant,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 8)),
+        if (filteredThematic.isEmpty)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                discovered.isEmpty
+                    ? 'Noch keine Zellen entdeckt. Sobald Zellen im NEXUS-Netzwerk '
+                        'bekannt sind, erscheinen sie hier.'
+                    : 'Keine thematischen Zellen in dieser Kategorie gefunden.',
+                style: TextStyle(
+                  color: AppColors.onDark.withValues(alpha: 0.5),
+                  fontSize: 13,
+                  height: 1.5,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          )
+        else
+          SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, i) => _DiscoveredCellTile(cell: filteredThematic[i]),
+              childCount: filteredThematic.length,
+            ),
+          ),
+
+        // Cell creation section
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SizedBox(height: 16),
-                if (onCreateTap != null)
+                Divider(color: AppColors.surfaceVariant),
+                const SizedBox(height: 12),
+                Text(
+                  'Keine passende Zelle gefunden?',
+                  style: TextStyle(
+                    color: AppColors.onDark.withValues(alpha: 0.7),
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (canCreate)
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
@@ -217,21 +360,28 @@ class _EmptyState extends StatelessWidget {
                     ),
                   )
                 else
-                  Text(
-                    'Zellen können derzeit nur von System-Admins gegründet werden. '
-                    'Stelle einer bestehenden Zelle eine Beitrittsanfrage.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: AppColors.onDark.withValues(alpha: 0.5),
-                      fontSize: 13,
-                      height: 1.5,
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: onRequestCreate,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.gold,
+                        side: BorderSide(color: AppColors.gold),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      icon: const Icon(Icons.mail_outline),
+                      label: const Text('Zellgründung anfragen',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
                     ),
                   ),
               ],
             ),
           ),
         ),
-        const SliverToBoxAdapter(child: SizedBox(height: 80)),
+        const SliverToBoxAdapter(child: SizedBox(height: 100)),
       ],
     );
   }
@@ -246,6 +396,8 @@ class _FilledState extends StatelessWidget {
   final ValueChanged<String> onCategoryChanged;
   final ValueChanged<Cell> onCellTap;
   final VoidCallback? onCreateTap;
+  final VoidCallback onRequestCreate;
+  final bool canCreate;
   final String? myGeohash;
   final bool gpsUnavailable;
 
@@ -256,6 +408,8 @@ class _FilledState extends StatelessWidget {
     required this.onCategoryChanged,
     required this.onCellTap,
     required this.onCreateTap,
+    required this.onRequestCreate,
+    required this.canCreate,
     required this.myGeohash,
     required this.gpsUnavailable,
   });
@@ -264,9 +418,13 @@ class _FilledState extends StatelessWidget {
   Widget build(BuildContext context) {
     final allCategories = ['Alle', ...cellCategories];
     final nearby = _nearbyCells(discovered, myGeohash);
+    final recommended = _recommendedCells(discovered);
+    final thematic = discovered
+        .where((c) => c.cellType == CellType.thematic)
+        .toList();
     final filtered = selectedCategory == 'Alle'
-        ? discovered
-        : discovered.where((c) => c.category == selectedCategory).toList();
+        ? thematic
+        : thematic.where((c) => c.category == selectedCategory).toList();
 
     return CustomScrollView(
       slivers: [
@@ -282,17 +440,26 @@ class _FilledState extends StatelessWidget {
           ),
         ),
 
-        // Nearby section
+        // Nearby section (GPS-based)
         _NearbySection(
           nearbyCells: nearby,
           myGeohash: myGeohash,
           gpsUnavailable: gpsUnavailable,
         ),
 
-        // Discovery section header
-        _SectionHeader(title: 'Weitere Zellen entdecken'),
+        // Recommended: cells where contacts are members
+        if (recommended.isNotEmpty) ...[
+          _SectionHeader(title: 'Empfohlen für dich'),
+          SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, i) => _DiscoveredCellTile(cell: recommended[i]),
+              childCount: recommended.length,
+            ),
+          ),
+        ],
 
-        // Category filter chips
+        // Thematic cells with category chips
+        _SectionHeader(title: 'Thematische Zellen'),
         SliverToBoxAdapter(
           child: SizedBox(
             height: 44,
@@ -331,13 +498,12 @@ class _FilledState extends StatelessWidget {
         ),
         const SliverToBoxAdapter(child: SizedBox(height: 8)),
 
-        // Discovered cells list
         if (filtered.isEmpty)
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.all(24),
               child: Text(
-                'Keine Zellen in dieser Kategorie entdeckt.',
+                'Keine thematischen Zellen in dieser Kategorie entdeckt.',
                 style: TextStyle(
                   color: AppColors.onDark.withValues(alpha: 0.5),
                 ),
@@ -353,13 +519,50 @@ class _FilledState extends StatelessWidget {
             ),
           ),
 
-        const SliverToBoxAdapter(child: SizedBox(height: 80)),
+        // Non-admin: "Zellgründung anfragen" button
+        if (!canCreate)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: OutlinedButton.icon(
+                onPressed: onRequestCreate,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.gold,
+                  side: BorderSide(color: AppColors.gold),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                icon: const Icon(Icons.mail_outline),
+                label: const Text('Neue Zelle gründen (anfragen)',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ),
+
+        const SliverToBoxAdapter(child: SizedBox(height: 100)),
       ],
     );
   }
 }
 
 // ── Nearby helpers ────────────────────────────────────────────────────────────
+
+/// Returns discovered cells where at least one of the user's contacts is a
+/// member. Excludes cells the user is already in.
+List<Cell> _recommendedCells(List<Cell> discovered) {
+  final contactDids =
+      ContactService.instance.contacts.map((c) => c.did).toSet();
+  if (contactDids.isEmpty) return [];
+  final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+  return discovered.where((cell) {
+    if (CellService.instance.isMember(cell.id)) return false;
+    final members = CellService.instance.membersOf(cell.id);
+    return members.any(
+        (m) => m.did != myDid && contactDids.contains(m.did));
+  }).toList();
+}
 
 /// Returns local cells sorted by geohash proximity.
 /// A common prefix of ≥4 characters (≈40 km) is considered "nearby".
