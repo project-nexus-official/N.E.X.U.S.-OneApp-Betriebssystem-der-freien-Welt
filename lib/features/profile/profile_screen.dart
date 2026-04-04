@@ -259,6 +259,88 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  /// Opens an inline visibility picker for the profile picture and saves
+  /// immediately – no need to enter full "Profil bearbeiten" for this.
+  void _changeImageVisibility(UserProfile profile) {
+    showModalBottomSheet<VisibilityLevel>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.photo_camera_outlined,
+                      color: AppColors.gold, size: 20),
+                  const SizedBox(width: 8),
+                  const Text('Profilbild – Sichtbarkeit',
+                      style: TextStyle(
+                          color: AppColors.gold,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16)),
+                ],
+              ),
+            ),
+            ...VisibilityLevel.values.map((level) => ListTile(
+                  leading: Icon(
+                    _visibilityIcon(level),
+                    color: profile.profileImage.visibility == level
+                        ? AppColors.gold
+                        : AppColors.onDark.withValues(alpha: 0.5),
+                  ),
+                  title: Text(level.label,
+                      style: TextStyle(
+                          color: profile.profileImage.visibility == level
+                              ? AppColors.gold
+                              : AppColors.onDark)),
+                  subtitle: Text(
+                    _visibilityDescription(level),
+                    style: TextStyle(
+                        color: AppColors.onDark.withValues(alpha: 0.45),
+                        fontSize: 11),
+                  ),
+                  trailing: profile.profileImage.visibility == level
+                      ? const Icon(Icons.check, color: AppColors.gold)
+                      : null,
+                  onTap: () async {
+                    Navigator.pop(context);
+                    final updated =
+                        profile.profileImage.copyWith(visibility: level);
+                    profile.profileImage = updated;
+                    await ProfileService.instance.save(profile);
+                    if (mounted) {
+                      setState(() {});
+                      context.read<ChatProvider>().republishIdentity();
+                    }
+                  },
+                )),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _visibilityDescription(VisibilityLevel l) {
+    switch (l) {
+      case VisibilityLevel.public:
+        return 'Jeder auf Nostr-Relays kann dein Bild sehen';
+      case VisibilityLevel.contacts:
+        return 'Nur deine Kontakte sehen dein Bild';
+      case VisibilityLevel.trusted:
+        return 'Nur Vertrauenspersonen und Bürgen';
+      case VisibilityLevel.guardians:
+        return 'Nur Bürgen';
+      case VisibilityLevel.private:
+        return 'Niemand sieht dein Bild (nur du selbst)';
+    }
+  }
+
   void _snack(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg), duration: const Duration(seconds: 2)));
@@ -334,23 +416,68 @@ class _ProfileScreenState extends State<ProfileScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // ── Avatar ─────────────────────────────────────────────────
-          GestureDetector(
-            onTap: _openEditProfile,
-            child: Container(
-              width: 100,
-              height: 100,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: AppColors.gold, width: 2.5),
+          // ── Avatar with visibility badge ────────────────────────────
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Stack(
+                children: [
+                  GestureDetector(
+                    onTap: _openEditProfile,
+                    child: Container(
+                      width: 100,
+                      height: 100,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: AppColors.gold, width: 2.5),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: hasImage
+                          ? Image.file(File(imagePath), fit: BoxFit.cover)
+                          : Identicon(bytes: identiconBytes, size: 100),
+                    ),
+                  ),
+                  // Visibility badge – tapping opens the visibility picker
+                  if (profile != null)
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: GestureDetector(
+                        onTap: () => _changeImageVisibility(profile),
+                        child: Container(
+                          padding: const EdgeInsets.all(5),
+                          decoration: BoxDecoration(
+                            color: AppColors.surface,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                                color: AppColors.gold.withValues(alpha: 0.6),
+                                width: 1.5),
+                          ),
+                          child: Icon(
+                            _visibilityIcon(profile.profileImage.visibility),
+                            color: AppColors.gold,
+                            size: 14,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
-              clipBehavior: Clip.antiAlias,
-              child: hasImage
-                  ? Image.file(File(imagePath), fit: BoxFit.cover)
-                  : Identicon(bytes: identiconBytes, size: 100),
-            ),
+              const SizedBox(height: 6),
+              if (profile != null)
+                GestureDetector(
+                  onTap: () => _changeImageVisibility(profile),
+                  child: Text(
+                    'Bild: ${profile.profileImage.visibility.label}',
+                    style: TextStyle(
+                      color: AppColors.gold.withValues(alpha: 0.7),
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+            ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
 
           // ── Pseudonym ───────────────────────────────────────────────
           Text(

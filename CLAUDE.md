@@ -343,6 +343,17 @@ Phase 2: Care-System + Sphären-Plugins
   - **Init**: `FeedService.instance.load()` in `initServicesAfterIdentity()` in `main.dart`
   - Tests: 31 Tests in `test/features/dorfplatz/feed_service_test.dart`
 
+- **Profilbild-Sichtbarkeit (komplett)**:
+  - `profileImage` hat wie alle anderen Profilfelder eine `VisibilityLevel`-Einstellung (Alle/Kontakte/Vertrauenspersonen/Bürgen/Privat)
+  - **Default** für neue Nutzer: `contacts` (vorher implizit `public`)
+  - **EditProfileScreen**: Sichtbarkeits-Picker direkt unter dem Avatar-Bild (Icon + Label, tippbar → gleicher Dropdown wie andere Felder)
+  - **`Contact.profileImageVisibility`** Getter: liest `nexusProfile['profileImageVisibility']`, Fallback `public` (Rückwärtskompatibilität)
+  - **`Contact.visibleProfileImage`** Getter: gibt `profileImage` nur zurück wenn `trustLevel.allowedVisibility.contains(profileImageVisibility)`, sonst `null` → Identicon
+  - **`ContactService.resolveVisibleProfileImage(did)`**: Convenience-Helper für Call-Sites ohne direktes Contact-Objekt
+  - **Nostr Kind-0**: `picture`-Feld nur wenn Sichtbarkeit `public`; `profileImageVisibility` immer in `nexus_profile`-Block (Kind-0-Empfänger kennen die Stufe)
+  - **Angewendet auf**: Konversationsliste, Kontaktliste, Kontakt-Details, Dorfplatz Feed-Posts, Dorfplatz Kommentare
+  - Tests: 21 Tests in `test/features/profile/profile_image_visibility_test.dart`
+
 ## Aktueller Fokus
 >>> PHASE 1a: Fundament + Identität (in Fertigstellung) <<<
 

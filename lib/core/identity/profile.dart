@@ -155,7 +155,7 @@ class UserProfile {
           updatedAt: now),
       profileImage: ProfileField(
           value: null,
-          visibility: VisibilityLevel.public,
+          visibility: VisibilityLevel.contacts,
           updatedAt: now),
       bio: ProfileField(
           value: null,
@@ -205,7 +205,7 @@ class UserProfile {
         profileImage: ProfileField.fromJson<String?>(
           json['profileImage'] as Map<String, dynamic>?,
           (v) => v as String?,
-          VisibilityLevel.public,
+          VisibilityLevel.contacts,
           null,
         ),
         bio: ProfileField.fromJson<String?>(
@@ -274,6 +274,10 @@ class UserProfile {
     addIf('location', location);
     addIf('skills', skills);
     // Future fields: just add addIf('fieldKey', fieldName) here.
+
+    // Always include the profile-image visibility setting so receiving contacts
+    // can decide whether to show the cached picture based on their trust level.
+    result['profileImageVisibility'] = profileImage.visibility.name;
 
     return result;
   }

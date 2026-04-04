@@ -328,7 +328,7 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
               children: [
                 PeerAvatar(
                   did: _contact.did,
-                  profileImage: _contact.profileImage,
+                  profileImage: _contact.visibleProfileImage,
                   size: 80,
                 ),
                 const SizedBox(height: 12),

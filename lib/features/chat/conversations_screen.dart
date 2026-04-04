@@ -765,7 +765,10 @@ class _Avatar extends StatelessWidget {
       }
       return _CircleIcon(icon: isPrivate ? Icons.lock : Icons.group);
     }
-    return PeerAvatar(did: conv.peerDid, profileImage: conv.peerProfileImage);
+    return PeerAvatar(
+      did: conv.peerDid,
+      profileImage: ContactService.instance.resolveVisibleProfileImage(conv.peerDid),
+    );
   }
 }
 

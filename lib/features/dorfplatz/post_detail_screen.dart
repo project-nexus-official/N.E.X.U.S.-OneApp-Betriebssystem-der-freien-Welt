@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../core/contacts/contact_service.dart';
 import '../../core/identity/identity_service.dart';
 import '../../shared/theme/app_theme.dart';
-import '../../shared/widgets/identicon.dart';
+import '../../shared/widgets/peer_avatar.dart';
 import 'feed_post.dart';
 import 'feed_post_card.dart';
 import 'feed_service.dart';
@@ -352,7 +353,12 @@ class _CommentTile extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      Identicon(bytes: comment.authorDid.codeUnits, size: 28),
+                      PeerAvatar(
+                        did: comment.authorDid,
+                        profileImage: ContactService.instance
+                            .resolveVisibleProfileImage(comment.authorDid),
+                        size: 28,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Column(

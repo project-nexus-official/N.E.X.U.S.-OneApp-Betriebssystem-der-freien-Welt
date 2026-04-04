@@ -97,6 +97,30 @@ class Contact {
   /// here automatically without any schema change.
   Map<String, dynamic> nexusProfile;
 
+  /// The visibility level declared by this contact for their profile picture.
+  /// Read from [nexusProfile]['profileImageVisibility'], defaulting to
+  /// [VisibilityLevel.public] for backwards compatibility with contacts that
+  /// have not yet republished a Kind-0 with the new field.
+  VisibilityLevel get profileImageVisibility {
+    final v = nexusProfile['profileImageVisibility'] as String?;
+    if (v == null) return VisibilityLevel.public;
+    return VisibilityLevel.values.firstWhere(
+      (e) => e.name == v,
+      orElse: () => VisibilityLevel.public,
+    );
+  }
+
+  /// Returns the locally cached profile image path only when our trust level
+  /// with this contact meets their declared [profileImageVisibility].
+  /// Returns null otherwise, which causes widgets to show an Identicon.
+  String? get visibleProfileImage {
+    if (profileImage == null) return null;
+    if (trustLevel.allowedVisibility.contains(profileImageVisibility)) {
+      return profileImage;
+    }
+    return null;
+  }
+
   Contact({
     required this.did,
     required this.pseudonym,

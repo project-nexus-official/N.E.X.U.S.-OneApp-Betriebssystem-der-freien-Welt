@@ -1,11 +1,11 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../../core/contacts/contact_service.dart';
 import '../../core/identity/identity_service.dart';
 import '../../shared/theme/app_theme.dart';
-import '../../shared/widgets/identicon.dart';
+import '../../shared/widgets/peer_avatar.dart';
 import 'feed_post.dart';
 import 'feed_service.dart';
 
@@ -97,8 +97,10 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Identicon(
-          bytes: Uint8List.fromList(post.authorDid.codeUnits),
+        PeerAvatar(
+          did: post.authorDid,
+          profileImage: ContactService.instance
+              .resolveVisibleProfileImage(post.authorDid),
           size: 38,
         ),
         const SizedBox(width: 10),

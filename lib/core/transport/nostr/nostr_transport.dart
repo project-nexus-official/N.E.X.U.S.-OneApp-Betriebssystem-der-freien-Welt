@@ -10,6 +10,7 @@ import 'package:cryptography/cryptography.dart' show AesCbc, MacAlgorithm,
     SecretKey, SecretBox, Mac;
 
 import '../../../core/contacts/contact_service.dart';
+import '../../../core/identity/profile.dart';
 import '../../../core/identity/profile_service.dart';
 import '../../../features/profile/profile_image_service.dart';
 import '../message_transport.dart';
@@ -492,13 +493,25 @@ class NostrTransport implements MessageTransport {
   Future<void> _publishMetadata() async {
     if (_keys == null) return;
     final name = _effectivePseudonym;
-    final imagePath =
-        ProfileService.instance.currentProfile?.profileImage.value;
-    debugPrint('[Nostr] _publishMetadata called  name=$name  imagePath=$imagePath');
-    final pictureDataUrl =
-        await ProfileImageService.instance.toBase64DataUrl(imagePath);
-
     final profile = ProfileService.instance.currentProfile;
+    debugPrint('[Nostr] _publishMetadata called  name=$name');
+
+    // Only embed the profile picture when the user has set visibility to
+    // "public" (Alle). For any more restrictive level the picture field is
+    // omitted – Nostr relays are public infrastructure and anyone can read
+    // Kind-0 events.
+    String? pictureDataUrl;
+    final imageVisibility =
+        profile?.profileImage.visibility ?? VisibilityLevel.contacts;
+    if (imageVisibility == VisibilityLevel.public) {
+      final imagePath = profile?.profileImage.value;
+      debugPrint('[Nostr] profileImage visibility=public, imagePath=$imagePath');
+      pictureDataUrl =
+          await ProfileImageService.instance.toBase64DataUrl(imagePath);
+    } else {
+      debugPrint('[Nostr] profileImage visibility=$imageVisibility → omitting picture from Kind-0');
+    }
+
     final bio = profile?.bio.value;
     final content = <String, dynamic>{
       'name': name,

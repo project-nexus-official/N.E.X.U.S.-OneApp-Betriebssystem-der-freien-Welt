@@ -366,46 +366,80 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             children: [
               // ── Profile image ────────────────────────────────────────
               Center(
-                child: GestureDetector(
-                  onTap: _changeImage,
-                  child: Stack(
-                    children: [
-                      Container(
-                        width: 110,
-                        height: 110,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                              color: AppColors.gold, width: 2.5),
-                        ),
-                        clipBehavior: Clip.antiAlias,
-                        child: imagePath != null &&
-                                File(imagePath).existsSync()
-                            ? Image.file(File(imagePath),
-                                fit: BoxFit.cover)
-                            : Identicon(
-                                bytes: widget.identiconBytes,
-                                size: 110,
-                              ),
-                      ),
-                      Positioned(
-                        right: 0,
-                        bottom: 0,
-                        child: Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: AppColors.gold,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    GestureDetector(
+                      onTap: _changeImage,
+                      child: Stack(
+                        children: [
+                          Container(
+                            width: 110,
+                            height: 110,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                  color: AppColors.gold, width: 2.5),
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: imagePath != null &&
+                                    File(imagePath).existsSync()
+                                ? Image.file(File(imagePath),
+                                    fit: BoxFit.cover)
+                                : Identicon(
+                                    bytes: widget.identiconBytes,
+                                    size: 110,
+                                  ),
                           ),
-                          child: const Icon(Icons.camera_alt,
-                              color: AppColors.deepBlue, size: 16),
-                        ),
+                          Positioned(
+                            right: 0,
+                            bottom: 0,
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: AppColors.gold,
+                              ),
+                              child: const Icon(Icons.camera_alt,
+                                  color: AppColors.deepBlue, size: 16),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 8),
+                    // Visibility control for profile picture
+                    GestureDetector(
+                      onTap: () => _pickVisibility(
+                        _p.profileImage.visibility,
+                        (v) => setState(() {
+                          _p.profileImage =
+                              _p.profileImage.copyWith(visibility: v);
+                        }),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _visibilityIcon(_p.profileImage.visibility),
+                            size: 14,
+                            color: AppColors.gold.withValues(alpha: 0.8),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _p.profileImage.visibility.label,
+                            style: TextStyle(
+                              color: AppColors.gold.withValues(alpha: 0.8),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 24),
 
               // ── Pseudonym ────────────────────────────────────────────
               _sectionLabel('Pseudonym'),

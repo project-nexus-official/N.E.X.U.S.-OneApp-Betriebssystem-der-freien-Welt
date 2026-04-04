@@ -365,6 +365,13 @@ class ContactService {
     _contactsChangedController.add(null);
   }
 
+  /// Returns the profile image path for [did] only if our trust level allows
+  /// viewing it according to the contact's declared visibility setting.
+  /// Returns null when no contact is found, when no image is cached, or when
+  /// the visibility level exceeds our trust level → caller shows Identicon.
+  String? resolveVisibleProfileImage(String did) =>
+      findByDid(did)?.visibleProfileImage;
+
   /// Updates the locally cached profile image path for a contact.
   /// Called when a Kind-0 event arrives with a `picture` field.
   Future<void> updateProfileImage(String did, String? localPath) async {

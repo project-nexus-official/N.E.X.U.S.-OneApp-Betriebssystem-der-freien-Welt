@@ -354,7 +354,7 @@ class _ContactTile extends StatelessWidget {
 
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      leading: PeerAvatar(did: contact.did, profileImage: contact.profileImage),
+      leading: PeerAvatar(did: contact.did, profileImage: contact.visibleProfileImage),
       title: Row(
         children: [
           Expanded(
