@@ -93,6 +93,20 @@ class NostrTransport implements MessageTransport {
   /// Emits a raw FeedPost data map when a Kind-1/nexus-dorfplatz event arrives.
   Stream<Map<String, dynamic>> get onFeedPost => _feedPostController.stream;
 
+  final _feedCommentController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
+  /// Emits a raw FeedComment data map when a Kind-1/nexus-dorfplatz-comment arrives.
+  Stream<Map<String, dynamic>> get onFeedComment =>
+      _feedCommentController.stream;
+
+  final _feedReactionController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
+  /// Emits {emoji, referencedEventId, senderPubkey} when a Kind-7 reaction arrives.
+  Stream<Map<String, dynamic>> get onFeedReaction =>
+      _feedReactionController.stream;
+
   String? _feedSubId;
 
   StreamSubscription<NostrEvent>? _eventSub;
@@ -753,11 +767,12 @@ class NostrTransport implements MessageTransport {
     });
     print('[NOSTR] Channel discovery sub: $_channelDiscoverySubId');
 
-    // Dorfplatz feed posts (Kind-1 with nexus-dorfplatz tag), last 7 days.
+    // Dorfplatz feed posts + comments (Kind-1/6 with nexus-dorfplatz* tags),
+    // Kind-7 reactions — last 7 days.
     if (_feedSubId != null) _relayManager.closeSubscription(_feedSubId!);
     _feedSubId = _relayManager.subscribe({
-      'kinds': [NostrKind.textNote, NostrKind.repost],
-      '#t': ['nexus-dorfplatz'],
+      'kinds': [NostrKind.textNote, NostrKind.repost, NostrKind.reaction],
+      '#t': ['nexus-dorfplatz', 'nexus-dorfplatz-comment'],
       'since': nowSeconds - 7 * 86400,
     });
     print('[NOSTR] Feed sub: $_feedSubId');
@@ -772,13 +787,18 @@ class NostrTransport implements MessageTransport {
       case NostrKind.encryptedDm:
         _handleDm(event);
       case NostrKind.textNote:
-        if (event.tagValues('t').contains('nexus-dorfplatz')) {
+        final tags = event.tagValues('t');
+        if (tags.contains('nexus-dorfplatz-comment')) {
+          _handleFeedComment(event);
+        } else if (tags.contains('nexus-dorfplatz')) {
           _handleFeedPost(event);
         } else {
           _handleBroadcast(event);
         }
       case NostrKind.repost:
         _handleFeedPost(event);
+      case NostrKind.reaction:
+        _handleReaction(event);
       case NostrKind.channelCreate:
         _handleChannelCreateEvent(event);
       case NostrKind.channelMessage:
@@ -801,6 +821,33 @@ class NostrTransport implements MessageTransport {
     } catch (e) {
       print('[NOSTR] Feed post parse FAILED: $e');
     }
+  }
+
+  void _handleFeedComment(NostrEvent event) {
+    if (_keys == null) return;
+    if (event.pubkey == _keys!.publicKeyHex) return; // own event
+    try {
+      final data = jsonDecode(event.content) as Map<String, dynamic>;
+      _feedCommentController.add({
+        ...data,
+        'nostrEventId': event.id,
+        '_nostrPubkey': event.pubkey,
+      });
+    } catch (e) {
+      print('[NOSTR] Feed comment parse FAILED: $e');
+    }
+  }
+
+  void _handleReaction(NostrEvent event) {
+    if (_keys == null) return;
+    if (event.pubkey == _keys!.publicKeyHex) return; // own reaction
+    final referencedEventId = event.tagValue('e');
+    if (referencedEventId == null) return;
+    _feedReactionController.add({
+      'emoji': event.content,
+      'referencedEventId': referencedEventId,
+      'senderPubkey': event.pubkey,
+    });
   }
 
   void _handleChannelCreateEvent(NostrEvent event) {

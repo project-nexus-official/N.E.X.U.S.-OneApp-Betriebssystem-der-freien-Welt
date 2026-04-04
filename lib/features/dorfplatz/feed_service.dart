@@ -3,8 +3,12 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import '../../core/contacts/contact_service.dart';
+import '../../core/identity/identity_service.dart';
 import '../../core/storage/pod_database.dart';
 import '../../core/transport/nostr/nostr_event.dart';
+import '../../services/notification_service.dart';
+import '../../services/notification_settings.dart';
 import 'feed_post.dart';
 
 /// Callback type for publishing events to Nostr.
@@ -200,10 +204,120 @@ class FeedService {
         ..insert(0, post)
         ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
       _streamController.add(null);
+
+      // Trigger 7: Repost of my post
+      if (post.isRepost && post.repostOf != null) {
+        final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+        if (post.authorDid != myDid) {
+          final isMyPost = _posts
+              .any((p) => p.id == post.repostOf && p.authorDid == myDid);
+          if (isMyPost && await NotificationSettings.feedReposts()) {
+            final original = _posts.firstWhere(
+                (p) => p.id == post.repostOf && p.authorDid == myDid);
+            final senderName = _senderName(post.authorDid);
+            final preview = _truncate(original.content, 50);
+            NotificationService.instance.showGenericNotification(
+              title: '$senderName hat deinen Beitrag geteilt',
+              body: preview.isNotEmpty ? preview : '🔁 Repost',
+            );
+          }
+        }
+      }
     } catch (e) {
       debugPrint('[FEED] handleIncomingPost error: $e');
     }
   }
+
+  /// Processes an incoming feed comment from NostrTransport (Kind-1 with
+  /// nexus-dorfplatz-comment tag). Fires notifications for Triggers 5 & 6.
+  Future<void> handleIncomingComment(Map<String, dynamic> data) async {
+    try {
+      final comment = FeedComment.fromJson(data);
+      final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+
+      if (comment.authorDid == myDid) return; // own comment
+
+      await PodDatabase.instance.insertFeedComment(comment.toJson());
+      _streamController.add(null);
+
+      final senderName = _senderName(comment.authorDid);
+      final preview = _truncate(comment.content, 50);
+
+      if (comment.parentCommentId != null) {
+        // Trigger 6: Reply to my comment
+        if (await NotificationSettings.feedReplies()) {
+          NotificationService.instance.showGenericNotification(
+            title: '$senderName hat geantwortet',
+            body: preview,
+          );
+        }
+      } else {
+        // Trigger 5: Comment on my post
+        final isMyPost = _posts
+            .any((p) => p.id == comment.postId && p.authorDid == myDid);
+        if (isMyPost && await NotificationSettings.feedComments()) {
+          NotificationService.instance.showGenericNotification(
+            title: '$senderName hat kommentiert',
+            body: preview,
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('[FEED] handleIncomingComment error: $e');
+    }
+  }
+
+  /// Processes an incoming Kind-7 reaction from NostrTransport.
+  /// Fires a notification if the reaction targets one of my posts (Trigger 4).
+  Future<void> handleIncomingReaction(Map<String, dynamic> data) async {
+    try {
+      final emoji = data['emoji'] as String? ?? '👍';
+      final referencedId = data['referencedEventId'] as String?;
+      final senderPubkey = data['senderPubkey'] as String?;
+      if (referencedId == null || senderPubkey == null) return;
+
+      final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+
+      // Find the post by its Nostr event ID
+      final matchingPosts = _posts
+          .where((p) => p.nostrEventId == referencedId && p.authorDid == myDid)
+          .toList();
+      if (matchingPosts.isEmpty) return;
+      final myPost = matchingPosts.first;
+
+      if (await NotificationSettings.feedLikes()) {
+        // Try to resolve the sender's name via their Nostr pubkey.
+        final contact = ContactService.instance.contacts.firstWhere(
+          (c) => c.nostrPubkey == senderPubkey,
+          orElse: () => ContactService.instance.contacts.first,
+        );
+        final senderName =
+            ContactService.instance.contacts.any((c) => c.nostrPubkey == senderPubkey)
+                ? contact.pseudonym
+                : (senderPubkey.length >= 8
+                    ? senderPubkey.substring(0, 8)
+                    : senderPubkey);
+        final preview = _truncate(myPost.content, 50);
+        NotificationService.instance.showGenericNotification(
+          title: '$senderName gefällt dein Beitrag',
+          body: '$emoji${preview.isNotEmpty ? ' · $preview' : ''}',
+        );
+      }
+    } catch (e) {
+      debugPrint('[FEED] handleIncomingReaction error: $e');
+    }
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  String _senderName(String did) {
+    final contact = ContactService.instance.findByDid(did);
+    if (contact != null) return contact.pseudonym;
+    return did.length > 8 ? did.substring(did.length - 8) : did;
+  }
+
+  static String _truncate(String s, int max) =>
+      s.length > max ? '${s.substring(0, max)}…' : s;
 
   // ── Post actions ──────────────────────────────────────────────────────────
 

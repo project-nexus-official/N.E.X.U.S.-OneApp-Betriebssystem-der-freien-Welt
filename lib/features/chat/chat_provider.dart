@@ -30,6 +30,7 @@ import '../../core/transport/transport_manager.dart';
 import '../../services/background_service.dart';
 import '../../services/contact_request_service.dart';
 import '../../services/notification_service.dart';
+import '../../services/notification_settings.dart';
 import '../../shared/widgets/notification_banner.dart';
 import 'channel_access_service.dart';
 import 'conversation_service.dart';
@@ -177,8 +178,11 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       // Wire FeedService to the Nostr transport for publishing and receiving.
       FeedService.instance.setNostrPublisher((kind, content, tags) =>
           _nostrTransport?.publishFeedEvent(kind, content, tags));
-      _nostrTransport!.onFeedPost.listen(
-          (data) => FeedService.instance.handleIncomingPost(data));
+      _nostrTransport!.onFeedPost
+          .listen((data) => FeedService.instance.handleIncomingPost(data));
+      _nostrTransport!.onFeedComment
+          .listen((data) => FeedService.instance.handleIncomingComment(data));
+      _nostrTransport!.onFeedReaction.listen(_handleIncomingReaction);
 
       // Subscribe to events before starting
       _msgSub = _manager.onMessageReceived.listen((msg) => _onMessageReceived(msg));
@@ -691,6 +695,33 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
               senderName: senderName,
               messagePreview: preview,
               conversationId: convId,
+            );
+          }
+        }
+      }
+
+      // Trigger 2: Channel reply targeting my message
+      if (processedMsg.isBroadcast && !muted) {
+        final replyToId = processedMsg.metadata?['reply_to_id'] as String?;
+        if (replyToId != null && processedMsg.fromDid != myDid) {
+          final myMessages = _conversationCache[convId] ?? [];
+          final isReplyToMe =
+              myMessages.any((m) => m.id == replyToId && m.fromDid == myDid);
+          if (isReplyToMe && await NotificationSettings.channelReplies()) {
+            final contact =
+                ContactService.instance.findByDid(processedMsg.fromDid);
+            final senderName = contact?.pseudonym ??
+                processedMsg.fromDid.substring(
+                    (processedMsg.fromDid.length - 8)
+                        .clamp(0, processedMsg.fromDid.length));
+            final channelLabel = processedMsg.channel ?? convId;
+            final msgPreview = processedMsg.body.length > 50
+                ? '${processedMsg.body.substring(0, 50)}…'
+                : processedMsg.body;
+            NotificationService.instance.showGenericNotification(
+              title: 'Antwort in $channelLabel',
+              body: '$senderName: $msgPreview',
+              payload: convId,
             );
           }
         }
@@ -1548,6 +1579,68 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// Loads reactions for a message.
   Future<Map<String, List<String>>> getMessageReactions(String messageId) =>
       PodDatabase.instance.getReactionsForMessage(messageId);
+
+  // ── Incoming reaction handler (Triggers 1 & 3) ───────────────────────────
+
+  /// Called when a Kind-7 reaction arrives from Nostr.
+  /// Checks whether the referenced event ID matches a message in the local
+  /// conversation cache that was sent by me.
+  Future<void> _handleIncomingReaction(Map<String, dynamic> data) async {
+    // Delegate feed reactions to FeedService (Trigger 4 handled there).
+    FeedService.instance.handleIncomingReaction(data);
+
+    final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+    final referencedId = data['referencedEventId'] as String?;
+    final senderPubkey = data['senderPubkey'] as String?;
+    final emoji = data['emoji'] as String? ?? '👍';
+    if (referencedId == null || senderPubkey == null) return;
+
+    // Search conversation cache for a message authored by me with this ID.
+    String? convId;
+    bool isChannel = false;
+    for (final entry in _conversationCache.entries) {
+      final msg = entry.value.cast<NexusMessage?>().firstWhere(
+            (m) => m!.id == referencedId && m.fromDid == myDid,
+            orElse: () => null,
+          );
+      if (msg != null) {
+        convId = entry.key;
+        isChannel = convId.startsWith('#');
+        break;
+      }
+    }
+    if (convId == null) return; // not my message
+
+    // Resolve sender name via nostrPubkey
+    final matchedContact = ContactService.instance.contacts
+        .where((c) => c.nostrPubkey == senderPubkey)
+        .firstOrNull;
+    final senderName = matchedContact?.pseudonym ??
+        (senderPubkey.length >= 8
+            ? senderPubkey.substring(0, 8)
+            : senderPubkey);
+
+    if (isChannel) {
+      // Trigger 3: channel reaction
+      if (await NotificationSettings.channelReactions()) {
+        final channelLabel = convId; // e.g. "#teneriffa"
+        NotificationService.instance.showGenericNotification(
+          title: '$senderName reagierte in $channelLabel',
+          body: emoji,
+          payload: convId,
+        );
+      }
+    } else {
+      // Trigger 1: direct message reaction
+      if (await NotificationSettings.chatReactions()) {
+        NotificationService.instance.showGenericNotification(
+          title: '$senderName hat reagiert',
+          body: '$emoji auf deine Nachricht',
+          payload: convId,
+        );
+      }
+    }
+  }
 
   /// Sends a moderation report as a DM to the channel admin (or system admin fallback).
   Future<void> reportChannelMessage({

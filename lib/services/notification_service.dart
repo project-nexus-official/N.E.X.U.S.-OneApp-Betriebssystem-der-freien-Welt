@@ -122,6 +122,24 @@ class NotificationService {
     );
   }
 
+  /// Show a generic notification (reactions, feed events, etc.).
+  Future<void> showGenericNotification({
+    required String title,
+    required String body,
+    String? payload,
+  }) async {
+    final s = NotificationSettingsService.instance;
+    if (!s.enabled || s.isInDndWindow()) return;
+
+    await _show(
+      id: (title + body).hashCode.abs() % 100000,
+      title: title,
+      body: _truncate(body, 100),
+      payload: payload,
+      silent: s.silentMode,
+    );
+  }
+
   /// Cancel the notification for a specific sender (call when opening that chat).
   Future<void> cancelForSender(String senderDid) async {
     if (!_supported) return;
