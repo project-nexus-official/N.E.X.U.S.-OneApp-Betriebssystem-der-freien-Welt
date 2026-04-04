@@ -97,23 +97,26 @@ class NotificationService {
     );
   }
 
-  /// Show a notification for an incoming #mesh broadcast.
+  /// Show a notification for an incoming #mesh broadcast or named channel.
+  /// [title] defaults to '#hotnews' when omitted (backward compat).
   Future<void> showBroadcastNotification({
     required String senderName,
     required String messagePreview,
+    String? title,
   }) async {
     final s = NotificationSettingsService.instance;
     if (!s.enabled || !s.broadcastEnabled || s.isInDndWindow()) return;
 
+    final notifTitle = title ?? '#hotnews';
     final body = s.showPreview
         ? '$senderName: ${_truncate(messagePreview, 80)}'
-        : 'Neue #hotnews Ankündigung';
+        : 'Neue Nachricht in $notifTitle';
 
     await _show(
-      id: 1,
-      title: '#hotnews',
+      id: notifTitle.hashCode.abs() % 100000,
+      title: notifTitle,
       body: body,
-      payload: 'broadcast',
+      payload: notifTitle,
       silent: s.silentMode,
       groupKey: 'nexus_broadcast',
     );

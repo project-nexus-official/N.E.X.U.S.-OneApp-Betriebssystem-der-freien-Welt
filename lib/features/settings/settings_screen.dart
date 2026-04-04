@@ -23,6 +23,7 @@ import '../chat/chat_provider.dart';
 import '../contacts/widgets/trust_badge.dart';
 import 'admin_management_screen.dart';
 import 'nostr_settings_screen.dart';
+import 'notification_settings_screen.dart';
 
 /// Top-level settings hub.
 class SettingsScreen extends StatelessWidget {
@@ -538,6 +539,18 @@ class _NotificationSectionState extends State<_NotificationSection> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _SectionHeader('Benachrichtigungen'),
+        ListTile(
+          leading: const Icon(Icons.tune_outlined, color: AppColors.gold),
+          title: const Text('Benachrichtigungs-Kategorien'),
+          subtitle: const Text('Chat, Kanäle, Dorfplatz'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => const NotificationSettingsScreen(),
+            ),
+          ),
+        ),
+        const Divider(height: 1, indent: 16),
         SwitchListTile(
           secondary: const Icon(Icons.notifications_outlined, color: AppColors.gold),
           title: const Text('Benachrichtigungen aktivieren'),

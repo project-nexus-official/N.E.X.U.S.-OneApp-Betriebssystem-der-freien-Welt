@@ -658,8 +658,16 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
 
         if (_appInForeground) {
           // In-app banner
+          // For named channels use the channel name; #mesh falls back to #hotnews
+          final bannerTitle = processedMsg.isBroadcast
+              ? (processedMsg.channel != null &&
+                      processedMsg.channel != '#mesh' &&
+                      processedMsg.channel!.startsWith('#')
+                  ? processedMsg.channel!
+                  : '#hotnews')
+              : senderName;
           InAppNotificationController.instance.show(InAppBannerData(
-            senderName: processedMsg.isBroadcast ? '#hotnews' : senderName,
+            senderName: bannerTitle,
             preview: preview,
             conversationId: convId,
             isBroadcast: processedMsg.isBroadcast,
@@ -667,9 +675,15 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
         } else {
           // System notification
           if (processedMsg.isBroadcast) {
+            final channelTitle = (processedMsg.channel != null &&
+                    processedMsg.channel != '#mesh' &&
+                    processedMsg.channel!.startsWith('#'))
+                ? processedMsg.channel
+                : null; // null → service defaults to #hotnews
             NotificationService.instance.showBroadcastNotification(
               senderName: senderName,
               messagePreview: preview,
+              title: channelTitle,
             );
           } else {
             NotificationService.instance.showMessageNotification(
