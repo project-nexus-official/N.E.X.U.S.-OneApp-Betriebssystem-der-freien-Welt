@@ -35,6 +35,15 @@ class PermissionHelper {
   static bool canCreateAnnouncementChannel(String did) =>
       RoleService.instance.isSystemAdmin(did);
 
+  // ── Cell creation ─────────────────────────────────────────────────────────
+
+  /// Whether [did] may found a new cell.
+  ///
+  /// Restricted to system admins and the superadmin to prevent cell spam
+  /// during the early rollout phase.
+  static bool canCreateCell(String did) =>
+      RoleService.instance.isSystemAdmin(did);
+
   // ── Message deletion ──────────────────────────────────────────────────────
 
   /// Whether [requesterDid] may delete a message sent by [messageSenderDid].

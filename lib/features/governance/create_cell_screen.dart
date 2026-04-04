@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../../core/identity/identity_service.dart';
+import '../../core/roles/permission_helper.dart';
 import '../../core/utils/geohash.dart';
 import '../../shared/theme/app_theme.dart';
 import 'cell.dart';
@@ -97,10 +98,21 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
 
   Future<void> _submit() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    final myDid = IdentityService.instance.currentIdentity!.did;
+    if (!PermissionHelper.canCreateCell(myDid)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nur System-Admins können Zellen gründen.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isCreating = true);
 
     try {
-      final myDid = IdentityService.instance.currentIdentity!.did;
       final cell = Cell.create(
         name: _nameCtrl.text.trim(),
         description: _descCtrl.text.trim(),

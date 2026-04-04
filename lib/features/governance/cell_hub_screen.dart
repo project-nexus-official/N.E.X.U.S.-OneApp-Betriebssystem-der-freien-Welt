@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../../core/identity/identity_service.dart';
+import '../../core/roles/permission_helper.dart';
 import '../../core/utils/geohash.dart';
 import '../../shared/theme/app_theme.dart';
 import 'cell.dart';
@@ -88,6 +89,8 @@ class _CellHubScreenState extends State<CellHubScreen> {
   Widget build(BuildContext context) {
     final myCells = CellService.instance.myCells;
     final discovered = CellService.instance.discoveredCells;
+    final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+    final canCreate = PermissionHelper.canCreateCell(myDid);
 
     return Scaffold(
       appBar: AppBar(
@@ -95,16 +98,18 @@ class _CellHubScreenState extends State<CellHubScreen> {
         backgroundColor: AppColors.deepBlue,
       ),
       backgroundColor: AppColors.deepBlue,
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _openCreate,
-        backgroundColor: AppColors.gold,
-        foregroundColor: Colors.black,
-        icon: const Icon(Icons.add),
-        label: const Text('Zelle gründen'),
-      ),
+      floatingActionButton: canCreate
+          ? FloatingActionButton.extended(
+              onPressed: _openCreate,
+              backgroundColor: AppColors.gold,
+              foregroundColor: Colors.black,
+              icon: const Icon(Icons.add),
+              label: const Text('Zelle gründen'),
+            )
+          : null,
       body: myCells.isEmpty
           ? _EmptyState(
-              onCreateTap: _openCreate,
+              onCreateTap: canCreate ? _openCreate : null,
               myGeohash: _myGeohash,
               gpsUnavailable: _gpsUnavailable,
             )
@@ -115,7 +120,7 @@ class _CellHubScreenState extends State<CellHubScreen> {
               onCategoryChanged: (cat) =>
                   setState(() => _selectedCategory = cat),
               onCellTap: _openCell,
-              onCreateTap: _openCreate,
+              onCreateTap: canCreate ? _openCreate : null,
               myGeohash: _myGeohash,
               gpsUnavailable: _gpsUnavailable,
             ),
@@ -126,7 +131,7 @@ class _CellHubScreenState extends State<CellHubScreen> {
 // ── Empty state ───────────────────────────────────────────────────────────────
 
 class _EmptyState extends StatelessWidget {
-  final VoidCallback onCreateTap;
+  final VoidCallback? onCreateTap;
   final String? myGeohash;
   final bool gpsUnavailable;
   const _EmptyState({
@@ -193,23 +198,35 @@ class _EmptyState extends StatelessWidget {
             child: Column(
               children: [
                 const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: onCreateTap,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.gold,
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                if (onCreateTap != null)
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: onCreateTap,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.gold,
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Zelle gründen',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
                     ),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Zelle gründen',
-                        style: TextStyle(fontWeight: FontWeight.bold)),
+                  )
+                else
+                  Text(
+                    'Zellen können derzeit nur von System-Admins gegründet werden. '
+                    'Stelle einer bestehenden Zelle eine Beitrittsanfrage.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.onDark.withValues(alpha: 0.5),
+                      fontSize: 13,
+                      height: 1.5,
+                    ),
                   ),
-                ),
               ],
             ),
           ),
@@ -228,7 +245,7 @@ class _FilledState extends StatelessWidget {
   final String selectedCategory;
   final ValueChanged<String> onCategoryChanged;
   final ValueChanged<Cell> onCellTap;
-  final VoidCallback onCreateTap;
+  final VoidCallback? onCreateTap;
   final String? myGeohash;
   final bool gpsUnavailable;
 
