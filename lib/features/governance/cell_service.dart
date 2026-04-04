@@ -148,6 +148,16 @@ class CellService {
     return cell;
   }
 
+  /// Updates the geohash of a local cell (founder action).
+  Future<void> updateCellGeohash(String cellId, String geohash) async {
+    final idx = _myCells.indexWhere((c) => c.id == cellId);
+    if (idx < 0) return;
+    final updated = _myCells[idx].copyWith(geohash: geohash);
+    _myCells[idx] = updated;
+    await PodDatabase.instance.upsertCell(updated.id, updated.toJson());
+    _notify();
+  }
+
   /// Updates a cell's settings (founder-only action checked by caller).
   Future<void> updateCell(Cell updated) async {
     final idx = _myCells.indexWhere((c) => c.id == updated.id);

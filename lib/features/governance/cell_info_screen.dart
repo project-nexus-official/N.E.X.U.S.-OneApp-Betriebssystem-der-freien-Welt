@@ -1,10 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 
 import 'package:provider/provider.dart';
 
 import '../../core/identity/identity_service.dart';
+import '../../core/utils/geohash.dart';
 import '../chat/chat_provider.dart';
 import '../../services/role_service.dart';
 import '../../shared/theme/app_theme.dart';
@@ -57,6 +59,52 @@ class _CellInfoScreenState extends State<CellInfoScreen> {
   bool get _isFounder => _myMembership?.role == MemberRole.founder;
   bool get _isMod => _myMembership?.role == MemberRole.moderator;
   bool get _canManage => _isFounder || _isMod;
+
+  Future<void> _updateGeohash() async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('GPS nicht verfügbar.')),
+        );
+        return;
+      }
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Standort-Berechtigung verweigert.')),
+        );
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.medium,
+        timeLimit: const Duration(seconds: 10),
+      );
+      final hash = encodeGeohash(pos.latitude, pos.longitude);
+      await CellService.instance.updateCellGeohash(_cell.id, hash);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Standort aktualisiert ✓'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Fehler: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
 
   /// True when the local user is a superadmin or system-admin.
   /// Note: founders cannot delete cells — only admins can.
@@ -284,6 +332,25 @@ class _CellInfoScreenState extends State<CellInfoScreen> {
                         style: const TextStyle(
                             color: Colors.blue, fontSize: 13)),
                   ]),
+                ],
+                if (_cell.cellType == CellType.local &&
+                    _cell.geohash == null &&
+                    _isFounder) ...[
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: _updateGeohash,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.gold,
+                      side: const BorderSide(color: AppColors.gold),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                    ),
+                    icon: const Icon(Icons.my_location, size: 16),
+                    label: const Text('Standort aktualisieren',
+                        style: TextStyle(fontSize: 13)),
+                  ),
                 ],
                 if (_cell.cellType == CellType.thematic) ...[
                   if (_cell.category != null) ...[

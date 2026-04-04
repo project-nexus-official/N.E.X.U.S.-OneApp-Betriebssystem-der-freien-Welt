@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../../core/identity/identity_service.dart';
+import '../../core/utils/geohash.dart';
 import '../../shared/theme/app_theme.dart';
 import 'cell.dart';
 import 'cell_service.dart';
@@ -28,6 +30,10 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
   int _maxMembers = 150;
   bool _isCreating = false;
 
+  String? _geohash;
+  bool _fetchingLocation = false;
+  String? _locationStatus;
+
   @override
   void dispose() {
     _nameCtrl.dispose();
@@ -35,6 +41,58 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
     _locationCtrl.dispose();
     _topicCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _fetchGeohash() async {
+    setState(() {
+      _fetchingLocation = true;
+      _locationStatus = null;
+      _geohash = null;
+    });
+
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        setState(() {
+          _fetchingLocation = false;
+          _locationStatus = 'GPS nicht verfügbar. Aktiviere den Standort in den Systemeinstellungen.';
+        });
+        return;
+      }
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        setState(() {
+          _fetchingLocation = false;
+          _locationStatus =
+              'Ohne Standort wird deine Zelle nicht in der Nähe-Suche angezeigt.';
+        });
+        return;
+      }
+
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.medium,
+        timeLimit: const Duration(seconds: 10),
+      );
+
+      final hash = encodeGeohash(pos.latitude, pos.longitude);
+      setState(() {
+        _geohash = hash;
+        _fetchingLocation = false;
+        _locationStatus = 'Standort gespeichert ✓';
+      });
+    } catch (_) {
+      setState(() {
+        _fetchingLocation = false;
+        _locationStatus =
+            'Ohne Standort wird deine Zelle nicht in der Nähe-Suche angezeigt.';
+      });
+    }
   }
 
   Future<void> _submit() async {
@@ -53,6 +111,7 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
                 ? null
                 : _locationCtrl.text.trim()
             : null,
+        geohash: _cellType == CellType.local ? _geohash : null,
         topic: _cellType == CellType.thematic
             ? _topicCtrl.text.trim().isEmpty
                 ? null
@@ -134,7 +193,12 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
                     label: 'Lokale Gemeinschaft',
                     icon: Icons.location_on,
                     selected: _cellType == CellType.local,
-                    onTap: () => setState(() => _cellType = CellType.local),
+                    onTap: () {
+                      setState(() => _cellType = CellType.local);
+                      if (_geohash == null && !_fetchingLocation) {
+                        _fetchGeohash();
+                      }
+                    },
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -152,12 +216,58 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
 
             // Type-specific fields
             if (_cellType == CellType.local) ...[
-              _SectionLabel('Standort (optional)'),
+              _SectionLabel('Anzeige-Name des Standorts (optional)'),
               TextFormField(
                 controller: _locationCtrl,
                 decoration: _inputDecoration('z. B. Teneriffa Nord'),
                 style: const TextStyle(color: AppColors.onDark),
               ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: _fetchingLocation ? null : _fetchGeohash,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.surface,
+                      foregroundColor: AppColors.gold,
+                      side: const BorderSide(color: AppColors.gold),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
+                    icon: _fetchingLocation
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppColors.gold),
+                          )
+                        : Icon(
+                            _geohash != null
+                                ? Icons.location_on
+                                : Icons.my_location,
+                            size: 16,
+                          ),
+                    label: Text(_fetchingLocation
+                        ? 'Ermittle ...'
+                        : _geohash != null
+                            ? 'GPS gespeichert'
+                            : 'GPS-Standort ermitteln'),
+                  ),
+                ],
+              ),
+              if (_locationStatus != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  _locationStatus!,
+                  style: TextStyle(
+                    color: _geohash != null
+                        ? Colors.green
+                        : AppColors.onDark.withValues(alpha: 0.6),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
             ],
 

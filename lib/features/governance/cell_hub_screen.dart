@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../../core/identity/identity_service.dart';
+import '../../core/utils/geohash.dart';
 import '../../shared/theme/app_theme.dart';
 import 'cell.dart';
 import 'cell_member.dart';
@@ -24,18 +26,50 @@ class _CellHubScreenState extends State<CellHubScreen> {
   StreamSubscription<void>? _sub;
   String _selectedCategory = 'Alle';
 
+  String? _myGeohash;
+  bool _gpsUnavailable = false;
+
   @override
   void initState() {
     super.initState();
     _sub = CellService.instance.stream.listen((_) {
       if (mounted) setState(() {});
     });
+    _fetchMyGeohash();
   }
 
   @override
   void dispose() {
     _sub?.cancel();
     super.dispose();
+  }
+
+  Future<void> _fetchMyGeohash() async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (mounted) setState(() => _gpsUnavailable = true);
+        return;
+      }
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        if (mounted) setState(() => _gpsUnavailable = true);
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.medium,
+        timeLimit: const Duration(seconds: 10),
+      );
+      if (mounted) {
+        setState(() => _myGeohash = encodeGeohash(pos.latitude, pos.longitude));
+      }
+    } catch (_) {
+      if (mounted) setState(() => _gpsUnavailable = true);
+    }
   }
 
   void _openCreate() {
@@ -69,7 +103,11 @@ class _CellHubScreenState extends State<CellHubScreen> {
         label: const Text('Zelle gründen'),
       ),
       body: myCells.isEmpty
-          ? _EmptyState(onCreateTap: _openCreate)
+          ? _EmptyState(
+              onCreateTap: _openCreate,
+              myGeohash: _myGeohash,
+              gpsUnavailable: _gpsUnavailable,
+            )
           : _FilledState(
               myCells: myCells,
               discovered: discovered,
@@ -78,6 +116,8 @@ class _CellHubScreenState extends State<CellHubScreen> {
                   setState(() => _selectedCategory = cat),
               onCellTap: _openCell,
               onCreateTap: _openCreate,
+              myGeohash: _myGeohash,
+              gpsUnavailable: _gpsUnavailable,
             ),
     );
   }
@@ -87,11 +127,18 @@ class _CellHubScreenState extends State<CellHubScreen> {
 
 class _EmptyState extends StatelessWidget {
   final VoidCallback onCreateTap;
-  const _EmptyState({required this.onCreateTap});
+  final String? myGeohash;
+  final bool gpsUnavailable;
+  const _EmptyState({
+    required this.onCreateTap,
+    required this.myGeohash,
+    required this.gpsUnavailable,
+  });
 
   @override
   Widget build(BuildContext context) {
     final discovered = CellService.instance.discoveredCells;
+    final nearby = _nearbyCells(discovered, myGeohash);
 
     return CustomScrollView(
       slivers: [
@@ -123,6 +170,14 @@ class _EmptyState extends StatelessWidget {
             ),
           ),
         ),
+
+        // Nearby section
+        _NearbySection(
+          nearbyCells: nearby,
+          myGeohash: myGeohash,
+          gpsUnavailable: gpsUnavailable,
+        ),
+
         if (discovered.isNotEmpty) ...[
           _SectionHeader(title: 'Entdeckte Zellen'),
           SliverList(
@@ -174,6 +229,8 @@ class _FilledState extends StatelessWidget {
   final ValueChanged<String> onCategoryChanged;
   final ValueChanged<Cell> onCellTap;
   final VoidCallback onCreateTap;
+  final String? myGeohash;
+  final bool gpsUnavailable;
 
   const _FilledState({
     required this.myCells,
@@ -182,11 +239,14 @@ class _FilledState extends StatelessWidget {
     required this.onCategoryChanged,
     required this.onCellTap,
     required this.onCreateTap,
+    required this.myGeohash,
+    required this.gpsUnavailable,
   });
 
   @override
   Widget build(BuildContext context) {
     final allCategories = ['Alle', ...cellCategories];
+    final nearby = _nearbyCells(discovered, myGeohash);
     final filtered = selectedCategory == 'Alle'
         ? discovered
         : discovered.where((c) => c.category == selectedCategory).toList();
@@ -203,6 +263,13 @@ class _FilledState extends StatelessWidget {
             ),
             childCount: myCells.length,
           ),
+        ),
+
+        // Nearby section
+        _NearbySection(
+          nearbyCells: nearby,
+          myGeohash: myGeohash,
+          gpsUnavailable: gpsUnavailable,
         ),
 
         // Discovery section header
@@ -270,6 +337,85 @@ class _FilledState extends StatelessWidget {
           ),
 
         const SliverToBoxAdapter(child: SizedBox(height: 80)),
+      ],
+    );
+  }
+}
+
+// ── Nearby helpers ────────────────────────────────────────────────────────────
+
+/// Returns local cells sorted by geohash proximity.
+/// A common prefix of ≥4 characters (≈40 km) is considered "nearby".
+List<Cell> _nearbyCells(List<Cell> all, String? myGeohash) {
+  if (myGeohash == null) return [];
+  final local = all.where((c) =>
+      c.cellType == CellType.local &&
+      c.geohash != null &&
+      geohashCommonPrefixLength(c.geohash!, myGeohash) >= 4);
+  final sorted = local.toList()
+    ..sort((a, b) {
+      final pa = geohashCommonPrefixLength(a.geohash!, myGeohash);
+      final pb = geohashCommonPrefixLength(b.geohash!, myGeohash);
+      return pb.compareTo(pa); // longer prefix first = closer
+    });
+  return sorted;
+}
+
+class _NearbySection extends StatelessWidget {
+  final List<Cell> nearbyCells;
+  final String? myGeohash;
+  final bool gpsUnavailable;
+
+  const _NearbySection({
+    required this.nearbyCells,
+    required this.myGeohash,
+    required this.gpsUnavailable,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (gpsUnavailable && myGeohash == null) {
+      return SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              const Icon(Icons.location_off,
+                  color: Colors.grey, size: 16),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Aktiviere GPS um Zellen in deiner Nähe zu finden.',
+                  style: TextStyle(
+                    color: AppColors.onDark.withValues(alpha: 0.5),
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (myGeohash == null) {
+      // Still loading GPS
+      return const SliverToBoxAdapter(child: SizedBox.shrink());
+    }
+
+    if (nearbyCells.isEmpty) {
+      return const SliverToBoxAdapter(child: SizedBox.shrink());
+    }
+
+    return SliverMainAxisGroup(
+      slivers: [
+        _SectionHeader(title: 'Zellen in deiner Nähe'),
+        SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, i) => _DiscoveredCellTile(cell: nearbyCells[i]),
+            childCount: nearbyCells.length,
+          ),
+        ),
       ],
     );
   }
