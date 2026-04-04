@@ -6,6 +6,7 @@ import '../../core/contacts/contact_service.dart';
 import '../../core/identity/identity_service.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/peer_avatar.dart';
+import '../contacts/contact_detail_screen.dart';
 import 'feed_post.dart';
 import 'feed_service.dart';
 
@@ -97,11 +98,19 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        PeerAvatar(
-          did: post.authorDid,
-          profileImage: ContactService.instance
-              .resolveVisibleProfileImage(post.authorDid),
-          size: 38,
+        // Avatar – tapping opens the author's contact detail
+        GestureDetector(
+          onTap: () => Navigator.of(context, rootNavigator: true).push(
+            MaterialPageRoute(
+              builder: (_) => ContactDetailScreen(did: post.authorDid),
+            ),
+          ),
+          child: PeerAvatar(
+            did: post.authorDid,
+            profileImage: ContactService.instance
+                .resolveVisibleProfileImage(post.authorDid),
+            size: 40,
+          ),
         ),
         const SizedBox(width: 10),
         Expanded(
@@ -132,15 +141,16 @@ class _Header extends StatelessWidget {
             ],
           ),
         ),
+        // Three-dot menu – horizontal dots, 44×44 touch target
         IconButton(
           onPressed: onMenuTap,
           icon: Icon(
-            Icons.more_vert,
+            Icons.more_horiz,
             color: AppColors.onDark.withValues(alpha: 0.5),
-            size: 20,
+            size: 24,
           ),
           padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(),
+          constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
         ),
       ],
     );

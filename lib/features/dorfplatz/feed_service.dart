@@ -228,6 +228,38 @@ class FeedService {
     _streamController.add(null);
   }
 
+  /// Expands the visibility of a post to [newVisibility].
+  ///
+  /// Visibility can only be widened (contacts → cell → public), never
+  /// restricted. Publishes a new Kind-1 Nostr event that references the
+  /// original via an ["e", id, "", "edit"] tag so peers update their view.
+  Future<void> changeVisibility(
+      String postId, FeedVisibility newVisibility) async {
+    final idx = _posts.indexWhere((p) => p.id == postId);
+    if (idx == -1) return;
+    final post = _posts[idx];
+
+    // Guard: only allow expanding, never restricting.
+    if (newVisibility.index <= post.visibility.index) return;
+
+    final updated = post.copyWith(visibility: newVisibility);
+    await PodDatabase.instance.updateFeedPost(postId, updated.toJson());
+    _posts[idx] = updated;
+
+    // Republish to Nostr so peers see the updated visibility.
+    if (_publisher != null) {
+      final tags = <List<String>>[
+        ['t', 'nexus-dorfplatz'],
+        ['visibility', newVisibility.name],
+        if (post.nostrEventId != null)
+          ['e', post.nostrEventId!, '', 'edit'],
+      ];
+      _publisher!(NostrKind.textNote, jsonEncode(updated.toJson()), tags);
+    }
+
+    _streamController.add(null);
+  }
+
   /// Updates the text content of a post (only within 24 h).
   Future<void> editPost(String postId, String newContent) async {
     final idx = _posts.indexWhere((p) => p.id == postId);

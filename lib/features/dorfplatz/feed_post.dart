@@ -195,6 +195,7 @@ class FeedPost {
   FeedPost copyWith({
     String? nostrEventId,
     Poll? poll,
+    FeedVisibility? visibility,
   }) =>
       FeedPost(
         id: id,
@@ -207,7 +208,7 @@ class FeedPost {
         voiceDurationMs: voiceDurationMs,
         linkPreview: linkPreview,
         poll: poll ?? this.poll,
-        visibility: visibility,
+        visibility: visibility ?? this.visibility,
         createdAt: createdAt,
         nostrEventId: nostrEventId ?? this.nostrEventId,
         repostOf: repostOf,
