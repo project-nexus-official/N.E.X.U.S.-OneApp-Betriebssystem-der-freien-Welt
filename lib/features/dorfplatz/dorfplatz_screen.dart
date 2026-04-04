@@ -303,31 +303,10 @@ class _DorfplatzScreenState extends State<DorfplatzScreen>
   }
 
   Future<void> _showEditDialog(FeedPost post) async {
-    final ctrl = TextEditingController(text: post.content);
     final saved = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Beitrag bearbeiten'),
-        content: TextField(
-          controller: ctrl,
-          maxLines: null,
-          autofocus: true,
-          style: const TextStyle(color: AppColors.onDark),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Abbrechen'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-            child: const Text('Speichern',
-                style: TextStyle(color: AppColors.gold)),
-          ),
-        ],
-      ),
+      builder: (ctx) => _EditPostDialog(initialContent: post.content),
     );
-    ctrl.dispose();
     if (saved != null && saved.isNotEmpty) {
       await FeedService.instance.editPost(post.id, saved);
     }
@@ -521,6 +500,60 @@ class _FeedListState extends State<_FeedList>
           },
         ),
       ),
+    );
+  }
+}
+
+// ── Edit post dialog ──────────────────────────────────────────────────────────
+
+/// Stateful dialog that owns its TextEditingController and disposes it cleanly.
+class _EditPostDialog extends StatefulWidget {
+  const _EditPostDialog({required this.initialContent});
+  final String initialContent;
+
+  @override
+  State<_EditPostDialog> createState() => _EditPostDialogState();
+}
+
+class _EditPostDialogState extends State<_EditPostDialog> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.initialContent);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.surface,
+      title: const Text('Beitrag bearbeiten',
+          style: TextStyle(color: AppColors.onDark)),
+      content: TextField(
+        controller: _ctrl,
+        maxLines: null,
+        autofocus: true,
+        style: const TextStyle(color: AppColors.onDark),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Abbrechen',
+              style: TextStyle(color: AppColors.onDark)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, _ctrl.text.trim()),
+          child: const Text('Speichern',
+              style: TextStyle(color: AppColors.gold)),
+        ),
+      ],
     );
   }
 }
