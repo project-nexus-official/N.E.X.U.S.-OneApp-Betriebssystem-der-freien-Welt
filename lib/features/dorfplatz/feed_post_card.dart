@@ -447,7 +447,15 @@ class _ImageTile extends StatelessWidget {
       final bytes = base64Decode(base64);
       return ClipRRect(
         borderRadius: BorderRadius.circular(8),
-        child: Image.memory(bytes, fit: BoxFit.cover),
+        // cacheWidth/cacheHeight tell Flutter to decode at display resolution,
+        // preventing repeated full-resolution decodes while scrolling.
+        child: Image.memory(
+          bytes,
+          fit: BoxFit.cover,
+          cacheWidth: 400,
+          cacheHeight: 400,
+          gaplessPlayback: true,
+        ),
       );
     } catch (_) {
       return Container(

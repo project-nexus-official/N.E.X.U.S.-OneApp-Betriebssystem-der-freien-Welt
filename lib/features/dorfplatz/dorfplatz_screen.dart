@@ -26,7 +26,6 @@ class _DorfplatzScreenState extends State<DorfplatzScreen>
   StreamSubscription<void>? _feedSub;
 
   bool _loading = true;
-  bool _loadingMore = false;
 
   @override
   void initState() {
@@ -74,12 +73,7 @@ class _DorfplatzScreenState extends State<DorfplatzScreen>
     await FeedService.instance.load();
   }
 
-  Future<void> _loadMore() async {
-    if (_loadingMore) return;
-    setState(() => _loadingMore = true);
-    await FeedService.instance.loadMore();
-    if (mounted) setState(() => _loadingMore = false);
-  }
+  Future<void> _loadMore() => FeedService.instance.loadMore();
 
   void _openCreatePost() {
     Navigator.of(context, rootNavigator: true).push(
@@ -362,11 +356,11 @@ class _DorfplatzScreenState extends State<DorfplatzScreen>
               controller: _tabCtrl,
               children: [
                 _FeedList(
+                  key: const PageStorageKey('feed_contacts'),
                   posts: _posts,
                   emptyMessage: 'Noch keine Beiträge von deinen Kontakten.',
                   onRefresh: _refresh,
                   onLoadMore: _loadMore,
-                  loadingMore: _loadingMore,
                   onTap: _openDetail,
                   onCommentTap: _openDetailComments,
                   onMenuTap: _onMenuTap,
@@ -376,6 +370,7 @@ class _DorfplatzScreenState extends State<DorfplatzScreen>
                       'Deine Zelle ist noch nicht aktiv.\nTritt einer Zelle bei, um lokale Beiträge zu sehen.',
                 ),
                 _FeedList(
+                  key: const PageStorageKey('feed_entdecken'),
                   posts: FeedService.instance.getPostsForTab(
                     FeedTab.entdecken,
                     myDid: _myDid,
@@ -385,7 +380,6 @@ class _DorfplatzScreenState extends State<DorfplatzScreen>
                       'Noch keine öffentlichen Beiträge im Netzwerk.',
                   onRefresh: _refresh,
                   onLoadMore: _loadMore,
-                  loadingMore: _loadingMore,
                   onTap: _openDetail,
                   onCommentTap: _openDetailComments,
                   onMenuTap: _onMenuTap,
@@ -404,40 +398,83 @@ class _DorfplatzScreenState extends State<DorfplatzScreen>
 
 // ── Feed list ──────────────────────────────────────────────────────────────────
 
-class _FeedList extends StatelessWidget {
+class _FeedList extends StatefulWidget {
   final List<FeedPost> posts;
   final String emptyMessage;
   final Future<void> Function() onRefresh;
   final Future<void> Function() onLoadMore;
-  final bool loadingMore;
   final void Function(FeedPost) onTap;
   final void Function(FeedPost) onCommentTap;
   final Future<void> Function(FeedPost) onMenuTap;
 
   const _FeedList({
+    super.key,
     required this.posts,
     required this.emptyMessage,
     required this.onRefresh,
     required this.onLoadMore,
-    required this.loadingMore,
     required this.onTap,
     required this.onCommentTap,
     required this.onMenuTap,
   });
 
   @override
+  State<_FeedList> createState() => _FeedListState();
+}
+
+class _FeedListState extends State<_FeedList>
+    with AutomaticKeepAliveClientMixin {
+  final ScrollController _scrollCtrl = ScrollController();
+  bool _loadingMore = false;
+  DateTime? _lastLoadMore;
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void dispose() {
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handleRefresh() async {
+    await widget.onRefresh();
+    // After explicit pull-to-refresh, scroll back to top.
+    if (mounted && _scrollCtrl.hasClients) {
+      _scrollCtrl.jumpTo(0);
+    }
+  }
+
+  Future<void> _triggerLoadMore() async {
+    if (_loadingMore) return;
+    // Debounce: at most once every 500 ms.
+    final now = DateTime.now();
+    if (_lastLoadMore != null &&
+        now.difference(_lastLoadMore!) < const Duration(milliseconds: 500)) {
+      return;
+    }
+    _lastLoadMore = now;
+    if (mounted) setState(() => _loadingMore = true);
+    await widget.onLoadMore();
+    if (mounted) setState(() => _loadingMore = false);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (posts.isEmpty) {
+    super.build(context); // required by AutomaticKeepAliveClientMixin
+
+    if (widget.posts.isEmpty) {
       return RefreshIndicator(
-        onRefresh: onRefresh,
+        onRefresh: _handleRefresh,
         color: AppColors.gold,
         child: SingleChildScrollView(
+          controller: _scrollCtrl,
           physics: const AlwaysScrollableScrollPhysics(),
           child: SizedBox(
             height: 300,
             child: Center(
               child: Text(
-                emptyMessage,
+                widget.emptyMessage,
                 style: TextStyle(
                   color: AppColors.onDark.withValues(alpha: 0.5),
                 ),
@@ -450,32 +487,36 @@ class _FeedList extends StatelessWidget {
     }
 
     return RefreshIndicator(
-      onRefresh: onRefresh,
+      onRefresh: _handleRefresh,
       color: AppColors.gold,
       child: NotificationListener<ScrollNotification>(
         onNotification: (n) {
-          if (n is ScrollEndNotification &&
-              n.metrics.extentAfter < 200) {
-            onLoadMore();
+          // Trigger pagination when 90% scrolled (extentAfter < 10% of total).
+          if (!_loadingMore &&
+              n is ScrollUpdateNotification &&
+              n.metrics.extentAfter < n.metrics.maxScrollExtent * 0.10 + 300) {
+            _triggerLoadMore();
           }
           return false;
         },
         child: ListView.builder(
-          itemCount: posts.length + (loadingMore ? 1 : 0),
+          controller: _scrollCtrl,
+          // Limit in-memory list to 50 posts for smooth performance.
+          itemCount: widget.posts.length.clamp(0, 50) + (_loadingMore ? 1 : 0),
           itemBuilder: (ctx, i) {
-            if (i == posts.length) {
+            if (i >= widget.posts.length) {
               return const Padding(
                 padding: EdgeInsets.all(16),
                 child: Center(child: CircularProgressIndicator()),
               );
             }
-            final post = posts[i];
+            final post = widget.posts[i];
             return FeedPostCard(
               key: ValueKey(post.id),
               post: post,
-              onTap: () => onTap(post),
-              onCommentTap: () => onCommentTap(post),
-              onMenuTap: () => onMenuTap(post),
+              onTap: () => widget.onTap(post),
+              onCommentTap: () => widget.onCommentTap(post),
+              onMenuTap: () => widget.onMenuTap(post),
             );
           },
         ),
