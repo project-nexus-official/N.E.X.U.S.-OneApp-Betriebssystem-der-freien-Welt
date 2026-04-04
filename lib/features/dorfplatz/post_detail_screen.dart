@@ -120,6 +120,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 onTap: () => Navigator.pop(ctx, 'edit'),
               ),
               ListTile(
+                leading: const Icon(Icons.lock_open_outlined),
+                title: const Text('Sichtbarkeit ändern'),
+                onTap: () => Navigator.pop(ctx, 'changeVisibility'),
+              ),
+              ListTile(
                 leading: const Icon(Icons.delete_outline,
                     color: Colors.redAccent),
                 title: const Text('Löschen',
@@ -183,6 +188,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           await FeedService.instance.deletePost(widget.post.id);
           if (mounted) Navigator.of(context).pop();
         }
+      case 'changeVisibility':
+        await _showVisibilityPicker(context);
       case 'repost':
         Navigator.of(context, rootNavigator: true).push(
           MaterialPageRoute(
@@ -209,6 +216,104 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           );
           Navigator.of(context).pop();
         }
+    }
+  }
+
+  Future<void> _showVisibilityPicker(BuildContext context) async {
+    final options = [
+      (FeedVisibility.contacts, Icons.people_outline, 'Meine Kontakte'),
+      (FeedVisibility.cell, Icons.group_work_outlined, 'Meine Zelle'),
+      (FeedVisibility.public, Icons.public, 'Öffentlich'),
+    ];
+
+    final chosen = await showModalBottomSheet<FeedVisibility>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Row(
+                children: const [
+                  Icon(Icons.lock_open_outlined, color: AppColors.gold),
+                  SizedBox(width: 8),
+                  Text('Sichtbarkeit erweitern',
+                      style: TextStyle(
+                          color: AppColors.gold,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16)),
+                ],
+              ),
+            ),
+            ...options.map((entry) {
+              final (vis, icon, label) = entry;
+              final isCurrent = vis == widget.post.visibility;
+              final isLower = vis.index < widget.post.visibility.index;
+              final disabled = isCurrent || isLower;
+              return ListTile(
+                leading: Icon(icon,
+                    color: disabled
+                        ? AppColors.onDark.withValues(alpha: 0.3)
+                        : AppColors.gold),
+                title: Text(label,
+                    style: TextStyle(
+                        color: disabled
+                            ? AppColors.onDark.withValues(alpha: 0.35)
+                            : AppColors.onDark)),
+                trailing: isCurrent
+                    ? const Icon(Icons.check, color: AppColors.gold, size: 18)
+                    : null,
+                enabled: !disabled,
+                onTap: disabled ? null : () => Navigator.pop(ctx, vis),
+              );
+            }),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (chosen == null || !mounted) return;
+
+    final visLabel = switch (chosen) {
+      FeedVisibility.contacts => 'Meine Kontakte',
+      FeedVisibility.cell => 'Meine Zelle',
+      FeedVisibility.public => 'Öffentlich',
+    };
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppColors.surface,
+            title: const Text('Sichtbarkeit erweitern?',
+                style: TextStyle(color: AppColors.onDark)),
+            content: Text(
+              'Sichtbarkeit auf „$visLabel" erweitern?\n'
+              'Das kann nicht rückgängig gemacht werden.',
+              style:
+                  TextStyle(color: AppColors.onDark.withValues(alpha: 0.8)),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Abbrechen',
+                    style: TextStyle(color: AppColors.onDark)),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Erweitern',
+                    style: TextStyle(color: AppColors.gold)),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (confirmed) {
+      await FeedService.instance.changeVisibility(widget.post.id, chosen);
     }
   }
 
