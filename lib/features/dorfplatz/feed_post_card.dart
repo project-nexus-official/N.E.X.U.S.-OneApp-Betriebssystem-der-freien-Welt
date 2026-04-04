@@ -4,9 +4,12 @@ import 'package:flutter/material.dart';
 
 import '../../core/contacts/contact_service.dart';
 import '../../core/identity/identity_service.dart';
+import '../../core/identity/profile_service.dart';
 import '../../shared/theme/app_theme.dart';
+import '../../shared/widgets/identicon.dart';
 import '../../shared/widgets/peer_avatar.dart';
 import '../contacts/contact_detail_screen.dart';
+import '../profile/profile_screen.dart';
 import 'feed_post.dart';
 import 'feed_service.dart';
 
@@ -96,19 +99,28 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Resolve the author's profile image.
+    // Own posts: ContactService has no entry for ourselves → use ProfileService.
+    // Others: use the visible profile image from ContactService (respects
+    //   selective-disclosure visibility; defaults to public for unknown contacts).
+    final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+    final String? profileImagePath;
+    if (post.authorDid == myDid) {
+      profileImagePath =
+          ProfileService.instance.currentProfile?.profileImage.value;
+    } else {
+      profileImagePath =
+          ContactService.instance.resolveVisibleProfileImage(post.authorDid);
+    }
+
     return Row(
       children: [
-        // Avatar – tapping opens the author's contact detail
+        // Avatar – tap navigates to the right screen depending on relationship
         GestureDetector(
-          onTap: () => Navigator.of(context, rootNavigator: true).push(
-            MaterialPageRoute(
-              builder: (_) => ContactDetailScreen(did: post.authorDid),
-            ),
-          ),
+          onTap: () => _openAuthorProfile(context, myDid),
           child: PeerAvatar(
             did: post.authorDid,
-            profileImage: ContactService.instance
-                .resolveVisibleProfileImage(post.authorDid),
+            profileImage: profileImagePath,
             size: 40,
           ),
         ),
@@ -153,6 +165,101 @@ class _Header extends StatelessWidget {
           constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
         ),
       ],
+    );
+  }
+
+  /// Opens the appropriate screen when the author avatar is tapped:
+  /// - Own post       → ProfileScreen (own profile)
+  /// - Known contact  → ContactDetailScreen
+  /// - Unknown author → bottom sheet with "Kontakt hinzufügen" option
+  void _openAuthorProfile(BuildContext context, String myDid) {
+    if (post.authorDid == myDid) {
+      Navigator.of(context, rootNavigator: true).push(
+        MaterialPageRoute(builder: (_) => const ProfileScreen()),
+      );
+      return;
+    }
+
+    final contact = ContactService.instance.findByDid(post.authorDid);
+    if (contact != null) {
+      Navigator.of(context, rootNavigator: true).push(
+        MaterialPageRoute(
+          builder: (_) => ContactDetailScreen(did: post.authorDid),
+        ),
+      );
+      return;
+    }
+
+    // Author is not yet a contact – offer to add them.
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            ClipOval(
+              child: SizedBox(
+                width: 56,
+                height: 56,
+                child: Identicon(
+                    bytes: post.authorDid.codeUnits, size: 56),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              post.authorPseudonym,
+              style: const TextStyle(
+                  color: AppColors.onDark,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Noch nicht in deinen Kontakten',
+              style: TextStyle(
+                  color: AppColors.onDark.withValues(alpha: 0.5),
+                  fontSize: 12),
+            ),
+            const SizedBox(height: 16),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    Navigator.pop(ctx);
+                    await ContactService.instance
+                        .addContact(post.authorDid, post.authorPseudonym);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                              '${post.authorPseudonym} zu Kontakten hinzugefügt.'),
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.person_add_outlined),
+                  label: const Text('Kontakt hinzufügen'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.gold,
+                    foregroundColor: AppColors.deepBlue,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
     );
   }
 
