@@ -12,6 +12,7 @@ import '../contacts/contact_request.dart';
 import '../../core/transport/message_transport.dart';
 import '../../services/invite_service.dart';
 import '../invite/invite_screen.dart';
+import '../../services/backup_service.dart';
 import '../../services/principles_service.dart';
 import '../../services/update_service.dart';
 import '../../shared/theme/app_theme.dart';
@@ -23,7 +24,10 @@ import '../chat/conversation_service.dart';
 import '../chat/group_channel_service.dart';
 import '../contacts/contacts_screen.dart';
 import '../dorfplatz/feed_service.dart';
+import '../governance/cell_hub_screen.dart';
+import '../governance/cell_service.dart';
 import '../governance/governance_screen.dart';
+import '../governance/proposal_service.dart';
 import 'node_counter_service.dart';
 
 // ── Top-level helpers (exported for testing) ─────────────────────────────────
@@ -81,9 +85,12 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   StreamSubscription<List<ContactRequest>>? _requestSub;
   StreamSubscription<void>? _feedSub;
+  StreamSubscription<void>? _cellSub;
+  StreamSubscription<void>? _proposalSub;
 
-  // Dismissed for this session only – reappears on next cold start.
+  // Dismissed for this session only – reappear on next cold start.
   bool _principlesReminderDismissed = false;
+  bool _backupReminderDismissed = false;
 
   @override
   void initState() {
@@ -133,6 +140,13 @@ class _DashboardScreenState extends State<DashboardScreen>
     _feedSub = FeedService.instance.stream.listen((_) {
       if (mounted) setState(() {});
     });
+
+    _cellSub = CellService.instance.stream.listen((_) {
+      if (mounted) setState(() {});
+    });
+    _proposalSub = ProposalService.instance.stream.listen((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   Future<void> _loadConversations() async {
@@ -148,6 +162,8 @@ class _DashboardScreenState extends State<DashboardScreen>
     _updateSub?.cancel();
     _requestSub?.cancel();
     _feedSub?.cancel();
+    _cellSub?.cancel();
+    _proposalSub?.cancel();
     super.dispose();
   }
 
@@ -202,7 +218,6 @@ class _DashboardScreenState extends State<DashboardScreen>
               ),
 
             // Principles reminder banner – shown when user skipped the flow.
-            // Dismissed for the session via X, reappears on next cold start.
             if (!PrinciplesService.instance.isAccepted &&
                 !_principlesReminderDismissed)
               SliverToBoxAdapter(
@@ -212,6 +227,20 @@ class _DashboardScreenState extends State<DashboardScreen>
                     onReadNow: () => context.go('/principles/intro'),
                     onDismiss: () =>
                         setState(() => _principlesReminderDismissed = true),
+                  ),
+                ),
+              ),
+
+            // Backup reminder banner – shown when backup hasn't been set up.
+            if (BackupService.instance.shouldShowReminder &&
+                !_backupReminderDismissed)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: _BackupReminderBanner(
+                    onSetupNow: () => context.go('/backup-setup'),
+                    onDismiss: () =>
+                        setState(() => _backupReminderDismissed = true),
                   ),
                 ),
               ),
@@ -375,14 +404,45 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildGovernanceCard(BuildContext context) {
+    final myCells = CellService.instance.myCells;
+    final isInCell = myCells.any((c) => CellService.instance.isMember(c.id));
+    final activeProposals = isInCell
+        ? myCells
+            .expand((c) => ProposalService.instance.activeProposalsForCell(c.id))
+            .length
+        : 0;
+    final pendingRequests = CellService.instance.totalPendingRequests;
+
+    final subtitle = !isInCell
+        ? 'Tritt einer Zelle bei, um mitzumachen.'
+        : [
+            if (activeProposals > 0)
+              '$activeProposals aktive${activeProposals == 1 ? 's' : ''} Proposal${activeProposals == 1 ? '' : 's'}',
+            if (pendingRequests > 0)
+              '+$pendingRequests Beitrittsanfrage${pendingRequests == 1 ? '' : 'n'}',
+            if (activeProposals == 0 && pendingRequests == 0)
+              '${myCells.length} Zelle${myCells.length == 1 ? '' : 'n'}',
+          ].join(', ');
+
     return _FeatureCard(
       key: const Key('governance_card'),
       icon: Icons.how_to_vote_outlined,
       title: 'Agora — Politik & Demokratie',
-      subtitle: 'Hier werdet ihr gemeinsam Entscheidungen treffen.',
-      onTap: () => Navigator.of(context, rootNavigator: true).push(
-        MaterialPageRoute<void>(builder: (_) => const GovernanceScreen()),
-      ),
+      subtitle: subtitle,
+      badgeCount: activeProposals + pendingRequests > 0
+          ? activeProposals + pendingRequests
+          : null,
+      onTap: () {
+        if (!isInCell) {
+          Navigator.of(context, rootNavigator: true).push(
+            MaterialPageRoute<void>(builder: (_) => const CellHubScreen()),
+          );
+        } else {
+          Navigator.of(context, rootNavigator: true).push(
+            MaterialPageRoute<void>(builder: (_) => const GovernanceScreen()),
+          );
+        }
+      },
     );
   }
 
@@ -988,6 +1048,58 @@ class _ComingSoonCard extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+
+// ── _BackupReminderBanner ─────────────────────────────────────────────────────
+
+class _BackupReminderBanner extends StatelessWidget {
+  final VoidCallback onSetupNow;
+  final VoidCallback onDismiss;
+
+  const _BackupReminderBanner({
+    required this.onSetupNow,
+    required this.onDismiss,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+            color: AppColors.gold.withValues(alpha: 0.5)),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
+        children: [
+          const Icon(Icons.backup_outlined,
+              color: AppColors.gold, size: 22),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              'Du hast noch kein Backup eingerichtet.',
+              style: TextStyle(color: AppColors.onDark, fontSize: 13),
+            ),
+          ),
+          TextButton(
+            onPressed: onSetupNow,
+            style: TextButton.styleFrom(
+                foregroundColor: AppColors.gold,
+                padding: const EdgeInsets.symmetric(horizontal: 10)),
+            child: const Text('Einrichten', style: TextStyle(fontSize: 12)),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, size: 16, color: AppColors.onDark),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            onPressed: onDismiss,
+          ),
+        ],
       ),
     );
   }

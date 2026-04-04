@@ -8,14 +8,18 @@ import 'package:nexus_oneapp/features/contacts/sent_requests_screen.dart';
 import 'package:nexus_oneapp/features/dashboard/dashboard_screen.dart';
 import 'package:nexus_oneapp/features/discover/discover_screen.dart';
 import 'package:nexus_oneapp/features/dorfplatz/dorfplatz_screen.dart';
+import 'package:nexus_oneapp/features/governance/cell_hub_screen.dart';
 import 'package:nexus_oneapp/features/governance/governance_screen.dart';
 import 'package:nexus_oneapp/features/onboarding/onboarding_screen.dart';
 import 'package:nexus_oneapp/features/invite/invite_screen.dart';
 import 'package:nexus_oneapp/features/invite/redeem_screen.dart';
+import 'package:nexus_oneapp/features/onboarding/backup_setup_screen.dart';
 import 'package:nexus_oneapp/features/onboarding/principles_commitment_screen.dart';
 import 'package:nexus_oneapp/features/onboarding/principles_content_screen.dart';
 import 'package:nexus_oneapp/features/onboarding/principles_intro_screen.dart';
+import 'package:nexus_oneapp/features/onboarding/restore_backup_screen.dart';
 import 'package:nexus_oneapp/features/onboarding/restore_screen.dart';
+import 'package:nexus_oneapp/services/backup_service.dart';
 import 'package:nexus_oneapp/features/profile/profile_screen.dart';
 import 'package:nexus_oneapp/features/settings/settings_screen.dart';
 import 'package:nexus_oneapp/features/wallet/wallet_screen.dart';
@@ -38,9 +42,14 @@ final router = GoRouter(
       return PrinciplesService.instance.hasSeen ? '/home' : '/principles/intro';
     }
 
+    final isBackupSetup = path.startsWith('/backup-setup');
+    final isRestoreBackup = path.startsWith('/onboarding/restore-backup');
+
     // Already in the app but principles not yet seen → intercept.
-    if (hasIdentity && !isOnboarding && !isPrinciples) {
+    if (hasIdentity && !isOnboarding && !isPrinciples && !isBackupSetup && !isRestoreBackup) {
       if (!PrinciplesService.instance.hasSeen) return '/principles/intro';
+      // Backup setup: only intercept once, after principles are seen.
+      if (!BackupService.instance.setupSeen) return '/backup-setup';
     }
 
     return null;
@@ -55,7 +64,16 @@ final router = GoRouter(
           path: 'restore',
           builder: (context, state) => const RestoreScreen(),
         ),
+        GoRoute(
+          path: 'restore-backup',
+          builder: (context, state) => const RestoreBackupScreen(),
+        ),
       ],
+    ),
+    // Backup setup – outside ShellRoute (full-screen, no bottom nav).
+    GoRoute(
+      path: '/backup-setup',
+      builder: (context, state) => const BackupSetupScreen(),
     ),
     // Principles flow (outside ShellRoute – no bottom nav)
     GoRoute(
@@ -75,6 +93,11 @@ final router = GoRouter(
     GoRoute(
       path: '/governance',
       builder: (context, state) => const GovernanceScreen(),
+    ),
+    // Cell Hub ("Meine Zelle") – outside ShellRoute, no bottom nav.
+    GoRoute(
+      path: '/cell-hub',
+      builder: (context, state) => const CellHubScreen(),
     ),
     // Settings – outside ShellRoute so it appears as a full-screen page
     // without the bottom navigation bar.

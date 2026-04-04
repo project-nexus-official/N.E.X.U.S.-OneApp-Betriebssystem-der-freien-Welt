@@ -72,6 +72,25 @@ class PrinciplesService {
     }
   }
 
+  /// Restores principles state from a backup.  Only applied when the user has
+  /// not already gone through the flow (checked by caller).
+  Future<void> restoreFromBackup(Map<String, dynamic> data) async {
+    _hasSeen   = data['hasSeen']   as bool? ?? false;
+    _isAccepted = data['isAccepted'] as bool? ?? false;
+    final ts = data['acceptedAt'] as String?;
+    if (ts != null) _acceptedAt = DateTime.tryParse(ts);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_keyHasSeen, _hasSeen);
+      await prefs.setBool(_keyAccepted, _isAccepted);
+      if (_acceptedAt != null) {
+        await prefs.setString(_keyAcceptedAt, _acceptedAt!.toIso8601String());
+      }
+    } catch (e) {
+      debugPrint('[PRINCIPLES] restoreFromBackup save failed: $e');
+    }
+  }
+
   /// Resets in-memory state to the initial (unset) values (used in tests).
   @visibleForTesting
   void resetForTest() {

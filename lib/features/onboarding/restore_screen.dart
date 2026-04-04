@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:nexus_oneapp/core/identity/bip39_wordlist.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
+import 'package:nexus_oneapp/main.dart' show initServicesAfterIdentity;
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
 
 /// Screen to restore an existing NEXUS identity from a 12-word seed phrase.
@@ -64,7 +65,11 @@ class _RestoreScreenState extends State<RestoreScreen> {
 
     try {
       await IdentityService.instance.restoreFromMnemonic(mnemonic);
-      if (mounted) context.go('/chat');
+      // Open (or reopen) the database with the restored identity's encryption
+      // key and load all services. Without this, PodDatabase stays closed and
+      // any attempt to save profile data throws a StateError → stuck spinner.
+      await initServicesAfterIdentity();
+      if (mounted) context.go('/onboarding/restore-backup');
     } on ArgumentError catch (e) {
       setState(() => _errorMessage = e.message.toString());
     } catch (e) {

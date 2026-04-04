@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:nexus_oneapp/core/contacts/contact_service.dart';
+import 'package:nexus_oneapp/services/backup_service.dart';
 import 'package:nexus_oneapp/services/contact_request_service.dart';
 import 'package:nexus_oneapp/core/crypto/encryption_keys.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
@@ -13,6 +14,8 @@ import 'package:nexus_oneapp/features/chat/conversation_service.dart';
 import 'package:nexus_oneapp/features/dashboard/node_counter_service.dart';
 import 'package:nexus_oneapp/services/role_service.dart';
 import 'package:nexus_oneapp/features/dorfplatz/feed_service.dart';
+import 'package:nexus_oneapp/features/governance/cell_service.dart';
+import 'package:nexus_oneapp/features/governance/proposal_service.dart';
 import 'package:nexus_oneapp/core/router.dart';
 import 'package:nexus_oneapp/core/storage/pod_database.dart';
 import 'package:nexus_oneapp/core/storage/retention_service.dart';
@@ -183,6 +186,11 @@ Future<void> initServicesAfterIdentity() async {
     await RoleService.instance.init();
     // Load Dorfplatz feed (posts + mutes from DB).
     await FeedService.instance.load();
+    // Load governance: cells and proposals.
+    await CellService.instance.load();
+    await ProposalService.instance.load();
+    // Initialize backup service (loads state, starts periodic timer).
+    await BackupService.instance.init();
     // Initialize X25519 encryption keys.
     try {
       final ed25519Bytes =

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../chat/chat_provider.dart';
 import '../chat/join_channel_screen.dart';
 import '../contacts/contacts_screen.dart';
+import '../governance/cell_hub_screen.dart';
 import '../governance/governance_screen.dart';
 import '../settings/settings_screen.dart';
 
@@ -42,9 +43,9 @@ const _mainTiles = <_TileItem>[
   ),
   _TileItem(
     icon: Icons.group_work,
-    iconColor: Color(0xFF00BCD4),
+    iconColor: AppColors.gold,
     label: 'Meine Zelle',
-    comingSoonPhase: 'Phase 2',
+    route: '/cell-hub',
   ),
   _TileItem(
     icon: Icons.shopping_cart,
@@ -125,6 +126,12 @@ class DiscoverScreen extends StatelessWidget {
             child: const JoinChannelScreen(),
           ),
         ),
+      );
+      return;
+    }
+    if (tile.route == '/cell-hub') {
+      Navigator.of(context, rootNavigator: true).push(
+        MaterialPageRoute<void>(builder: (_) => const CellHubScreen()),
       );
       return;
     }

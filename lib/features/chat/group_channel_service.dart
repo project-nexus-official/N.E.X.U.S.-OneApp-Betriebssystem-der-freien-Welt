@@ -153,6 +153,20 @@ class GroupChannelService {
     _discovered.add(channel);
   }
 
+  /// Restores a channel from a backup JSON map (merge – only adds if not
+  /// already joined).  Called by [BackupService].
+  Future<void> restoreFromBackup(Map<String, dynamic> json) async {
+    try {
+      final channel = GroupChannel.fromJson(json);
+      if (_joined.any((c) => c.id == channel.id)) return;
+      _joined.add(channel);
+      await PodDatabase.instance.upsertChannel(channel.id, json);
+      _joinedController.add(joinedChannels);
+    } catch (e) {
+      debugPrint('[CHANNELS] restoreFromBackup error: $e');
+    }
+  }
+
   /// Ensures default channels are present on first start.
   Future<void> ensureDefaults(String myDid) async {
     if (!isJoined('#nexus-global')) {

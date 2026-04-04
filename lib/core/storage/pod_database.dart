@@ -33,6 +33,14 @@ class PodDatabase {
   /// stays stable regardless of the process working directory (important on
   /// Windows desktop where sqflite_ffi defaults to the CWD).
   Future<void> open(Uint8List encKey) async {
+    // Close any previously opened database before reopening with a (potentially
+    // different) key. This is required when restoring an identity over an
+    // existing one: the new seed produces a different encryption key, so we must
+    // reopen to avoid encrypting new data with the stale key.
+    if (_db != null) {
+      await _db!.close();
+      _db = null;
+    }
     _encKey = encKey;
 
     // Use path_provider so the path is consistent across restarts on all
@@ -47,7 +55,7 @@ class PodDatabase {
 
     _db = await openDatabase(
       dbPath,
-      version: 9,
+      version: 10,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -250,6 +258,47 @@ class PodDatabase {
         muted_at   INTEGER NOT NULL
       )
     ''');
+
+    // Governance: cells (Zellen).
+    await db.execute('''
+      CREATE TABLE cells (
+        id         TEXT PRIMARY KEY,
+        enc        TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    ''');
+
+    // Governance: cell members.
+    await db.execute('''
+      CREATE TABLE cell_members (
+        cell_id TEXT NOT NULL,
+        did     TEXT NOT NULL,
+        enc     TEXT NOT NULL,
+        PRIMARY KEY (cell_id, did)
+      )
+    ''');
+
+    // Governance: cell join requests (both inbound and outbound).
+    await db.execute('''
+      CREATE TABLE cell_join_requests (
+        id       TEXT PRIMARY KEY,
+        cell_id  TEXT NOT NULL,
+        is_sent  INTEGER NOT NULL DEFAULT 0,
+        enc      TEXT NOT NULL
+      )
+    ''');
+
+    // Governance: proposals.
+    await db.execute('''
+      CREATE TABLE proposals (
+        id         TEXT PRIMARY KEY,
+        cell_id    TEXT NOT NULL,
+        enc        TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        status     TEXT NOT NULL DEFAULT 'draft'
+      )
+    ''');
   }
 
   static Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -362,6 +411,42 @@ class PodDatabase {
         CREATE TABLE IF NOT EXISTS feed_mutes (
           author_did TEXT PRIMARY KEY,
           muted_at   INTEGER NOT NULL
+        )
+      ''');
+    }
+    if (oldVersion < 10) {
+      // Governance: cells, cell_members, cell_join_requests, proposals.
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS cells (
+          id         TEXT PRIMARY KEY,
+          enc        TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS cell_members (
+          cell_id TEXT NOT NULL,
+          did     TEXT NOT NULL,
+          enc     TEXT NOT NULL,
+          PRIMARY KEY (cell_id, did)
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS cell_join_requests (
+          id       TEXT PRIMARY KEY,
+          cell_id  TEXT NOT NULL,
+          is_sent  INTEGER NOT NULL DEFAULT 0,
+          enc      TEXT NOT NULL
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS proposals (
+          id         TEXT PRIMARY KEY,
+          cell_id    TEXT NOT NULL,
+          enc        TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          status     TEXT NOT NULL DEFAULT 'draft'
         )
       ''');
     }
@@ -1148,5 +1233,176 @@ class PodDatabase {
       result.putIfAbsent(emoji, () => []).add(did);
     }
     return result;
+  }
+
+  // ── Governance: Cells ─────────────────────────────────────────────────────
+
+  Future<void> upsertCell(String id, Map<String, dynamic> data) async {
+    final enc = await PodEncryption.encrypt(jsonEncode(data), _key);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await _database.insert(
+      'cells',
+      {'id': id, 'enc': enc, 'created_at': now, 'updated_at': now},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> listCells() async {
+    final rows = await _database.query('cells', orderBy: 'created_at ASC');
+    final result = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      try {
+        final plain = await PodEncryption.decrypt(row['enc'] as String, _key);
+        result.add(jsonDecode(plain) as Map<String, dynamic>);
+      } catch (_) {}
+    }
+    return result;
+  }
+
+  Future<void> deleteCell(String id) async {
+    await _database.delete('cells', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // ── Governance: Cell Members ──────────────────────────────────────────────
+
+  Future<void> upsertCellMember(
+      String cellId, String did, Map<String, dynamic> data) async {
+    final enc = await PodEncryption.encrypt(jsonEncode(data), _key);
+    await _database.insert(
+      'cell_members',
+      {'cell_id': cellId, 'did': did, 'enc': enc},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> listCellMembers(String cellId) async {
+    final rows = await _database.query(
+      'cell_members',
+      where: 'cell_id = ?',
+      whereArgs: [cellId],
+    );
+    final result = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      try {
+        final plain = await PodEncryption.decrypt(row['enc'] as String, _key);
+        result.add(jsonDecode(plain) as Map<String, dynamic>);
+      } catch (_) {}
+    }
+    return result;
+  }
+
+  Future<void> deleteCellMember(String cellId, String did) async {
+    await _database.delete(
+      'cell_members',
+      where: 'cell_id = ? AND did = ?',
+      whereArgs: [cellId, did],
+    );
+  }
+
+  // ── Governance: Cell Join Requests ────────────────────────────────────────
+
+  Future<void> upsertCellJoinRequest(
+      String id, String cellId, Map<String, dynamic> data,
+      {required bool isSent}) async {
+    final enc = await PodEncryption.encrypt(jsonEncode(data), _key);
+    await _database.insert(
+      'cell_join_requests',
+      {'id': id, 'cell_id': cellId, 'is_sent': isSent ? 1 : 0, 'enc': enc},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> listCellJoinRequests(String cellId) async {
+    final rows = await _database.query(
+      'cell_join_requests',
+      where: 'cell_id = ? AND is_sent = 0',
+      whereArgs: [cellId],
+    );
+    final result = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      try {
+        final plain = await PodEncryption.decrypt(row['enc'] as String, _key);
+        result.add(jsonDecode(plain) as Map<String, dynamic>);
+      } catch (_) {}
+    }
+    return result;
+  }
+
+  Future<List<Map<String, dynamic>>> listMyCellJoinRequests() async {
+    final rows = await _database.query(
+      'cell_join_requests',
+      where: 'is_sent = 1',
+    );
+    final result = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      try {
+        final plain = await PodEncryption.decrypt(row['enc'] as String, _key);
+        result.add(jsonDecode(plain) as Map<String, dynamic>);
+      } catch (_) {}
+    }
+    return result;
+  }
+
+  Future<void> updateCellJoinRequestStatus(
+      String id, String status, String decidedBy, DateTime decidedAt) async {
+    final rows = await _database.query(
+      'cell_join_requests',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (rows.isEmpty) return;
+    final plain = await PodEncryption.decrypt(rows.first['enc'] as String, _key);
+    final data = jsonDecode(plain) as Map<String, dynamic>;
+    data['status'] = status;
+    data['decidedBy'] = decidedBy;
+    data['decidedAt'] = decidedAt.millisecondsSinceEpoch;
+    final enc = await PodEncryption.encrypt(jsonEncode(data), _key);
+    await _database.update(
+      'cell_join_requests',
+      {'enc': enc},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  // ── Governance: Proposals ─────────────────────────────────────────────────
+
+  Future<void> upsertProposal(
+      String id, String cellId, Map<String, dynamic> data) async {
+    final enc = await PodEncryption.encrypt(jsonEncode(data), _key);
+    await _database.insert(
+      'proposals',
+      {
+        'id': id,
+        'cell_id': cellId,
+        'enc': enc,
+        'created_at': data['createdAt'] as int? ??
+            DateTime.now().millisecondsSinceEpoch,
+        'status': data['status'] as String? ?? 'draft',
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> listProposals({String? cellId}) async {
+    final rows = await _database.query(
+      'proposals',
+      where: cellId != null ? 'cell_id = ?' : null,
+      whereArgs: cellId != null ? [cellId] : null,
+      orderBy: 'created_at DESC',
+    );
+    final result = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      try {
+        final plain = await PodEncryption.decrypt(row['enc'] as String, _key);
+        result.add(jsonDecode(plain) as Map<String, dynamic>);
+      } catch (_) {}
+    }
+    return result;
+  }
+
+  Future<void> deleteProposal(String id) async {
+    await _database.delete('proposals', where: 'id = ?', whereArgs: [id]);
   }
 }

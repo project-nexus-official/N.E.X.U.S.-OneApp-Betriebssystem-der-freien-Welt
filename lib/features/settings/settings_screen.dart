@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -11,9 +10,11 @@ import '../../core/identity/identity_service.dart';
 import '../../core/roles/role_enums.dart';
 import '../../core/storage/pod_database.dart';
 import '../../core/storage/retention_service.dart';
+import '../../services/backup_service.dart';
 import '../../services/role_service.dart';
 import '../invite/redeem_screen.dart';
 import '../onboarding/principles_content_screen.dart';
+import '../onboarding/restore_backup_screen.dart';
 import '../../services/notification_settings_service.dart';
 import '../../services/principles_service.dart';
 import '../../services/update_service.dart';
@@ -54,6 +55,8 @@ class SettingsScreen extends StatelessWidget {
           const _NotificationSection(),
           const Divider(height: 1),
           _NachrichtenSection(chatProvider: context.read<ChatProvider>()),
+          const Divider(height: 1),
+          const _BackupSection(),
           const Divider(height: 1),
           _SectionHeader('Einladungen'),
           ListTile(
@@ -887,6 +890,117 @@ class _BlockedContactsScreenState extends State<_BlockedContactsScreen> {
                 );
               },
             ),
+    );
+  }
+}
+
+// ── Backup section ────────────────────────────────────────────────────────────
+
+class _BackupSection extends StatefulWidget {
+  const _BackupSection();
+
+  @override
+  State<_BackupSection> createState() => _BackupSectionState();
+}
+
+class _BackupSectionState extends State<_BackupSection> {
+  bool _creatingBackup = false;
+
+  String _formatDate(DateTime? dt) {
+    if (dt == null) return 'Noch kein Backup';
+    return '${dt.day.toString().padLeft(2, '0')}.'
+        '${dt.month.toString().padLeft(2, '0')}.'
+        '${dt.year} '
+        '${dt.hour.toString().padLeft(2, '0')}:'
+        '${dt.minute.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _backupNow() async {
+    setState(() => _creatingBackup = true);
+    final result = await BackupService.instance.createBackup();
+    if (!mounted) return;
+    setState(() => _creatingBackup = false);
+    if (result.success && result.path != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Backup gespeichert: ${result.path}'),
+          duration: const Duration(seconds: 6),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Backup fehlgeschlagen: ${result.error ?? "Unbekannter Fehler"}'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
+  }
+
+  Future<void> _restoreFromFile() async {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const RestoreBackupScreen(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final svc = BackupService.instance;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader('Datensicherung'),
+        ListTile(
+          leading: const Icon(Icons.backup_outlined, color: AppColors.gold),
+          title: const Text('Letztes Backup'),
+          subtitle: Text(_formatDate(svc.lastBackupAt)),
+        ),
+        ListTile(
+          leading: _creatingBackup
+              ? const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.gold),
+                )
+              : const Icon(Icons.save_outlined, color: AppColors.gold),
+          title: const Text('Jetzt sichern'),
+          subtitle: const Text('Erstellt sofort ein verschlüsseltes Backup'),
+          onTap: _creatingBackup ? null : _backupNow,
+        ),
+        ListTile(
+          leading: const Icon(Icons.restore_outlined, color: AppColors.gold),
+          title: const Text('Backup wiederherstellen'),
+          subtitle: const Text('Daten aus einem Backup importieren'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: _restoreFromFile,
+        ),
+        SwitchListTile(
+          secondary: const Icon(Icons.schedule_outlined,
+              color: AppColors.gold),
+          title: const Text('Automatisches Backup'),
+          subtitle: const Text('Alle 24 Stunden wenn Daten geändert'),
+          value: svc.autoBackupEnabled,
+          onChanged: (v) {
+            BackupService.instance.setAutoBackupEnabled(v);
+            setState(() {});
+          },
+          activeColor: AppColors.gold,
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Text(
+            'Backups sind verschlüsselt und können nur mit deiner Seed Phrase '
+            'geöffnet werden.',
+            style: TextStyle(
+                color: AppColors.onDark.withValues(alpha: 0.55),
+                fontSize: 12,
+                height: 1.5),
+          ),
+        ),
+      ],
     );
   }
 }

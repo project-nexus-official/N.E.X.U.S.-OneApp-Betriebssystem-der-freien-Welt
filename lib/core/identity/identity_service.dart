@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:crypto/crypto.dart' as pkg_crypto;
 import 'package:cryptography/cryptography.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'identity.dart';
 import 'did.dart';
@@ -30,9 +31,25 @@ class IdentityService {
   bool get hasIdentity => _current != null;
 
   /// Loads the existing identity from secure storage. Call at app startup.
+  ///
+  /// On Android, FlutterSecureStorage can throw a [PlatformException] when the
+  /// Keystore entry is corrupted (e.g. after a factory reset or keystore wipe).
+  /// We catch that here so the caller gets a clear error rather than a generic
+  /// platform crash.
   Future<void> init() async {
-    final pubKey = await _storage.read(key: _keyPublicKey);
-    final pseudonym = await _storage.read(key: _keyPseudonym);
+    String? pubKey;
+    String? pseudonym;
+    try {
+      pubKey = await _storage.read(key: _keyPublicKey);
+      pseudonym = await _storage.read(key: _keyPseudonym);
+    } catch (e) {
+      // Keystore / secure storage unavailable – treat as no identity so the
+      // crash reporter in main() surfaces a meaningful message.
+      throw StateError(
+        'Sichere Datenspeicherung nicht verfügbar (Keystore-Fehler): $e\n'
+        'Bitte prüfe ob die App-Daten beschädigt sind.',
+      );
+    }
     if (pubKey != null && pseudonym != null) {
       // Load stored DID, or derive it on the fly for existing users (migration).
       String? did = await _storage.read(key: _keyDid);
@@ -41,6 +58,9 @@ class IdentityService {
         await _storage.write(key: _keyDid, value: did);
       }
       _current = NexusIdentity(publicKeyHex: pubKey, pseudonym: pseudonym, did: did);
+      debugPrint('[IDENTITY] Loaded: ${_current!.did}');
+    } else {
+      debugPrint('[IDENTITY] No stored identity found (fresh install or data cleared).');
     }
   }
 

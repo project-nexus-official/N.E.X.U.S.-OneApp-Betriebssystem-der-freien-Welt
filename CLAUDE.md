@@ -1,5 +1,20 @@
 # CLAUDE.md – NEXUS OneApp
 
+## ⛔ KRITISCHE ENTWICKLUNGSREGELN
+1. NIEMALS `adb uninstall` oder `flutter install` verwenden.
+   Immer `flutter run` für Updates — das behält alle Nutzerdaten.
+   `adb uninstall` LÖSCHT den Android Keystore und damit die 
+   Identität des Nutzers UNWIEDERBRINGLICH (außer per Seed Phrase).
+   Lokale Daten (Kontakte, Nachrichten, Posts) sind dann verloren.
+
+2. NIEMALS die bestehende Datenbank löschen oder neu erstellen 
+   bei Migrationen. Immer CREATE TABLE IF NOT EXISTS und 
+   ALTER TABLE für Änderungen. Bestehende Tabellen und Daten 
+   sind heilig.
+
+3. Immer mit `flutter run` auf dem Gerät testen BEVOR gepusht 
+   wird. Nie ungetestete Builds releasen.
+
 ## Projekt-Übersicht
 Die NEXUS OneApp ist eine dezentrale, zensurresistente App für die Menschheitsfamilie.
 Sie implementiert das AETHER-Protokoll mit drei Wertformen:
@@ -354,8 +369,53 @@ Phase 2: Care-System + Sphären-Plugins
   - **Angewendet auf**: Konversationsliste, Kontaktliste, Kontakt-Details, Dorfplatz Feed-Posts, Dorfplatz Kommentare
   - Tests: 21 Tests in `test/features/profile/profile_image_visibility_test.dart`
 
+- **Governance G1: Zellen-Hub und Proposals (komplett)**:
+  - **Datenmodell** (`lib/features/governance/`):
+    - `Cell` – Zelle mit `CellType` (LOCAL/THEMATIC), `JoinPolicy` (APPROVAL_REQUIRED/INVITE_ONLY), `MinTrustLevel` (NONE/CONTACT/TRUSTED), `proposalWaitDays`, Dunbar-Limit (max 150), `isNew`/`isFull` Getter
+    - `CellMember` – Mitgliedschaft mit `MemberRole` (FOUNDER/MODERATOR/MEMBER/PENDING), `isConfirmed`, `canManageRequests`
+    - `CellJoinRequest` – Beitrittsanfrage mit Status (PENDING/APPROVED/REJECTED), `isPending`
+    - `Proposal` – Governance-Proposal mit `ProposalScope` (CELL/FEDERATION/GLOBAL), `ProposalStatus` (DRAFT/DISCUSSION/VOTING/DECIDED/ARCHIVED), Deadlines, Quorum
+  - **DB v10-Migration**: Neue Tabellen `cells`, `cell_members`, `cell_join_requests`, `proposals` (alle AES-verschlüsselt)
+  - **PodDatabase**: `upsertCell/listCells/deleteCell`, `upsertCellMember/listCellMembers/deleteCellMember`, `upsertCellJoinRequest/listCellJoinRequests/listMyCellJoinRequests/updateCellJoinRequestStatus`, `upsertProposal/listProposals/deleteProposal`
+  - **CellService** Singleton (`lib/features/governance/cell_service.dart`): `load()`, `createCell()`, `updateCell()`, `leaveCell()`, `sendJoinRequest()`, `handleIncomingJoinRequest()`, `approveRequest()`, `rejectRequest()`, `promoteModerator()`, `meetsMinTrustLevel()`, `stream` (Broadcast)
+  - **ProposalService** Singleton (`lib/features/governance/proposal_service.dart`): `load()`, `createProposal()`, `publishProposal()`, `proposalsForCell()`, `activeProposalsForCell()`, `myProposals()`, automatische Status-Advancement (DISCUSSION→VOTING→DECIDED→ARCHIVED)
+  - **Screens**:
+    - `CellHubScreen` – "Meine Zelle": Leerzustand (Entdecken/Gründen), Gefüllt (Meine Zellen + Discovery mit Kategorie-Chips)
+    - `CreateCellScreen` – Formular: Typ, Standort/Thema/Kategorie, Beitrittspolitik, Vertrauensstufe, Wartezeit, Max-Mitglieder
+    - `CellInfoScreen` – Zellendetails, Mitgliederliste, Founder-Aktionen (Moderator-Beförderung), Verlassen
+    - `CellRequestsScreen` – Beitrittsanfragen verwalten (Bestätigen/Ablehnen), Vertrauens-Kontext, Zellen-Mitgliedschaften des Anfragenden
+    - `GovernanceScreen` (Agora) – Tabs Aktiv/Abgeschlossen/Meine, Zell-Selektor bei mehreren Zellen, Leerzustand mit "Zelle finden"-Button
+    - `CreateProposalScreen` – Titel, Beschreibung, Scope (CELL aktiv / FEDERATION+GLOBAL disabled), Domäne, Diskussions-/Abstimmungsdauer, Quorum; Entwurf oder Veröffentlichen
+    - `ProposalDetailScreen` – Status, Timeline, Abstimmungs-Placeholder (G2)
+  - **Integration**:
+    - Entdecken-Hub: "Meine Zelle" Kachel aktiviert (→ `CellHubScreen`)
+    - Dashboard-Karte "Agora": Zeigt echte Daten (aktive Proposals, Beitrittsanfragen, Zellen-Anzahl); Tipp → Agora wenn in Zelle, Zellen-Hub wenn nicht
+    - `initServicesAfterIdentity()`: `CellService.load()` + `ProposalService.load()`
+    - Router: `/cell-hub` Route hinzugefügt
+  - Tests: 33 Tests in `test/features/governance/cell_service_test.dart`, 29 Tests in `test/features/governance/proposal_service_test.dart`
+
 ## Aktueller Fokus
->>> PHASE 1a: Fundament + Identität (in Fertigstellung) <<<
+- **Automatisches lokales Backup-System (komplett)**:
+  - **BackupService** Singleton (`lib/services/backup_service.dart`):
+    - Verschlüsselung: AES-256-GCM mit SHA-256(seed64 || "nexus-backup-v1") → 32-Byte-Schlüssel
+    - Gesichert: Kontakte, Kanal-Mitgliedschaften, Zellen-Mitgliedschaften, Profil, Grundsätze-Status, Benachrichtigungseinstellungen
+    - NICHT gesichert: Seed Phrase / Private Keys, Nachrichten, Bilder, Sprachnachrichten
+    - Automatisch alle 24h mit Hash-Vergleich (überspringt wenn keine Änderungen)
+    - Maximal 3 Backups, älteste werden automatisch gelöscht
+    - Speicherort: Android – `getExternalStorageDirectory()/nexus_backups/`; Windows/andere – Documents/nexus_backups/
+    - Dateiname: `nexus_backup_YYYYMMDD_HHMMSS.enc`
+  - **BackupSetupScreen** (`lib/features/onboarding/backup_setup_screen.dart`): Einmalig nach Grundsätze-Flow
+  - **RestoreBackupScreen** (`lib/features/onboarding/restore_backup_screen.dart`): Automatisch nach Seed-Phrase-Wiederherstellung
+  - **Merge-Logik**: Bestehende Kontakte/Kanäle/Zellen werden NICHT überschrieben; nur fehlende werden ergänzt
+  - **Einstellungen**: Neuer Abschnitt "Datensicherung" in `settings_screen.dart`
+  - **Dashboard-Banner**: `_BackupReminderBanner` wenn Backup noch nicht eingerichtet
+  - **Router**: `/backup-setup` Route + Redirect nach Principles; `/onboarding/restore-backup` Route
+  - `PrinciplesService.restoreFromBackup()`, `ContactService.addContactFromBackup()`, `GroupChannelService.restoreFromBackup()`, `CellService.restoreFromBackup()` hinzugefügt
+  - Tests: 31 Tests in `test/services/backup_service_test.dart`
+  - Onboarding-Flow (neu): Seed Phrase → Nickname → Grundsätze → Backup-Einrichtung → Dashboard
+  - Restore-Flow (neu): Seed-Phrase-Eingabe → Backup-Suche → Wiederherstellung → Dashboard
+
+>>> PHASE 1b: Governance G1 abgeschlossen – G2 (Liquid Democracy Abstimmung) als nächstes <<<
 
 ## Release-Prozess
 

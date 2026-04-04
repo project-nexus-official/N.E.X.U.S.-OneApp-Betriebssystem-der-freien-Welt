@@ -484,6 +484,20 @@ class ContactService {
     contact.lastSeen = DateTime.now();
     await PodDatabase.instance.upsertContact(contact.did, contact.toJson());
   }
+
+  /// Restores a contact from a backup JSON map (merge – only adds if DID is
+  /// not already known).  Called by [BackupService].
+  Future<void> addContactFromBackup(Map<String, dynamic> json) async {
+    try {
+      final contact = Contact.fromJson(json);
+      if (_findByDid(contact.did) != null) return; // already known
+      await PodDatabase.instance.upsertContact(contact.did, json);
+      _contacts.add(contact);
+      _contactsChangedController.add(null);
+    } catch (e) {
+      debugPrint('[CONTACTS] addContactFromBackup error: $e');
+    }
+  }
 }
 
 class ImportResult {
