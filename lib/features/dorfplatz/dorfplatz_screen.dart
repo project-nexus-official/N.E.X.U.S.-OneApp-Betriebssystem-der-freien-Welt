@@ -407,8 +407,49 @@ class _FeedListState extends State<_FeedList>
   bool _loadingMore = false;
   DateTime? _lastLoadMore;
 
+  // Scroll-aware update deferral:
+  // While the user is scrolling we never call setState with new post data —
+  // that would cause a visible layout jump. Instead we stash the latest posts
+  // in _pendingUpdate and apply them once the scroll comes to rest.
+  bool _isScrolling = false;
+  List<FeedPost>? _pendingUpdate;
+
+  // Local snapshot of posts shown in the list.
+  late List<FeedPost> _displayedPosts;
+
   @override
   bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    _displayedPosts = widget.posts;
+  }
+
+  @override
+  void didUpdateWidget(_FeedList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Parent rebuilds (triggered by FeedService stream) pass a new posts list.
+    // Defer the visual update while the user is scrolling.
+    if (_isScrolling) {
+      _pendingUpdate = widget.posts;
+    } else {
+      // Not scrolling — apply immediately without a jank-causing setState;
+      // the parent's setState already schedules a rebuild so we just sync.
+      _displayedPosts = widget.posts;
+      _pendingUpdate = null;
+    }
+  }
+
+  /// Apply any update that was deferred during scrolling.
+  void _applyPendingUpdate() {
+    if (_pendingUpdate != null && mounted) {
+      setState(() {
+        _displayedPosts = _pendingUpdate!;
+        _pendingUpdate = null;
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -442,7 +483,7 @@ class _FeedListState extends State<_FeedList>
   Widget build(BuildContext context) {
     super.build(context); // required by AutomaticKeepAliveClientMixin
 
-    if (widget.posts.isEmpty) {
+    if (_displayedPosts.isEmpty) {
       return RefreshIndicator(
         onRefresh: _handleRefresh,
         color: AppColors.gold,
@@ -470,6 +511,12 @@ class _FeedListState extends State<_FeedList>
       color: AppColors.gold,
       child: NotificationListener<ScrollNotification>(
         onNotification: (n) {
+          if (n is ScrollStartNotification) {
+            _isScrolling = true;
+          } else if (n is ScrollEndNotification) {
+            _isScrolling = false;
+            _applyPendingUpdate();
+          }
           // Trigger pagination when 90% scrolled (extentAfter < 10% of total).
           if (!_loadingMore &&
               n is ScrollUpdateNotification &&
@@ -487,15 +534,15 @@ class _FeedListState extends State<_FeedList>
           // RepaintBoundary is already the default but we make it explicit.
           addRepaintBoundaries: true,
           // Limit in-memory list to 50 posts for smooth performance.
-          itemCount: widget.posts.length.clamp(0, 50) + (_loadingMore ? 1 : 0),
+          itemCount: _displayedPosts.length.clamp(0, 50) + (_loadingMore ? 1 : 0),
           itemBuilder: (ctx, i) {
-            if (i >= widget.posts.length) {
+            if (i >= _displayedPosts.length) {
               return const Padding(
                 padding: EdgeInsets.all(16),
                 child: Center(child: CircularProgressIndicator()),
               );
             }
-            final post = widget.posts[i];
+            final post = _displayedPosts[i];
             return RepaintBoundary(
               child: FeedPostCard(
                 key: ValueKey(post.id),
