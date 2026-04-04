@@ -10,6 +10,7 @@ import '../../shared/widgets/identicon.dart';
 import '../../shared/widgets/peer_avatar.dart';
 import '../contacts/contact_detail_screen.dart';
 import '../profile/profile_screen.dart';
+import 'create_post_screen.dart';
 import 'feed_post.dart';
 import 'feed_service.dart';
 
@@ -749,25 +750,110 @@ class _FooterState extends State<_Footer> {
     await _loadData();
   }
 
+  /// Bottom sheet: repost + DM + channel share options.
+  void _showShareSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Row(
+                children: const [
+                  Icon(Icons.share_outlined, color: AppColors.gold),
+                  SizedBox(width: 8),
+                  Text('Beitrag teilen',
+                      style: TextStyle(
+                          color: AppColors.gold,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16)),
+                ],
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.repeat, color: AppColors.gold),
+              title: const Text('In meinen Feed reposten',
+                  style: TextStyle(color: AppColors.onDark)),
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.of(context, rootNavigator: true).push(
+                  MaterialPageRoute(
+                    builder: (_) => CreatePostScreen(
+                      repostOf: widget.post.id,
+                      repostAuthorPseudonym: widget.post.authorPseudonym,
+                      repostPreview: widget.post.content.isNotEmpty
+                          ? widget.post.content
+                          : widget.post.images.isNotEmpty
+                              ? '[Bild]'
+                              : null,
+                    ),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.chat_outlined,
+                  color: AppColors.onDark.withValues(alpha: 0.35)),
+              title: Text('Per Direktnachricht senden',
+                  style: TextStyle(
+                      color: AppColors.onDark.withValues(alpha: 0.35))),
+              subtitle: Text('Bald verfügbar',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: AppColors.onDark.withValues(alpha: 0.3))),
+              enabled: false,
+            ),
+            ListTile(
+              leading: Icon(Icons.tag,
+                  color: AppColors.onDark.withValues(alpha: 0.35)),
+              title: Text('In Kanal oder Gruppe teilen',
+                  style: TextStyle(
+                      color: AppColors.onDark.withValues(alpha: 0.35))),
+              subtitle: Text('Bald verfügbar',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: AppColors.onDark.withValues(alpha: 0.3))),
+              enabled: false,
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final myDid =
-        IdentityService.instance.currentIdentity?.did ?? '';
+    final myDid = IdentityService.instance.currentIdentity?.did ?? '';
 
     return Row(
       children: [
-        // Emoji reaction button
-        GestureDetector(
-          onTap: _showEmojiPicker,
-          child: Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceVariant,
-              borderRadius: BorderRadius.circular(16),
+        // Emoji reaction button – 44×44 touch target
+        SizedBox(
+          height: 44,
+          child: InkWell(
+            onTap: _showEmojiPicker,
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Center(
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceVariant,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Icon(Icons.add_reaction_outlined,
+                      size: 22, color: AppColors.gold),
+                ),
+              ),
             ),
-            child: const Icon(Icons.add_reaction_outlined,
-                size: 16, color: AppColors.gold),
           ),
         ),
 
@@ -809,34 +895,50 @@ class _FooterState extends State<_Footer> {
 
         const Spacer(),
 
-        // Comments button
-        GestureDetector(
-          onTap: widget.onCommentTap,
-          child: Row(
-            children: [
-              Icon(Icons.chat_bubble_outline,
-                  size: 16,
-                  color: AppColors.onDark.withValues(alpha: 0.5)),
-              const SizedBox(width: 4),
-              Text(
-                '$_commentCount',
-                style: TextStyle(
-                  color: AppColors.onDark.withValues(alpha: 0.5),
-                  fontSize: 12,
-                ),
+        // Comments button – 44×44 touch target
+        SizedBox(
+          height: 44,
+          child: InkWell(
+            onTap: widget.onCommentTap,
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Icon(Icons.chat_bubble_outline,
+                      size: 22,
+                      color: AppColors.onDark.withValues(alpha: 0.5)),
+                  const SizedBox(width: 5),
+                  Text(
+                    '$_commentCount',
+                    style: TextStyle(
+                      color: AppColors.onDark.withValues(alpha: 0.5),
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
 
-        const SizedBox(width: 16),
+        const SizedBox(width: 24),
 
-        // Share button
-        GestureDetector(
-          onTap: widget.onShareTap,
-          child: Icon(Icons.share_outlined,
-              size: 16,
-              color: AppColors.onDark.withValues(alpha: 0.5)),
+        // Share button – 44×44 touch target, opens share sheet
+        SizedBox(
+          width: 44,
+          height: 44,
+          child: InkWell(
+            onTap: _showShareSheet,
+            borderRadius: BorderRadius.circular(8),
+            child: Center(
+              child: Icon(Icons.share_outlined,
+                  size: 22,
+                  color: AppColors.onDark.withValues(alpha: 0.5)),
+            ),
+          ),
         ),
       ],
     );

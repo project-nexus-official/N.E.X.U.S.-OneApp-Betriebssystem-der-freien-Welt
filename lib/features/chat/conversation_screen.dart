@@ -13,6 +13,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/contacts/contact_service.dart';
 import '../../core/contacts/contact.dart';
+import '../../core/storage/pod_database.dart';
 import '../../core/crypto/encryption_keys.dart';
 import '../../core/identity/identity_service.dart';
 import '../../services/contact_request_service.dart';
@@ -738,6 +739,22 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
   // ── Context menu (long press) ───────────────────────────────────────────
 
+  static const _quickReactions = ['👍', '❤️', '😂', '😮', '😢', '👎'];
+
+  Future<void> _toggleReaction(NexusMessage msg, String emoji) async {
+    final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+    final reactions =
+        await PodDatabase.instance.getReactionsForMessage(msg.id);
+    final reactors = reactions[emoji] ?? [];
+    final provider = context.read<ChatProvider>();
+    if (reactors.contains(myDid)) {
+      await provider.removeChannelReaction(msg.id, emoji);
+    } else {
+      await provider.addChannelReaction(msg.id, emoji);
+    }
+    if (mounted) setState(() {});
+  }
+
   void _showMessageMenu(BuildContext context, NexusMessage msg) {
     final myDid = IdentityService.instance.currentIdentity?.did ?? '';
     final isMe = msg.fromDid == myDid;
@@ -746,10 +763,31 @@ class _ConversationScreenState extends State<ConversationScreen> {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // ── Quick emoji reactions ──
+            Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: _quickReactions.map((e) {
+                  return GestureDetector(
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _toggleReaction(msg, e);
+                    },
+                    child: Text(e, style: const TextStyle(fontSize: 28)),
+                  );
+                }).toList(),
+              ),
+            ),
+            const Divider(height: 1),
             // ── Antworten ──
             ListTile(
               leading: const Icon(Icons.reply, color: AppColors.gold),
@@ -1543,6 +1581,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                   _showMessageMenu(context, msg),
                               onSwipeReply: _startReply,
                               onTapQuote: _scrollToMessage,
+                              onReactionToggle: (msg, emoji) =>
+                                  _toggleReaction(msg, emoji),
                               highlightedId: _highlightedId,
                               messageKeys: _messageKeys,
                               searchHighlight: _searchHighlight,
@@ -1670,6 +1710,7 @@ class _MessageList extends StatelessWidget {
     required this.onLongPress,
     required this.onSwipeReply,
     required this.onTapQuote,
+    required this.onReactionToggle,
     required this.highlightedId,
     required this.messageKeys,
     required this.searchHighlight,
@@ -1682,6 +1723,7 @@ class _MessageList extends StatelessWidget {
   final void Function(NexusMessage) onLongPress;
   final void Function(NexusMessage) onSwipeReply;
   final void Function(String) onTapQuote;
+  final void Function(NexusMessage, String) onReactionToggle;
   final ValueNotifier<String?> highlightedId;
   final Map<String, GlobalKey> messageKeys;
   final ValueNotifier<_SearchHighlight> searchHighlight;
@@ -1718,6 +1760,7 @@ class _MessageList extends StatelessWidget {
           onLongPress: () => onLongPress(msg),
           onSwipeReply: () => onSwipeReply(msg),
           onTapQuote: onTapQuote,
+          onReactionToggle: (emoji) => onReactionToggle(msg, emoji),
           highlightQuery: searchQuery,
         );
         return ListenableBuilder(
@@ -1758,6 +1801,7 @@ class _SwipeableMessageBubble extends StatefulWidget {
     required this.onLongPress,
     required this.onSwipeReply,
     required this.onTapQuote,
+    required this.onReactionToggle,
     this.highlightQuery = '',
   });
 
@@ -1767,6 +1811,7 @@ class _SwipeableMessageBubble extends StatefulWidget {
   final VoidCallback onLongPress;
   final VoidCallback onSwipeReply;
   final void Function(String) onTapQuote;
+  final void Function(String emoji) onReactionToggle;
   final String highlightQuery;
 
   @override
@@ -1842,13 +1887,25 @@ class _SwipeableMessageBubbleState extends State<_SwipeableMessageBubble>
             ],
           );
         },
-        child: _MessageBubble(
-          message: widget.message,
-          isMe: widget.isMe,
-          showSender: widget.showSender,
-          onLongPress: widget.onLongPress,
-          onTapQuote: widget.onTapQuote,
-          highlightQuery: widget.highlightQuery,
+        child: Column(
+          crossAxisAlignment: widget.isMe
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _MessageBubble(
+              message: widget.message,
+              isMe: widget.isMe,
+              showSender: widget.showSender,
+              onLongPress: widget.onLongPress,
+              onTapQuote: widget.onTapQuote,
+              highlightQuery: widget.highlightQuery,
+            ),
+            _ReactionsRow(
+              messageId: widget.message.id,
+              onToggle: widget.onReactionToggle,
+            ),
+          ],
         ),
       ),
     );
@@ -3547,6 +3604,123 @@ class _SentRequestsInline extends StatelessWidget {
                 ),
         );
       },
+    );
+  }
+}
+
+// ── Reactions row ─────────────────────────────────────────────────────────────
+
+class _ReactionsRow extends StatefulWidget {
+  const _ReactionsRow({required this.messageId, required this.onToggle});
+  final String messageId;
+  final void Function(String emoji) onToggle;
+
+  @override
+  State<_ReactionsRow> createState() => _ReactionsRowState();
+}
+
+class _ReactionsRowState extends State<_ReactionsRow> {
+  Map<String, List<String>> _reactions = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(_ReactionsRow old) {
+    super.didUpdateWidget(old);
+    _load();
+  }
+
+  Future<void> _load() async {
+    final r =
+        await PodDatabase.instance.getReactionsForMessage(widget.messageId);
+    if (mounted) setState(() => _reactions = r);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_reactions.isEmpty) return const SizedBox.shrink();
+    final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Wrap(
+        spacing: 4,
+        runSpacing: 4,
+        children: _reactions.entries.map((e) {
+          final reacted = e.value.contains(myDid);
+          return GestureDetector(
+            onTap: () {
+              widget.onToggle(e.key);
+              _load();
+            },
+            onLongPress: () => _showReactorList(context, e.key, e.value),
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: reacted
+                    ? AppColors.gold.withValues(alpha: 0.2)
+                    : AppColors.surfaceVariant,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: reacted
+                      ? AppColors.gold.withValues(alpha: 0.5)
+                      : Colors.transparent,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(e.key, style: const TextStyle(fontSize: 14)),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${e.value.length}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: reacted ? AppColors.gold : AppColors.onDark,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  void _showReactorList(
+      BuildContext context, String emoji, List<String> dids) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text('$emoji Reaktionen',
+                  style: const TextStyle(
+                      color: AppColors.gold,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16)),
+            ),
+            const Divider(height: 1),
+            ...dids.map((did) => ListTile(
+                  leading:
+                      const Icon(Icons.person, color: AppColors.gold),
+                  title: Text(
+                      ContactService.instance.getDisplayName(did)),
+                )),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
     );
   }
 }
