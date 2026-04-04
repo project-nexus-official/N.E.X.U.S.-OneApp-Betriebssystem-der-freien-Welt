@@ -248,6 +248,10 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
           _nostrTransport?.subscribeToChannel(ch.nostrTag);
         }
       });
+
+      // Republish all cells where the local user is FOUNDER so that other
+      // devices can discover them. We delay by 3 s to let relays connect first.
+      Future.delayed(const Duration(seconds: 3), _republishMyCells);
     } catch (e) {
       debugPrint('[CHAT] Channel init failed: $e');
     }
@@ -295,6 +299,20 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// Publishes a Kind-30000 cell announcement event to Nostr relays.
   void publishNostrCellAnnouncement(Cell cell) {
     _nostrTransport?.publishCellAnnouncement(cell.toJson());
+  }
+
+  /// Re-publishes all cells where the local user is FOUNDER so that other
+  /// nodes can discover them via the Nostr Kind-30000 subscription.
+  void _republishMyCells() {
+    final myDid = IdentityService.instance.currentIdentity?.did;
+    if (myDid == null) return;
+    final cells = CellService.instance.myCells;
+    final founderCells = cells.where((c) => c.createdBy == myDid).toList();
+    if (founderCells.isEmpty) return;
+    debugPrint('[CELL] Republishing ${founderCells.length} founder cell(s) to Nostr');
+    for (final cell in founderCells) {
+      _nostrTransport?.publishCellAnnouncement(cell.toJson());
+    }
   }
 
   Future<void> _initNostrKeys(dynamic identity) async {

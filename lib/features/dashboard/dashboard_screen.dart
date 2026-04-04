@@ -292,6 +292,8 @@ class _DashboardScreenState extends State<DashboardScreen>
             const SizedBox(height: 12),
             _buildContactsCard(context),
             const SizedBox(height: 12),
+            _buildCellCard(context),
+            const SizedBox(height: 12),
             _buildGovernanceCard(context),
             const SizedBox(height: 12),
             _buildDorfplatzCard(context),
@@ -320,6 +322,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             _buildMessagesCard(context),
             _buildChannelsCard(context),
             _buildContactsCard(context),
+            _buildCellCard(context),
             _buildGovernanceCard(context),
             _buildDorfplatzCard(context),
           ]),
@@ -403,9 +406,37 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
+  Widget _buildCellCard(BuildContext context) {
+    final myCells = CellService.instance.myCells;
+    final isInCell = myCells.isNotEmpty;
+
+    final String subtitle;
+    if (!isInCell) {
+      subtitle = 'Finde deine Gemeinschaft';
+    } else if (myCells.length == 1) {
+      final cell = myCells.first;
+      final memberCount = CellService.instance.membersOf(cell.id).length;
+      subtitle = '$memberCount Mitglied${memberCount == 1 ? '' : 'er'}';
+    } else {
+      subtitle = '${myCells.length} Zellen';
+    }
+
+    return _FeatureCard(
+      key: const Key('cell_card'),
+      icon: Icons.groups_outlined,
+      title: isInCell
+          ? (myCells.length == 1 ? myCells.first.name : 'Meine Zellen')
+          : 'Meine Zelle',
+      subtitle: subtitle,
+      onTap: () => Navigator.of(context, rootNavigator: true).push(
+        MaterialPageRoute<void>(builder: (_) => const CellHubScreen()),
+      ),
+    );
+  }
+
   Widget _buildGovernanceCard(BuildContext context) {
     final myCells = CellService.instance.myCells;
-    final isInCell = myCells.any((c) => CellService.instance.isMember(c.id));
+    final isInCell = myCells.isNotEmpty;
     final activeProposals = isInCell
         ? myCells
             .expand((c) => ProposalService.instance.activeProposalsForCell(c.id))
@@ -421,7 +452,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             if (pendingRequests > 0)
               '+$pendingRequests Beitrittsanfrage${pendingRequests == 1 ? '' : 'n'}',
             if (activeProposals == 0 && pendingRequests == 0)
-              '${myCells.length} Zelle${myCells.length == 1 ? '' : 'n'}',
+              'Keine aktiven Proposals',
           ].join(', ');
 
     return _FeatureCard(

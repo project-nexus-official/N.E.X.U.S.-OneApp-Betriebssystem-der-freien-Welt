@@ -372,6 +372,7 @@ class NostrTransport implements MessageTransport {
   void publishCellAnnouncement(Map<String, dynamic> cellJson) {
     if (_keys == null) return;
     final cellId = cellJson['id'] as String? ?? '';
+    final cellName = cellJson['name'] as String? ?? cellId;
     final event = NostrEvent.create(
       keys: _keys!,
       kind: NostrKind.cellAnnounce,
@@ -382,7 +383,8 @@ class NostrTransport implements MessageTransport {
       ],
     );
     _relayManager.publish(event);
-    print('[NOSTR] Published Kind-30000 cell announcement: $cellId');
+    print('[CELL] Publishing cell announcement: $cellId ($cellName) '
+        'to ${_relayManager.statuses.where((s) => s.state == RelayState.connected).length} relays');
   }
 
   /// Publishes a Kind-5 deletion event for a cell identified by [nostrTag].
@@ -820,10 +822,10 @@ class NostrTransport implements MessageTransport {
       'kinds': [NostrKind.cellAnnounce],
       '#t': ['nexus-cell'],
     });
-    print('[NOSTR] Cell discovery sub: $_cellSubId');
+    print('[CELL] Subscribed to cell announcements, subId=$_cellSubId');
 
     // Dorfplatz feed posts + comments (Kind-1/6 with nexus-dorfplatz* tags),
-    // Kind-7 reactions — last 7 days.
+    // Kind-7 reactions — tag-based subscription for last 7 days.
     if (_feedSubId != null) _relayManager.closeSubscription(_feedSubId!);
     _feedSubId = _relayManager.subscribe({
       'kinds': [NostrKind.textNote, NostrKind.repost, NostrKind.reaction],
@@ -831,6 +833,26 @@ class NostrTransport implements MessageTransport {
       'since': nowSeconds - 7 * 86400,
     });
     print('[NOSTR] Feed sub: $_feedSubId');
+
+    // Author-based feed subscription: fetch own posts + known contacts' posts
+    // from the last 30 days.  This restores posts after a seed-phrase restore
+    // when the local DB is empty but Nostr still holds the events.
+    final feedAuthors = <String>{
+      if (myPubkey.isNotEmpty) myPubkey,
+      ...ContactService.instance.contacts
+          .where((c) => c.nostrPubkey != null && c.nostrPubkey!.isNotEmpty)
+          .map((c) => c.nostrPubkey!),
+    };
+    if (feedAuthors.isNotEmpty) {
+      _relayManager.subscribe({
+        'kinds': [NostrKind.textNote, NostrKind.repost],
+        'authors': feedAuthors.toList(),
+        '#t': ['nexus-dorfplatz'],
+        'since': nowSeconds - 30 * 86400,
+      });
+      print('[NOSTR] Feed author-sync sub: ${feedAuthors.length} authors '
+          '(own + contacts), last 30 days');
+    }
   }
 
   void _onRelayEvent(NostrEvent event) {
@@ -910,14 +932,17 @@ class NostrTransport implements MessageTransport {
   void _handleCellAnnounceEvent(NostrEvent event) {
     try {
       final data = jsonDecode(event.content) as Map<String, dynamic>;
+      final cellId = data['id'] as String? ?? '?';
+      final cellName = data['name'] as String? ?? '?';
+      print('[CELL] Received cell announcement: $cellId ($cellName) '
+          'from pubkey=${event.pubkey.substring(0, 8)}…');
       _cellAnnouncedController.add({
         ...data,
         '_nostr_pubkey': event.pubkey,
         '_created_at': event.createdAt,
       });
-      print('[NOSTR] Kind-30000 cell announced: ${data['name']}');
     } catch (e) {
-      print('[NOSTR] Cell announce parse FAILED: $e');
+      print('[CELL] Cell announce parse FAILED: $e');
     }
   }
 

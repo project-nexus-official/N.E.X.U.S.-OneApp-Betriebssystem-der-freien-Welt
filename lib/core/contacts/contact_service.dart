@@ -112,6 +112,7 @@ class ContactService {
       }
       await _persist(contact);
     }
+    _contactsChangedController.add(null);
     return contact;
   }
 
