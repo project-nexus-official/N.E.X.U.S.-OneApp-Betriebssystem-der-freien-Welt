@@ -4,6 +4,7 @@ import '../../core/contacts/contact_service.dart';
 import '../../core/identity/identity_service.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/peer_avatar.dart';
+import 'create_post_screen.dart';
 import 'feed_post.dart';
 import 'feed_post_card.dart';
 import 'feed_service.dart';
@@ -102,6 +103,115 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     _focusNode.unfocus();
   }
 
+  Future<void> _showPostMenu(BuildContext context) async {
+    final myDid = IdentityService.instance.currentIdentity?.did;
+    final isOwn = widget.post.authorDid == myDid;
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (isOwn) ...[
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Bearbeiten'),
+                onTap: () => Navigator.pop(ctx, 'edit'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline,
+                    color: Colors.redAccent),
+                title: const Text('Löschen',
+                    style: TextStyle(color: Colors.redAccent)),
+                onTap: () => Navigator.pop(ctx, 'delete'),
+              ),
+            ] else ...[
+              ListTile(
+                leading: const Icon(Icons.repeat),
+                title: const Text('Reposten'),
+                onTap: () => Navigator.pop(ctx, 'repost'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.volume_off_outlined),
+                title: const Text('Autor stumm schalten'),
+                onTap: () => Navigator.pop(ctx, 'mute'),
+              ),
+            ],
+            ListTile(
+              leading: const Icon(Icons.close),
+              title: const Text('Abbrechen'),
+              onTap: () => Navigator.pop(ctx),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (action == null || !mounted) return;
+
+    switch (action) {
+      case 'edit':
+        final saved = await showDialog<String>(
+          context: context,
+          builder: (ctx) => _EditPostDialog(
+              initialContent: widget.post.content),
+        );
+        if (saved != null && saved.isNotEmpty) {
+          await FeedService.instance.editPost(widget.post.id, saved);
+        }
+      case 'delete':
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Beitrag löschen?'),
+            content: const Text('Dieser Beitrag wird unwiderruflich gelöscht.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Abbrechen'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Löschen',
+                    style: TextStyle(color: Colors.redAccent)),
+              ),
+            ],
+          ),
+        );
+        if (confirmed == true && mounted) {
+          await FeedService.instance.deletePost(widget.post.id);
+          if (mounted) Navigator.of(context).pop();
+        }
+      case 'repost':
+        Navigator.of(context, rootNavigator: true).push(
+          MaterialPageRoute(
+            builder: (_) => CreatePostScreen(
+              repostOf: widget.post.id,
+              repostAuthorPseudonym: widget.post.authorPseudonym,
+              repostPreview: widget.post.content.isNotEmpty
+                  ? widget.post.content
+                  : widget.post.images.isNotEmpty
+                      ? '[Bild]'
+                      : null,
+            ),
+          ),
+        );
+      case 'mute':
+        await FeedService.instance.muteAuthor(widget.post.authorDid);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content:
+                  Text('${widget.post.authorPseudonym} stumm geschaltet.'),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+          Navigator.of(context).pop();
+        }
+    }
+  }
+
   Future<void> _deleteComment(FeedComment comment) async {
     final identity = IdentityService.instance.currentIdentity;
     if (identity == null || comment.authorDid != identity.did) return;
@@ -165,6 +275,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         post: widget.post,
                         onTap: () {},
                         onCommentTap: () => _focusNode.requestFocus(),
+                        onMenuTap: () => _showPostMenu(context),
                       ),
                       const Divider(height: 1),
                       // Comments header
@@ -443,5 +554,58 @@ class _CommentTile extends StatelessWidget {
       ),
     );
     if (confirmed == true) onDelete();
+  }
+}
+
+// ── Edit post dialog ───────────────────────────────────────────────────────────
+
+class _EditPostDialog extends StatefulWidget {
+  const _EditPostDialog({required this.initialContent});
+  final String initialContent;
+
+  @override
+  State<_EditPostDialog> createState() => _EditPostDialogState();
+}
+
+class _EditPostDialogState extends State<_EditPostDialog> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.initialContent);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.surface,
+      title: const Text('Beitrag bearbeiten',
+          style: TextStyle(color: AppColors.onDark)),
+      content: TextField(
+        controller: _ctrl,
+        maxLines: null,
+        autofocus: true,
+        style: const TextStyle(color: AppColors.onDark),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Abbrechen',
+              style: TextStyle(color: AppColors.onDark)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, _ctrl.text.trim()),
+          child: const Text('Speichern',
+              style: TextStyle(color: AppColors.gold)),
+        ),
+      ],
+    );
   }
 }
