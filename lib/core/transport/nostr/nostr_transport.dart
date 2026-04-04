@@ -93,6 +93,15 @@ class NostrTransport implements MessageTransport {
   /// Emits a raw FeedPost data map when a Kind-1/nexus-dorfplatz event arrives.
   Stream<Map<String, dynamic>> get onFeedPost => _feedPostController.stream;
 
+  final _cellAnnouncedController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
+  /// Emits a Cell JSON map whenever a Kind-30000 cell announcement arrives.
+  Stream<Map<String, dynamic>> get onCellAnnounced =>
+      _cellAnnouncedController.stream;
+
+  String? _cellSubId;
+
   final _feedCommentController =
       StreamController<Map<String, dynamic>>.broadcast();
 
@@ -354,6 +363,26 @@ class NostrTransport implements MessageTransport {
     );
     _relayManager.publish(event);
     print('[NOSTR] Published Kind-5 deletion for event: $messageId');
+  }
+
+  /// Publishes a Kind-30000 cell announcement so other nodes can discover the cell.
+  ///
+  /// Uses parameterized replaceable event with d-tag = cell ID, so updating
+  /// the cell simply replaces the previous announcement on relays.
+  void publishCellAnnouncement(Map<String, dynamic> cellJson) {
+    if (_keys == null) return;
+    final cellId = cellJson['id'] as String? ?? '';
+    final event = NostrEvent.create(
+      keys: _keys!,
+      kind: NostrKind.cellAnnounce,
+      content: jsonEncode(cellJson),
+      tags: [
+        ['d', cellId],
+        ['t', 'nexus-cell'],
+      ],
+    );
+    _relayManager.publish(event);
+    print('[NOSTR] Published Kind-30000 cell announcement: $cellId');
   }
 
   /// Publishes a Kind-5 deletion event for a cell identified by [nostrTag].
@@ -785,6 +814,14 @@ class NostrTransport implements MessageTransport {
     });
     print('[NOSTR] Channel discovery sub: $_channelDiscoverySubId');
 
+    // Cell announcements (Kind-30000, parameterized replaceable) — all time.
+    if (_cellSubId != null) _relayManager.closeSubscription(_cellSubId!);
+    _cellSubId = _relayManager.subscribe({
+      'kinds': [NostrKind.cellAnnounce],
+      '#t': ['nexus-cell'],
+    });
+    print('[NOSTR] Cell discovery sub: $_cellSubId');
+
     // Dorfplatz feed posts + comments (Kind-1/6 with nexus-dorfplatz* tags),
     // Kind-7 reactions — last 7 days.
     if (_feedSubId != null) _relayManager.closeSubscription(_feedSubId!);
@@ -823,6 +860,8 @@ class NostrTransport implements MessageTransport {
         _handleChannelMessageEvent(event);
       case NostrKind.presence:
         _handlePresenceEvent(event);
+      case NostrKind.cellAnnounce:
+        _handleCellAnnounceEvent(event);
     }
   }
 
@@ -866,6 +905,20 @@ class NostrTransport implements MessageTransport {
       'referencedEventId': referencedEventId,
       'senderPubkey': event.pubkey,
     });
+  }
+
+  void _handleCellAnnounceEvent(NostrEvent event) {
+    try {
+      final data = jsonDecode(event.content) as Map<String, dynamic>;
+      _cellAnnouncedController.add({
+        ...data,
+        '_nostr_pubkey': event.pubkey,
+        '_created_at': event.createdAt,
+      });
+      print('[NOSTR] Kind-30000 cell announced: ${data['name']}');
+    } catch (e) {
+      print('[NOSTR] Cell announce parse FAILED: $e');
+    }
   }
 
   void _handleChannelCreateEvent(NostrEvent event) {

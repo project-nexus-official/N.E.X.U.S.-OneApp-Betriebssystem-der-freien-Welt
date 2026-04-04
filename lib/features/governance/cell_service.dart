@@ -333,6 +333,32 @@ class CellService {
     debugPrint('[CELLS] Deleted cell $cellId (admin action)');
   }
 
+  /// Transfers the FOUNDER role to [targetDid] and demotes the current founder
+  /// to MEMBER.  Only the current founder or a superadmin may call this.
+  Future<void> transferFounderRole(String cellId, String targetDid) async {
+    final members = _members[cellId];
+    if (members == null) return;
+
+    final founderIdx = members.indexWhere((m) => m.role == MemberRole.founder);
+    final targetIdx = members.indexWhere((m) => m.did == targetDid);
+    if (founderIdx < 0 || targetIdx < 0) return;
+
+    // Demote old founder to member.
+    final oldFounder = members[founderIdx].copyWith(role: MemberRole.member);
+    members[founderIdx] = oldFounder;
+    await PodDatabase.instance.upsertCellMember(
+        cellId, oldFounder.did, oldFounder.toJson());
+
+    // Promote target to founder.
+    final newFounder = members[targetIdx].copyWith(role: MemberRole.founder);
+    members[targetIdx] = newFounder;
+    await PodDatabase.instance.upsertCellMember(
+        cellId, newFounder.did, newFounder.toJson());
+
+    _notify();
+    debugPrint('[CELLS] Founder role transferred to $targetDid in $cellId');
+  }
+
   /// Promotes a member to moderator.
   Future<void> promoteModerator(String cellId, String targetDid) async {
     final myMembership = myMembershipIn(cellId);

@@ -2,40 +2,60 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 
-import '../../core/identity/identity_service.dart';
-import '../../core/roles/permission_helper.dart';
 import '../../core/utils/geohash.dart';
 import '../../shared/theme/app_theme.dart';
 import '../chat/chat_provider.dart';
 import 'cell.dart';
 import 'cell_service.dart';
 
-/// Form to found a new cell.
-class CreateCellScreen extends StatefulWidget {
-  const CreateCellScreen({super.key});
+/// Edit screen for the cell founder to modify cell settings.
+///
+/// The cell type (local ↔ thematic) cannot be changed after creation.
+class CellEditScreen extends StatefulWidget {
+  final Cell cell;
+  const CellEditScreen({super.key, required this.cell});
 
   @override
-  State<CreateCellScreen> createState() => _CreateCellScreenState();
+  State<CellEditScreen> createState() => _CellEditScreenState();
 }
 
-class _CreateCellScreenState extends State<CreateCellScreen> {
+class _CellEditScreenState extends State<CellEditScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _nameCtrl = TextEditingController();
-  final _descCtrl = TextEditingController();
-  final _locationCtrl = TextEditingController();
-  final _topicCtrl = TextEditingController();
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _descCtrl;
+  late final TextEditingController _locationCtrl;
+  late final TextEditingController _topicCtrl;
 
-  CellType _cellType = CellType.thematic;
-  String _category = cellCategories.first;
-  JoinPolicy _joinPolicy = JoinPolicy.approvalRequired;
-  MinTrustLevel _minTrust = MinTrustLevel.none;
-  int _proposalWaitDays = 0;
-  int _maxMembers = 150;
-  bool _isCreating = false;
+  late String _category;
+  late JoinPolicy _joinPolicy;
+  late MinTrustLevel _minTrust;
+  late int _proposalWaitDays;
+  late int _maxMembers;
 
   String? _geohash;
   bool _fetchingLocation = false;
   String? _locationStatus;
+
+  bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final c = widget.cell;
+    _nameCtrl = TextEditingController(text: c.name);
+    _descCtrl = TextEditingController(text: c.description);
+    _locationCtrl = TextEditingController(text: c.locationName ?? '');
+    _topicCtrl = TextEditingController(text: c.topic ?? '');
+    _category = c.category ?? cellCategories.first;
+    _joinPolicy = c.joinPolicy;
+    _minTrust = c.minTrustLevel;
+    _proposalWaitDays = c.proposalWaitDays;
+    _maxMembers = c.maxMembers;
+    _geohash = c.geohash;
+    if (_geohash != null) {
+      _locationStatus = 'Aktueller GPS-Standort gespeichert ✓';
+    }
+  }
 
   @override
   void dispose() {
@@ -50,105 +70,78 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
     setState(() {
       _fetchingLocation = true;
       _locationStatus = null;
-      _geohash = null;
     });
-
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         setState(() {
           _fetchingLocation = false;
-          _locationStatus = 'GPS nicht verfügbar. Aktiviere den Standort in den Systemeinstellungen.';
+          _locationStatus = 'GPS nicht verfügbar.';
         });
         return;
       }
-
       var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
       }
-
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
         setState(() {
           _fetchingLocation = false;
-          _locationStatus =
-              'Ohne Standort wird deine Zelle nicht in der Nähe-Suche angezeigt.';
+          _locationStatus = 'Standort-Berechtigung verweigert.';
         });
         return;
       }
-
       final pos = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.medium,
         timeLimit: const Duration(seconds: 10),
       );
-
-      final hash = encodeGeohash(pos.latitude, pos.longitude);
       setState(() {
-        _geohash = hash;
+        _geohash = encodeGeohash(pos.latitude, pos.longitude);
         _fetchingLocation = false;
-        _locationStatus = 'Standort gespeichert ✓';
+        _locationStatus = 'Neuer GPS-Standort gespeichert ✓';
       });
     } catch (_) {
       setState(() {
         _fetchingLocation = false;
-        _locationStatus =
-            'Ohne Standort wird deine Zelle nicht in der Nähe-Suche angezeigt.';
+        _locationStatus = 'Standort konnte nicht ermittelt werden.';
       });
     }
   }
 
-  Future<void> _submit() async {
+  Future<void> _save() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
-
-    final myDid = IdentityService.instance.currentIdentity!.did;
-    if (!PermissionHelper.canCreateCell(myDid)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Nur System-Admins können Zellen gründen.'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    setState(() => _isCreating = true);
-
+    setState(() => _isSaving = true);
     try {
-      final cell = Cell.create(
+      final updated = widget.cell.copyWith(
         name: _nameCtrl.text.trim(),
         description: _descCtrl.text.trim(),
-        createdBy: myDid,
-        cellType: _cellType,
-        locationName: _cellType == CellType.local
-            ? _locationCtrl.text.trim().isEmpty
+        locationName: widget.cell.cellType == CellType.local
+            ? (_locationCtrl.text.trim().isEmpty
                 ? null
-                : _locationCtrl.text.trim()
+                : _locationCtrl.text.trim())
             : null,
-        geohash: _cellType == CellType.local ? _geohash : null,
-        topic: _cellType == CellType.thematic
-            ? _topicCtrl.text.trim().isEmpty
-                ? null
-                : _topicCtrl.text.trim()
+        geohash: widget.cell.cellType == CellType.local ? _geohash : null,
+        topic: widget.cell.cellType == CellType.thematic
+            ? (_topicCtrl.text.trim().isEmpty ? null : _topicCtrl.text.trim())
             : null,
-        category: _cellType == CellType.thematic ? _category : null,
-        maxMembers: _maxMembers,
+        category: widget.cell.cellType == CellType.thematic ? _category : null,
         joinPolicy: _joinPolicy,
         minTrustLevel: _minTrust,
         proposalWaitDays: _proposalWaitDays,
+        maxMembers: _maxMembers,
       );
 
-      await CellService.instance.createCell(cell);
+      await CellService.instance.updateCell(updated);
 
-      // Publish Nostr announcement so other nodes can discover this cell.
       if (mounted) {
-        context.read<ChatProvider>().publishNostrCellAnnouncement(cell);
+        context.read<ChatProvider>().publishNostrCellAnnouncement(updated);
       }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Zelle "${cell.name}" gegründet!'),
+          const SnackBar(
+            content: Text('Zelle aktualisiert ✓'),
             backgroundColor: Colors.green,
           ),
         );
@@ -157,11 +150,12 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Fehler: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Fehler: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
-      if (mounted) setState(() => _isCreating = false);
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
@@ -169,7 +163,7 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Zelle gründen'),
+        title: const Text('Zelle bearbeiten'),
         backgroundColor: AppColors.deepBlue,
       ),
       backgroundColor: AppColors.deepBlue,
@@ -179,10 +173,10 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
           padding: const EdgeInsets.all(20),
           children: [
             // Name
-            _SectionLabel('Zellenname *'),
+            _Label('Zellenname *'),
             TextFormField(
               controller: _nameCtrl,
-              decoration: _inputDecoration('z. B. Hamburg Altona'),
+              decoration: _deco('z. B. Hamburg Altona'),
               style: const TextStyle(color: AppColors.onDark),
               validator: (v) {
                 if (v == null || v.trim().isEmpty) return 'Name ist Pflichtfeld.';
@@ -193,52 +187,22 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
             const SizedBox(height: 16),
 
             // Description
-            _SectionLabel('Beschreibung (optional)'),
+            _Label('Beschreibung (optional)'),
             TextFormField(
               controller: _descCtrl,
-              decoration: _inputDecoration('Worum geht es in dieser Zelle?'),
+              decoration: _deco('Worum geht es in dieser Zelle?'),
               style: const TextStyle(color: AppColors.onDark),
               maxLines: 3,
               maxLength: 500,
             ),
             const SizedBox(height: 16),
 
-            // Cell type
-            _SectionLabel('Zellen-Typ *'),
-            Row(
-              children: [
-                Expanded(
-                  child: _TypeChip(
-                    label: 'Lokale Gemeinschaft',
-                    icon: Icons.location_on,
-                    selected: _cellType == CellType.local,
-                    onTap: () {
-                      setState(() => _cellType = CellType.local);
-                      if (_geohash == null && !_fetchingLocation) {
-                        _fetchGeohash();
-                      }
-                    },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _TypeChip(
-                    label: 'Thematische Gemeinschaft',
-                    icon: Icons.group_work,
-                    selected: _cellType == CellType.thematic,
-                    onTap: () => setState(() => _cellType = CellType.thematic),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
             // Type-specific fields
-            if (_cellType == CellType.local) ...[
-              _SectionLabel('Anzeige-Name des Standorts (optional)'),
+            if (widget.cell.cellType == CellType.local) ...[
+              _Label('Anzeige-Name des Standorts (optional)'),
               TextFormField(
                 controller: _locationCtrl,
-                decoration: _inputDecoration('z. B. Teneriffa Nord'),
+                decoration: _deco('z. B. Teneriffa Nord'),
                 style: const TextStyle(color: AppColors.onDark),
               ),
               const SizedBox(height: 12),
@@ -258,19 +222,17 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
                             width: 14,
                             height: 14,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: AppColors.gold),
+                                strokeWidth: 2, color: AppColors.gold),
                           )
                         : Icon(
                             _geohash != null
                                 ? Icons.location_on
                                 : Icons.my_location,
-                            size: 16,
-                          ),
+                            size: 16),
                     label: Text(_fetchingLocation
-                        ? 'Ermittle ...'
+                        ? 'Ermittle …'
                         : _geohash != null
-                            ? 'GPS gespeichert'
+                            ? 'GPS aktualisieren'
                             : 'GPS-Standort ermitteln'),
                   ),
                 ],
@@ -280,7 +242,7 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
                 Text(
                   _locationStatus!,
                   style: TextStyle(
-                    color: _geohash != null
+                    color: _locationStatus!.contains('✓')
                         ? Colors.green
                         : AppColors.onDark.withValues(alpha: 0.6),
                     fontSize: 12,
@@ -290,20 +252,20 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
               const SizedBox(height: 16),
             ],
 
-            if (_cellType == CellType.thematic) ...[
-              _SectionLabel('Thema (optional)'),
+            if (widget.cell.cellType == CellType.thematic) ...[
+              _Label('Thema (optional)'),
               TextFormField(
                 controller: _topicCtrl,
-                decoration: _inputDecoration('z. B. Softwareentwicklung'),
+                decoration: _deco('z. B. Softwareentwicklung'),
                 style: const TextStyle(color: AppColors.onDark),
               ),
               const SizedBox(height: 16),
-              _SectionLabel('Kategorie'),
+              _Label('Kategorie'),
               DropdownButtonFormField<String>(
                 value: _category,
                 dropdownColor: AppColors.surface,
                 style: const TextStyle(color: AppColors.onDark),
-                decoration: _inputDecoration(''),
+                decoration: _deco(''),
                 items: cellCategories
                     .map((c) => DropdownMenuItem(value: c, child: Text(c)))
                     .toList(),
@@ -313,15 +275,15 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
             ],
 
             // Join policy
-            _SectionLabel('Beitrittspolitik'),
-            _RadioOption<JoinPolicy>(
+            _Label('Beitrittspolitik'),
+            _Radio<JoinPolicy>(
               label: 'Beitritt anfragen (Standard)',
               subtitle: 'Interessierte können eine Anfrage schicken',
               value: JoinPolicy.approvalRequired,
               groupValue: _joinPolicy,
               onChanged: (v) => setState(() => _joinPolicy = v!),
             ),
-            _RadioOption<JoinPolicy>(
+            _Radio<JoinPolicy>(
               label: 'Nur auf Einladung',
               subtitle: 'Mitglieder laden neue Personen direkt ein',
               value: JoinPolicy.inviteOnly,
@@ -331,20 +293,20 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
             const SizedBox(height: 16),
 
             // Min trust level
-            _SectionLabel('Mindest-Vertrauensstufe'),
-            _RadioOption<MinTrustLevel>(
-              label: 'Keine Einschränkung (Standard)',
+            _Label('Mindest-Vertrauensstufe'),
+            _Radio<MinTrustLevel>(
+              label: 'Keine Einschränkung',
               value: MinTrustLevel.none,
               groupValue: _minTrust,
               onChanged: (v) => setState(() => _minTrust = v!),
             ),
-            _RadioOption<MinTrustLevel>(
+            _Radio<MinTrustLevel>(
               label: 'Kontakt eines Mitglieds',
               value: MinTrustLevel.contact,
               groupValue: _minTrust,
               onChanged: (v) => setState(() => _minTrust = v!),
             ),
-            _RadioOption<MinTrustLevel>(
+            _Radio<MinTrustLevel>(
               label: 'Vertrauensperson eines Mitglieds',
               value: MinTrustLevel.trusted,
               groupValue: _minTrust,
@@ -353,20 +315,20 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
             const SizedBox(height: 16),
 
             // Proposal wait days
-            _SectionLabel('Wartezeit vor Proposals'),
-            _RadioOption<int>(
-              label: 'Sofort (Standard)',
+            _Label('Wartezeit vor Proposals'),
+            _Radio<int>(
+              label: 'Sofort',
               value: 0,
               groupValue: _proposalWaitDays,
               onChanged: (v) => setState(() => _proposalWaitDays = v!),
             ),
-            _RadioOption<int>(
+            _Radio<int>(
               label: '7 Tage nach Beitritt',
               value: 7,
               groupValue: _proposalWaitDays,
               onChanged: (v) => setState(() => _proposalWaitDays = v!),
             ),
-            _RadioOption<int>(
+            _Radio<int>(
               label: '30 Tage nach Beitritt',
               value: 30,
               groupValue: _proposalWaitDays,
@@ -375,7 +337,7 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
             const SizedBox(height: 16),
 
             // Max members
-            _SectionLabel('Max. Mitglieder: $_maxMembers'),
+            _Label('Max. Mitglieder: $_maxMembers'),
             Slider(
               value: _maxMembers.toDouble(),
               min: 5,
@@ -387,29 +349,25 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
             ),
             const SizedBox(height: 32),
 
-            // Submit
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: _isCreating ? null : _submit,
+                onPressed: _isSaving ? null : _save,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.gold,
                   foregroundColor: Colors.black,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+                      borderRadius: BorderRadius.circular(12)),
                 ),
-                child: _isCreating
+                child: _isSaving
                     ? const SizedBox(
                         height: 20,
                         width: 20,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Text(
-                        'Zelle gründen',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
+                    : const Text('Änderungen speichern',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
               ),
             ),
             const SizedBox(height: 40),
@@ -419,10 +377,9 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
     );
   }
 
-  InputDecoration _inputDecoration(String hint) => InputDecoration(
+  InputDecoration _deco(String hint) => InputDecoration(
         hintText: hint,
-        hintStyle:
-            TextStyle(color: AppColors.onDark.withValues(alpha: 0.4)),
+        hintStyle: TextStyle(color: AppColors.onDark.withValues(alpha: 0.4)),
         filled: true,
         fillColor: AppColors.surface,
         border: OutlineInputBorder(
@@ -442,11 +399,9 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
       );
 }
 
-// ── Small widgets ─────────────────────────────────────────────────────────────
-
-class _SectionLabel extends StatelessWidget {
+class _Label extends StatelessWidget {
   final String text;
-  const _SectionLabel(this.text);
+  const _Label(this.text);
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -462,66 +417,14 @@ class _SectionLabel extends StatelessWidget {
       );
 }
 
-class _TypeChip extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _TypeChip({
-    required this.label,
-    required this.icon,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: selected
-              ? AppColors.gold.withValues(alpha: 0.15)
-              : AppColors.surface,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: selected ? AppColors.gold : AppColors.surfaceVariant,
-            width: selected ? 1.5 : 1,
-          ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon,
-                color: selected ? AppColors.gold : AppColors.onDark,
-                size: 24),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: selected ? AppColors.gold : AppColors.onDark,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _RadioOption<T> extends StatelessWidget {
+class _Radio<T> extends StatelessWidget {
   final String label;
   final String? subtitle;
   final T value;
   final T groupValue;
   final ValueChanged<T?> onChanged;
 
-  const _RadioOption({
+  const _Radio({
     required this.label,
     this.subtitle,
     required this.value,
@@ -530,27 +433,20 @@ class _RadioOption<T> extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    return RadioListTile<T>(
-      title: Text(
-        label,
-        style: const TextStyle(color: AppColors.onDark, fontSize: 14),
-      ),
-      subtitle: subtitle != null
-          ? Text(
-              subtitle!,
-              style: TextStyle(
-                color: AppColors.onDark.withValues(alpha: 0.5),
-                fontSize: 12,
-              ),
-            )
-          : null,
-      value: value,
-      groupValue: groupValue,
-      activeColor: AppColors.gold,
-      onChanged: onChanged,
-      contentPadding: EdgeInsets.zero,
-      dense: true,
-    );
-  }
+  Widget build(BuildContext context) => RadioListTile<T>(
+        title: Text(label,
+            style: const TextStyle(color: AppColors.onDark, fontSize: 14)),
+        subtitle: subtitle != null
+            ? Text(subtitle!,
+                style: TextStyle(
+                    color: AppColors.onDark.withValues(alpha: 0.5),
+                    fontSize: 12))
+            : null,
+        value: value,
+        groupValue: groupValue,
+        activeColor: AppColors.gold,
+        onChanged: onChanged,
+        contentPadding: EdgeInsets.zero,
+        dense: true,
+      );
 }

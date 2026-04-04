@@ -121,9 +121,11 @@ class _CellHubScreenState extends State<CellHubScreen> {
   @override
   Widget build(BuildContext context) {
     final myCells = CellService.instance.myCells;
-    final discovered = CellService.instance.discoveredCells;
     final myDid = IdentityService.instance.currentIdentity?.did ?? '';
     final canCreate = PermissionHelper.canCreateCell(myDid);
+
+    // All known cells for discovery (joined + nostr-discovered), de-duplicated.
+    final allKnown = CellService.instance.allKnownCells;
 
     return Scaffold(
       appBar: AppBar(
@@ -153,13 +155,14 @@ class _CellHubScreenState extends State<CellHubScreen> {
               canCreate: canCreate,
               myGeohash: _myGeohash,
               gpsUnavailable: _gpsUnavailable,
+              allKnownCells: allKnown,
               selectedCategory: _selectedCategory,
               onCategoryChanged: (cat) =>
                   setState(() => _selectedCategory = cat),
             )
           : _FilledState(
               myCells: myCells,
-              discovered: discovered,
+              allKnownCells: allKnown,
               selectedCategory: _selectedCategory,
               onCategoryChanged: (cat) =>
                   setState(() => _selectedCategory = cat),
@@ -182,6 +185,7 @@ class _EmptyState extends StatelessWidget {
   final bool canCreate;
   final String? myGeohash;
   final bool gpsUnavailable;
+  final List<Cell> allKnownCells;
   final String selectedCategory;
   final ValueChanged<String> onCategoryChanged;
 
@@ -191,24 +195,24 @@ class _EmptyState extends StatelessWidget {
     required this.canCreate,
     required this.myGeohash,
     required this.gpsUnavailable,
+    required this.allKnownCells,
     required this.selectedCategory,
     required this.onCategoryChanged,
   });
 
   @override
   Widget build(BuildContext context) {
-    final discovered = CellService.instance.discoveredCells;
-    final nearby = _nearbyCells(discovered, myGeohash);
-    final allCategories = ['Alle', ...cellCategories];
-    final thematic = discovered
+    final nearby = _nearbyCells(allKnownCells, myGeohash);
+    final allCategories = ['Alle', 'Sonstiges', ...cellCategories.where((c) => c != 'Sonstiges')];
+    final thematic = allKnownCells
         .where((c) => c.cellType == CellType.thematic)
         .toList();
     final filteredThematic = selectedCategory == 'Alle'
         ? thematic
         : thematic
-            .where((c) => c.category == selectedCategory)
+            .where((c) => (c.category ?? 'Sonstiges') == selectedCategory)
             .toList();
-    final recommended = _recommendedCells(discovered);
+    final recommended = _recommendedCells(allKnownCells);
 
     return CustomScrollView(
       slivers: [
@@ -303,7 +307,7 @@ class _EmptyState extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.all(24),
               child: Text(
-                discovered.isEmpty
+                allKnownCells.isEmpty
                     ? 'Noch keine Zellen entdeckt. Sobald Zellen im NEXUS-Netzwerk '
                         'bekannt sind, erscheinen sie hier.'
                     : 'Keine thematischen Zellen in dieser Kategorie gefunden.',
@@ -391,7 +395,7 @@ class _EmptyState extends StatelessWidget {
 
 class _FilledState extends StatelessWidget {
   final List<Cell> myCells;
-  final List<Cell> discovered;
+  final List<Cell> allKnownCells;
   final String selectedCategory;
   final ValueChanged<String> onCategoryChanged;
   final ValueChanged<Cell> onCellTap;
@@ -403,7 +407,7 @@ class _FilledState extends StatelessWidget {
 
   const _FilledState({
     required this.myCells,
-    required this.discovered,
+    required this.allKnownCells,
     required this.selectedCategory,
     required this.onCategoryChanged,
     required this.onCellTap,
@@ -416,15 +420,15 @@ class _FilledState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final allCategories = ['Alle', ...cellCategories];
-    final nearby = _nearbyCells(discovered, myGeohash);
-    final recommended = _recommendedCells(discovered);
-    final thematic = discovered
+    final allCategories = ['Alle', 'Sonstiges', ...cellCategories.where((c) => c != 'Sonstiges')];
+    final nearby = _nearbyCells(allKnownCells, myGeohash);
+    final recommended = _recommendedCells(allKnownCells);
+    final thematic = allKnownCells
         .where((c) => c.cellType == CellType.thematic)
         .toList();
     final filtered = selectedCategory == 'Alle'
         ? thematic
-        : thematic.where((c) => c.category == selectedCategory).toList();
+        : thematic.where((c) => (c.category ?? 'Sonstiges') == selectedCategory).toList();
 
     return CustomScrollView(
       slivers: [
@@ -439,6 +443,9 @@ class _FilledState extends StatelessWidget {
             childCount: myCells.length,
           ),
         ),
+
+        // "Weitere Zellen entdecken" divider
+        _SectionHeader(title: 'Weitere Zellen entdecken'),
 
         // Nearby section (GPS-based)
         _NearbySection(

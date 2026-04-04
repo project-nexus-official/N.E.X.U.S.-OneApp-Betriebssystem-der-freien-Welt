@@ -53,6 +53,13 @@ class NostrKind {
   /// d-tag: "nexus-channel-role-{channelId}-{did}"
   /// Content: JSON { "role": "channelModerator|channelMember", "channel_id": "...", "granted_by": "..." }
   static const int channelRoleAssignment = 31002;
+
+  /// NEXUS cell announcement (parameterized replaceable).
+  ///
+  /// d-tag: cell ID. When the founder updates the cell settings, the relay
+  /// keeps only the latest event, so discovery always shows current data.
+  /// Content: Cell.toJson(). Tags: t=nexus-cell.
+  static const int cellAnnounce = 30000;
 }
 
 /// A NIP-01 Nostr event.

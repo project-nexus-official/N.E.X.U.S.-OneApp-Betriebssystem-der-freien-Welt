@@ -37,6 +37,8 @@ import 'conversation_service.dart';
 import 'group_channel.dart';
 import 'group_channel_service.dart';
 import '../dorfplatz/feed_service.dart';
+import '../governance/cell.dart';
+import '../governance/cell_service.dart';
 
 /// ViewModel for the chat feature.
 ///
@@ -235,6 +237,11 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
             _nostrTransport!.onChannelAnnounced.listen(_onChannelAnnounced);
       }
 
+      // Listen for newly discovered cells via Kind-30000.
+      if (_nostrTransport != null) {
+        _nostrTransport!.onCellAnnounced.listen(_onCellAnnounced);
+      }
+
       // Re-subscribe when channel list changes (join/leave).
       GroupChannelService.instance.joinedStream.listen((channels) {
         for (final ch in channels) {
@@ -270,6 +277,24 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     } catch (e) {
       debugPrint('[CHAT] Channel announced parse error: $e');
     }
+  }
+
+  void _onCellAnnounced(Map<String, dynamic> data) {
+    try {
+      // Remove internal nostr fields before passing to Cell.fromJson.
+      final cellJson = Map<String, dynamic>.from(data)
+        ..remove('_nostr_pubkey')
+        ..remove('_created_at');
+      final cell = Cell.fromJson(cellJson);
+      CellService.instance.addDiscoveredCell(cell);
+    } catch (e) {
+      debugPrint('[CHAT] Cell announced parse error: $e');
+    }
+  }
+
+  /// Publishes a Kind-30000 cell announcement event to Nostr relays.
+  void publishNostrCellAnnouncement(Cell cell) {
+    _nostrTransport?.publishCellAnnouncement(cell.toJson());
   }
 
   Future<void> _initNostrKeys(dynamic identity) async {

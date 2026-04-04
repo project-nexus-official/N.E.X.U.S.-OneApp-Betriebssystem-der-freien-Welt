@@ -11,6 +11,7 @@ import '../chat/chat_provider.dart';
 import '../../services/role_service.dart';
 import '../../shared/theme/app_theme.dart';
 import 'cell.dart';
+import 'cell_edit_screen.dart';
 import 'cell_member.dart';
 import 'cell_requests_screen.dart';
 import 'cell_service.dart';
@@ -213,21 +214,68 @@ class _CellInfoScreenState extends State<CellInfoScreen> {
 
   Future<void> _leaveCell() async {
     if (_isFounder) {
-      final members = CellService.instance.membersOf(_cell.id)
+      final otherMembers = CellService.instance.membersOf(_cell.id)
           .where((m) => m.isConfirmed && m.did != _myDid)
           .toList();
-      if (members.isNotEmpty) {
+
+      if (otherMembers.isEmpty) {
+        // Only member — must delete instead of leaving.
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-                'Als Gründer: Ernenne zuerst einen Nachfolger zum Moderator, bevor du die Zelle verlässt.'),
-            duration: Duration(seconds: 4),
+        showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppColors.surface,
+            title: const Text('Zelle verlassen nicht möglich',
+                style: TextStyle(color: AppColors.onDark)),
+            content: const Text(
+              'Du bist das einzige Mitglied. Lösche die Zelle statt sie zu verlassen.',
+              style: TextStyle(color: AppColors.onDark),
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('OK')),
+            ],
           ),
         );
         return;
       }
+
+      // Must choose a successor.
+      final successor = await _pickSuccessor(otherMembers);
+      if (successor == null || !mounted) return;
+
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: const Text('Gründer-Rolle übertragen',
+              style: TextStyle(color: AppColors.onDark)),
+          content: Text(
+            'Möchtest du …${successor.did.substring(successor.did.length > 12 ? successor.did.length - 12 : 0)} '
+            'zum neuen Gründer von "${_cell.name}" ernennen und die Zelle verlassen?',
+            style: TextStyle(color: AppColors.onDark.withValues(alpha: 0.85)),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Abbrechen')),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Übertragen & Verlassen',
+                    style: TextStyle(color: Colors.orange))),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+
+      await CellService.instance.transferFounderRole(_cell.id, successor.did);
+      await CellService.instance.leaveCell(_cell.id);
+      if (mounted) Navigator.of(context).pop();
+      return;
     }
+
+    // Regular member leave.
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -252,6 +300,85 @@ class _CellInfoScreenState extends State<CellInfoScreen> {
     if (confirmed == true && mounted) {
       await CellService.instance.leaveCell(_cell.id);
       if (mounted) Navigator.of(context).pop();
+    }
+  }
+
+  /// Shows a dialog to pick a successor from [candidates].
+  Future<CellMember?> _pickSuccessor(List<CellMember> candidates) {
+    return showDialog<CellMember>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Nachfolger wählen',
+            style: TextStyle(color: AppColors.onDark)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: candidates.length,
+            itemBuilder: (_, i) {
+              final m = candidates[i];
+              final shortDid = '…${m.did.substring(m.did.length > 12 ? m.did.length - 12 : 0)}';
+              final roleLabel = m.role == MemberRole.moderator
+                  ? 'Moderator'
+                  : 'Mitglied';
+              return ListTile(
+                leading: const Icon(Icons.person, color: AppColors.gold),
+                title: Text(shortDid,
+                    style: const TextStyle(color: AppColors.onDark)),
+                subtitle: Text(roleLabel,
+                    style: TextStyle(
+                        color: AppColors.onDark.withValues(alpha: 0.6),
+                        fontSize: 12)),
+                onTap: () => Navigator.pop(ctx, m),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Abbrechen')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _transferFounderRole(CellMember target) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Gründer-Rolle übertragen',
+            style: TextStyle(color: AppColors.onDark)),
+        content: Text(
+          'Möchtest du …${target.did.substring(target.did.length > 12 ? target.did.length - 12 : 0)} '
+          'zum neuen Gründer von "${_cell.name}" ernennen? '
+          'Du wirst danach zum normalen Mitglied.',
+          style: TextStyle(color: AppColors.onDark.withValues(alpha: 0.85)),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abbrechen')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Ernennen',
+                  style: TextStyle(color: AppColors.gold))),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await CellService.instance.transferFounderRole(_cell.id, target.did);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                '…${target.did.substring(target.did.length > 12 ? target.did.length - 12 : 0)} ist jetzt Gründer von ${_cell.name}.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     }
   }
 
@@ -393,6 +520,21 @@ class _CellInfoScreenState extends State<CellInfoScreen> {
               ),
             const SizedBox(height: 8),
           ],
+          if (_isFounder) ...[
+            _ActionTile(
+              icon: Icons.edit,
+              label: 'Zelle bearbeiten',
+              iconColor: AppColors.gold,
+              onTap: () async {
+                await Navigator.of(context, rootNavigator: true).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => CellEditScreen(cell: _cell),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
 
           // Member list
           const Padding(
@@ -406,17 +548,27 @@ class _CellInfoScreenState extends State<CellInfoScreen> {
               ),
             ),
           ),
-          ...members.map((m) => _MemberTile(
-                member: m,
-                isMe: m.did == _myDid,
-                canPromote: _isFounder && m.role == MemberRole.member,
-                onPromote: _isFounder
-                    ? () async {
-                        await CellService.instance
-                            .promoteModerator(_cell.id, m.did);
-                      }
-                    : null,
-              )),
+          ...members.map((m) {
+            final canTransferFounder = ((_isFounder || _isAdminUser) &&
+                m.did != _myDid &&
+                (m.role == MemberRole.member ||
+                    m.role == MemberRole.moderator));
+            return _MemberTile(
+              member: m,
+              isMe: m.did == _myDid,
+              canPromote: _isFounder && m.role == MemberRole.member,
+              canTransferFounder: canTransferFounder,
+              onPromote: _isFounder
+                  ? () async {
+                      await CellService.instance
+                          .promoteModerator(_cell.id, m.did);
+                    }
+                  : null,
+              onTransferFounder: canTransferFounder
+                  ? () => _transferFounderRole(m)
+                  : null,
+            );
+          }),
           const SizedBox(height: 24),
 
           // Danger zone
@@ -480,13 +632,17 @@ class _MemberTile extends StatelessWidget {
   final CellMember member;
   final bool isMe;
   final bool canPromote;
+  final bool canTransferFounder;
   final VoidCallback? onPromote;
+  final VoidCallback? onTransferFounder;
 
   const _MemberTile({
     required this.member,
     required this.isMe,
     required this.canPromote,
+    required this.canTransferFounder,
     this.onPromote,
+    this.onTransferFounder,
   });
 
   @override
@@ -498,7 +654,11 @@ class _MemberTile extends StatelessWidget {
       MemberRole.pending => 'Ausstehend',
     };
 
-    return Container(
+    final shortDid = isMe
+        ? 'Du'
+        : '…${member.did.substring(member.did.length > 12 ? member.did.length - 12 : 0)}';
+
+    Widget tile = Container(
       margin: const EdgeInsets.only(bottom: 4),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
@@ -525,9 +685,7 @@ class _MemberTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  isMe
-                      ? 'Du'
-                      : '…${member.did.substring(member.did.length > 12 ? member.did.length - 12 : 0)}',
+                  shortDid,
                   style: TextStyle(
                     color: isMe ? AppColors.gold : AppColors.onDark,
                     fontWeight: isMe ? FontWeight.bold : FontWeight.normal,
@@ -549,6 +707,41 @@ class _MemberTile extends StatelessWidget {
               child: const Text('Zum Moderator'),
             ),
         ],
+      ),
+    );
+
+    if (canTransferFounder) {
+      tile = GestureDetector(
+        onLongPress: () => _showContextMenu(context, shortDid),
+        child: tile,
+      );
+    }
+
+    return tile;
+  }
+
+  void _showContextMenu(BuildContext context, String name) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.stars, color: AppColors.gold),
+              title: Text('$name zum Gründer ernennen',
+                  style: const TextStyle(color: AppColors.onDark)),
+              onTap: () {
+                Navigator.pop(context);
+                onTransferFounder?.call();
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
