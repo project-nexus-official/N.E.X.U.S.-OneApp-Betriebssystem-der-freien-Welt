@@ -356,6 +356,24 @@ class NostrTransport implements MessageTransport {
     print('[NOSTR] Published Kind-5 deletion for event: $messageId');
   }
 
+  /// Publishes a Kind-5 deletion event for a cell identified by [nostrTag].
+  ///
+  /// Uses a `t` tag so subscribers watching the cell's nostrTag will receive
+  /// the dissolution signal.  Best-effort, same caveats as [publishDeletion].
+  void publishCellDeletion(String nostrTag, String cellName) {
+    if (_keys == null) return;
+    final event = NostrEvent.create(
+      keys: _keys!,
+      kind: NostrKind.deletion,
+      content: 'Zelle "$cellName" wurde aufgelöst.',
+      tags: [
+        ['t', nostrTag],
+      ],
+    );
+    _relayManager.publish(event);
+    print('[NOSTR] Published Kind-5 cell deletion for tag: $nostrTag');
+  }
+
   /// Publishes a NIP-25 Kind-7 reaction for [messageId].
   void publishReaction(String messageId, String emoji) {
     if (_keys == null) return;

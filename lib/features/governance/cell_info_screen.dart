@@ -2,7 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'package:provider/provider.dart';
+
 import '../../core/identity/identity_service.dart';
+import '../chat/chat_provider.dart';
+import '../../services/role_service.dart';
 import '../../shared/theme/app_theme.dart';
 import 'cell.dart';
 import 'cell_member.dart';
@@ -53,6 +57,111 @@ class _CellInfoScreenState extends State<CellInfoScreen> {
   bool get _isFounder => _myMembership?.role == MemberRole.founder;
   bool get _isMod => _myMembership?.role == MemberRole.moderator;
   bool get _canManage => _isFounder || _isMod;
+
+  /// True when the local user is a superadmin or system-admin.
+  /// Note: founders cannot delete cells — only admins can.
+  bool get _isAdminUser => RoleService.instance.isSystemAdmin(_myDid);
+
+  Future<void> _deleteCell() async {
+    // Step 1: warning dialog.
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Zelle löschen',
+            style: TextStyle(color: Colors.red)),
+        content: Text(
+          'Zelle "${_cell.name}" wirklich löschen? '
+          'Alle Mitglieder werden entfernt. '
+          'Das kann nicht rückgängig gemacht werden.',
+          style: TextStyle(color: AppColors.onDark.withValues(alpha: 0.85)),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abbrechen')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Weiter',
+                  style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    // Step 2: type cell name to confirm.
+    final nameCtrl = TextEditingController();
+    final doubleConfirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Zellenname bestätigen',
+            style: TextStyle(color: AppColors.onDark)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Tippe den Namen der Zelle ein, um die Löschung zu bestätigen:',
+              style: TextStyle(
+                  color: AppColors.onDark.withValues(alpha: 0.8)),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: nameCtrl,
+              autofocus: true,
+              style: const TextStyle(color: AppColors.onDark),
+              decoration: InputDecoration(
+                hintText: _cell.name,
+                hintStyle: TextStyle(
+                    color: AppColors.onDark.withValues(alpha: 0.4)),
+                enabledBorder: const UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.red)),
+                focusedBorder: const UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.red)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abbrechen')),
+          StatefulBuilder(
+            builder: (ctx2, setInner) {
+              nameCtrl.addListener(() => setInner(() {}));
+              return TextButton(
+                onPressed: nameCtrl.text == _cell.name
+                    ? () => Navigator.pop(ctx, true)
+                    : null,
+                child: const Text('Endgültig löschen',
+                    style: TextStyle(color: Colors.red)),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+    if (doubleConfirmed != true || !mounted) return;
+
+    // Perform deletion.
+    final cellName = _cell.name;
+    final nostrTag = _cell.nostrTag;
+    await CellService.instance.deleteCell(_cell.id);
+    if (mounted) {
+      context.read<ChatProvider>().publishNostrCellDeletion(nostrTag, cellName);
+    }
+
+    if (mounted) {
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Die Zelle "$cellName" wurde aufgelöst.'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
 
   Future<void> _leaveCell() async {
     if (_isFounder) {
@@ -251,6 +360,16 @@ class _CellInfoScreenState extends State<CellInfoScreen> {
             textColor: Colors.red,
             onTap: _leaveCell,
           ),
+          if (_isAdminUser) ...[
+            const SizedBox(height: 8),
+            _ActionTile(
+              icon: Icons.delete_forever,
+              label: 'Zelle löschen',
+              iconColor: Colors.red,
+              textColor: Colors.red,
+              onTap: _deleteCell,
+            ),
+          ],
           const SizedBox(height: 40),
         ],
       ),

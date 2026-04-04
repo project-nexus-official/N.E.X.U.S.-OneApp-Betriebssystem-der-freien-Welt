@@ -305,6 +305,24 @@ class CellService {
     debugPrint('[CELLS] Left cell $cellId');
   }
 
+  /// Dissolves a cell entirely (superadmin / system-admin only).
+  ///
+  /// Removes all members and the cell itself from the local DB.
+  /// The caller is responsible for publishing the Kind-5 Nostr deletion event.
+  Future<void> deleteCell(String cellId) async {
+    final members = List<CellMember>.from(_members[cellId] ?? []);
+    for (final m in members) {
+      await PodDatabase.instance.deleteCellMember(cellId, m.did);
+    }
+    await PodDatabase.instance.deleteCell(cellId);
+    _myCells.removeWhere((c) => c.id == cellId);
+    _discovered.removeWhere((c) => c.id == cellId);
+    _members.remove(cellId);
+    _requests.remove(cellId);
+    _notify();
+    debugPrint('[CELLS] Deleted cell $cellId (admin action)');
+  }
+
   /// Promotes a member to moderator.
   Future<void> promoteModerator(String cellId, String targetDid) async {
     final myMembership = myMembershipIn(cellId);
