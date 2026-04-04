@@ -403,8 +403,10 @@ class _ImageGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (images.length == 1) {
-      return _ImageTile(base64: images[0]);
+      // Single image: preserve aspect ratio, full card width.
+      return _ImageTile(base64: images[0], squareCrop: false);
     }
+    // Multiple images: 2-column grid with square cells (cover crop is fine).
     return GridView.count(
       crossAxisCount: 2,
       shrinkWrap: true,
@@ -418,7 +420,7 @@ class _ImageGrid extends StatelessWidget {
           return Stack(
             fit: StackFit.expand,
             children: [
-              _ImageTile(base64: b64),
+              _ImageTile(base64: b64, squareCrop: true),
               Container(
                 color: Colors.black54,
                 alignment: Alignment.center,
@@ -431,7 +433,7 @@ class _ImageGrid extends StatelessWidget {
             ],
           );
         }
-        return _ImageTile(base64: b64);
+        return _ImageTile(base64: b64, squareCrop: true);
       }).toList(),
     );
   }
@@ -439,7 +441,12 @@ class _ImageGrid extends StatelessWidget {
 
 class _ImageTile extends StatelessWidget {
   final String base64;
-  const _ImageTile({required this.base64});
+
+  /// When true (grid cells): BoxFit.cover, no height constraint.
+  /// When false (single image): BoxFit.contain, full width, auto height.
+  final bool squareCrop;
+
+  const _ImageTile({required this.base64, this.squareCrop = false});
 
   @override
   Widget build(BuildContext context) {
@@ -447,15 +454,26 @@ class _ImageTile extends StatelessWidget {
       final bytes = base64Decode(base64);
       return ClipRRect(
         borderRadius: BorderRadius.circular(8),
-        // cacheWidth/cacheHeight tell Flutter to decode at display resolution,
-        // preventing repeated full-resolution decodes while scrolling.
-        child: Image.memory(
-          bytes,
-          fit: BoxFit.cover,
-          cacheWidth: 400,
-          cacheHeight: 400,
-          gaplessPlayback: true,
-        ),
+        child: squareCrop
+            // Grid cell: cover-crop into the square cell.
+            // cacheWidth only (no cacheHeight) so the decoded size
+            // stays proportional and BoxFit.cover fills correctly.
+            ? Image.memory(
+                bytes,
+                fit: BoxFit.cover,
+                width: double.infinity,
+                height: double.infinity,
+                cacheWidth: 400,
+                gaplessPlayback: true,
+              )
+            // Single image: preserve aspect ratio, full card width.
+            : Image.memory(
+                bytes,
+                fit: BoxFit.contain,
+                width: double.infinity,
+                cacheWidth: 600,
+                gaplessPlayback: true,
+              ),
       );
     } catch (_) {
       return Container(
