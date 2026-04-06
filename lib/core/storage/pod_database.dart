@@ -848,6 +848,20 @@ class PodDatabase {
     );
   }
 
+  /// Deletes ALL cell-internal channels (cell_id IS NOT NULL).
+  /// Returns the number of deleted rows. DEBUG use only.
+  Future<int> deleteAllCellChannels() async {
+    return _database.delete(
+      'group_channels',
+      where: 'cell_id IS NOT NULL',
+    );
+  }
+
+  /// Deletes ALL cell join requests (both sent and received). DEBUG use only.
+  Future<void> deleteAllCellJoinRequests() async {
+    await _database.delete('cell_join_requests');
+  }
+
   // ── Contact requests namespace ────────────────────────────────────────────
 
   /// Inserts or replaces a contact request record.

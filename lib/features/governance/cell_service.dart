@@ -202,6 +202,38 @@ class CellService {
 
   // ── Membership management ──────────────────────────────────────────────────
 
+  /// Called on member devices when a cell dissolution event is received from
+  /// Nostr (Kind-30000 with deleted:true).  Removes all local state for the
+  /// cell: membership, join requests, discovered entry.
+  Future<void> handleCellDeleted(String cellId, String cellName) async {
+    // Skip if we don't know this cell (already cleaned up or never joined).
+    final wasInMyList = _myCells.any((c) => c.id == cellId) ||
+        _discovered.any((c) => c.id == cellId);
+    if (!wasInMyList) return;
+
+    // Remove from DB.
+    await PodDatabase.instance.deleteCell(cellId);
+    await PodDatabase.instance.deleteCellJoinRequestsByCell(cellId);
+    // Remove members stored for this cell.
+    final members = List<CellMember>.from(_members[cellId] ?? []);
+    for (final m in members) {
+      await PodDatabase.instance.deleteCellMember(cellId, m.did);
+    }
+
+    // Remove from in-memory state.
+    _myCells.removeWhere((c) => c.id == cellId);
+    _discovered.removeWhere((c) => c.id == cellId);
+    _members.remove(cellId);
+    _requests.remove(cellId);
+    // Clean up any outgoing pending request (zombie prevention).
+    _myRequests.removeWhere((r) => r.cellId == cellId);
+
+    _notify();
+    print('[CELL-DEL] Removing cell + channels from local DB: $cellId');
+    print('[CELL-DEL] Cleaning up pending join requests for deleted cell: $cellId');
+    print('[CELL-DEL] UI updated — cell removed from Meine Zellen: $cellName');
+  }
+
   /// Withdraws a pending join request for [cellId].
   ///
   /// Deletes the local record and publishes a Kind-31003 withdraw event so
@@ -536,6 +568,16 @@ class CellService {
     Map<String, dynamic> memberJson,
     String requesterNostrPubkeyHex,
   )? onPublishMembershipConfirmed;
+
+  /// Clears all in-memory cell state. DEBUG use only — call after wiping the DB.
+  Future<void> resetForDebug() async {
+    _myCells.clear();
+    _discovered.clear();
+    _members.clear();
+    _requests.clear();
+    _myRequests.clear();
+    _notify();
+  }
 
   void _notify() => _streamCtrl.add(null);
 }

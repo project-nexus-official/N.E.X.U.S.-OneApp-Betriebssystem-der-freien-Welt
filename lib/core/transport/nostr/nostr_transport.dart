@@ -100,6 +100,14 @@ class NostrTransport implements MessageTransport {
   Stream<Map<String, dynamic>> get onCellAnnounced =>
       _cellAnnouncedController.stream;
 
+  final _cellDeletedController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
+  /// Emits {id, name, nostrTag} when a Kind-30000 cell-dissolution event
+  /// (content contains "deleted":true) arrives.
+  Stream<Map<String, dynamic>> get onCellDeleted =>
+      _cellDeletedController.stream;
+
   String? _cellSubId;
 
   final _cellJoinRequestController =
@@ -469,6 +477,28 @@ class NostrTransport implements MessageTransport {
     );
     _relayManager.publish(event);
     print('[JOIN] Confirmation sent to ${requesterNostrPubkeyHex.substring(0, 8)}… for cell: $cellId');
+  }
+
+  /// Publishes a Kind-30000 cell-dissolution event.
+  ///
+  /// Uses the same d-tag as the original announcement so relays replace it
+  /// with this "deleted" version.  All devices subscribed to
+  /// `#t: ['nexus-cell']` will receive it and clean up their local state.
+  void publishCellDissolution(Map<String, dynamic> cellJson) {
+    if (_keys == null) return;
+    final cellId = cellJson['id'] as String? ?? '';
+    final cellName = cellJson['name'] as String? ?? cellId;
+    final event = NostrEvent.create(
+      keys: _keys!,
+      kind: NostrKind.cellAnnounce,
+      content: jsonEncode({...cellJson, 'deleted': true}),
+      tags: [
+        ['d', cellId],
+        ['t', 'nexus-cell'],
+      ],
+    );
+    _relayManager.publish(event);
+    print('[CELL-DEL] Publishing cell deletion event: $cellId ($cellName)');
   }
 
   /// Publishes a NIP-25 Kind-7 reaction for [messageId].
@@ -1041,6 +1071,20 @@ class NostrTransport implements MessageTransport {
       final data = jsonDecode(event.content) as Map<String, dynamic>;
       final cellId = data['id'] as String? ?? '?';
       final cellName = data['name'] as String? ?? '?';
+
+      // Dissolution marker: founder published Kind-30000 with deleted:true.
+      if (data['deleted'] == true) {
+        // Ignore if it's our own dissolution event (already handled locally).
+        if (_keys != null && event.pubkey == _keys!.publicKeyHex) return;
+        print('[CELL-DEL] Received cell deletion for: $cellId ($cellName)');
+        _cellDeletedController.add({
+          'id': cellId,
+          'name': cellName,
+          'nostrTag': data['nostrTag'] as String? ?? 'nexus-cell-$cellId',
+        });
+        return;
+      }
+
       print('[CELL] Received cell announcement: $cellId ($cellName) '
           'from pubkey=${event.pubkey.substring(0, 8)}…');
       _cellAnnouncedController.add({

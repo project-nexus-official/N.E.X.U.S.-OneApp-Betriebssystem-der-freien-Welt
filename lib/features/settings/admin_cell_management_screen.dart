@@ -89,10 +89,12 @@ class _AdminCellManagementScreenState
 
     try {
       await CellService.instance.deleteCell(cell.id);
+      await chatProvider.deleteCellChannels(cell.id);
 
-      // Publish Kind-5 dissolution event via ChatProvider (which holds the
-      // Nostr transport with the current user's keys).
+      // Kind-5: asks relays to delete the original announcement.
       chatProvider.publishNostrCellDeletion(cell.nostrTag, cell.name);
+      // Kind-30000 with deleted:true: notifies all member devices.
+      chatProvider.publishNostrCellDissolution(cell.toJson());
 
       if (!mounted) return;
       setState(() => _cells.removeWhere((c) => c.id == cell.id));

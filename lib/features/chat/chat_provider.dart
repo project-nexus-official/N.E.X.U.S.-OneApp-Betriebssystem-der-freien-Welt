@@ -267,6 +267,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       // Listen for newly discovered cells via Kind-30000.
       if (_nostrTransport != null) {
         _nostrTransport!.onCellAnnounced.listen(_onCellAnnounced);
+        _nostrTransport!.onCellDeleted.listen(_onCellDeleted);
       }
 
       // Re-subscribe when channel list changes (join/leave).
@@ -505,9 +506,41 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  /// Handles an incoming Kind-30000 cell-dissolution event from Nostr.
+  /// Called on member devices when the founder dissolves a cell.
+  Future<void> _onCellDeleted(Map<String, dynamic> data) async {
+    final cellId = data['id'] as String? ?? '';
+    final cellName = data['name'] as String? ?? cellId;
+    if (cellId.isEmpty) return;
+    print('[CELL-DEL] Received cell deletion for: $cellId ($cellName)');
+
+    await CellService.instance.handleCellDeleted(cellId, cellName);
+    await deleteCellChannels(cellId);
+    print('[CELL-DEL] Removing cell + channels from local DB: $cellId');
+
+    await NotificationService.instance.showGenericNotification(
+      title: 'Zelle aufgelöst',
+      body: 'Die Zelle "$cellName" wurde aufgelöst.',
+      payload: 'cell_deleted:$cellId',
+    );
+  }
+
+  /// Re-runs Nostr subscriptions. Used after a debug data reset.
+  void resetNostrSubscriptions() {
+    _nostrTransport?.resetSubscriptions();
+    print('[CLEANUP] Subscriptions reset');
+  }
+
   /// Publishes a Kind-30000 cell announcement event to Nostr relays.
   void publishNostrCellAnnouncement(Cell cell) {
     _nostrTransport?.publishCellAnnouncement(cell.toJson());
+  }
+
+  /// Publishes a Kind-30000 cell-dissolution event (deleted:true) so that
+  /// all member devices receive and clean up this cell automatically.
+  void publishNostrCellDissolution(Map<String, dynamic> cellJson) {
+    _nostrTransport?.publishCellDissolution(cellJson);
+    print('[CELL-DEL] Publishing cell deletion event: ${cellJson['id']}');
   }
 
   /// Re-publishes all cells where the local user is FOUNDER so that other

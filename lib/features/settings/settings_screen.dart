@@ -22,6 +22,7 @@ import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/update_bottom_sheet.dart';
 import '../chat/chat_provider.dart';
 import '../contacts/widgets/trust_badge.dart';
+import '../../features/governance/cell_service.dart';
 import 'admin_cell_management_screen.dart';
 import 'admin_management_screen.dart';
 import 'nostr_settings_screen.dart';
@@ -665,7 +666,31 @@ class _AdminSection extends StatelessWidget {
     final svc = RoleService.instance;
     final role = svc.getSystemRole(myDid);
 
-    if (role == SystemRole.user) return const SizedBox.shrink();
+    // Always show debug reset when there is local cell data to clean up.
+    final hasCellData = CellService.instance.myCells.isNotEmpty ||
+        CellService.instance.discoveredCells.isNotEmpty ||
+        CellService.instance.myOutgoingRequests.isNotEmpty;
+
+    if (role == SystemRole.user) {
+      // Non-admin: only show debug cleanup when there is stale cell data.
+      if (!hasCellData) return const SizedBox.shrink();
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SectionHeader('Debug'),
+          ListTile(
+            leading: const Icon(Icons.cleaning_services, color: Colors.grey),
+            title: const Text(
+              '🧹 Alle Zellen-Daten zurücksetzen',
+              style: TextStyle(color: Colors.grey),
+            ),
+            subtitle: const Text('Testdaten bereinigen',
+                style: TextStyle(fontSize: 11)),
+            onTap: () => _resetCellData(context),
+          ),
+        ],
+      );
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -732,6 +757,21 @@ class _AdminSection extends StatelessWidget {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _confirmTransfer(context, myDid),
           ),
+          // ── TEMP DEBUG ──────────────────────────────────────────────────
+          if (hasCellData)
+            ListTile(
+              leading: const Icon(Icons.cleaning_services, color: Colors.grey),
+              title: const Text(
+                '🧹 Alle Zellen-Daten zurücksetzen',
+                style: TextStyle(color: Colors.grey),
+              ),
+              subtitle: const Text(
+                'DEBUG – Testdaten bereinigen',
+                style: TextStyle(fontSize: 11),
+              ),
+              onTap: () => _resetCellData(context),
+            ),
+          // ── END TEMP DEBUG ───────────────────────────────────────────────
         ],
       ],
     );
@@ -831,6 +871,94 @@ class _AdminSection extends StatelessWidget {
           const SnackBar(
             content: Text('Superadmin-Rolle übertragen.'),
             backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Fehler: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _resetCellData(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Zellen-Daten zurücksetzen?',
+            style: TextStyle(color: Colors.grey)),
+        content: const Text(
+          'Alle Zellen, Zell-Kanäle und offene Beitrittsanfragen '
+          'werden lokal gelöscht. Dieser Vorgang kann nicht '
+          'rückgängig gemacht werden.',
+          style: TextStyle(color: AppColors.onDark),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Abbrechen',
+                style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.grey.shade700,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Löschen'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    try {
+      final db = PodDatabase.instance;
+
+      // Count before deletion for logging.
+      final cells = await db.listCells();
+      final cellCount = cells.length;
+
+      // Delete all cells and their members.
+      for (final cellJson in cells) {
+        final cellId = cellJson['id'] as String? ?? '';
+        if (cellId.isEmpty) continue;
+        final members = await db.listCellMembers(cellId);
+        for (final m in members) {
+          final did = m['did'] as String? ?? '';
+          if (did.isNotEmpty) await db.deleteCellMember(cellId, did);
+        }
+        await db.deleteCellJoinRequestsByCell(cellId);
+        await db.deleteCell(cellId);
+      }
+      print('[CLEANUP] Deleted $cellCount cells');
+
+      // Delete all cell-internal channels (cell_id NOT NULL).
+      final channelCount = await db.deleteAllCellChannels();
+      print('[CLEANUP] Deleted $channelCount cell channels');
+
+      // Any remaining join requests (outgoing).
+      await db.deleteAllCellJoinRequests();
+      print('[CLEANUP] Deleted pending join requests');
+
+      // Reset in-memory state in CellService.
+      await CellService.instance.resetForDebug();
+      print('[CLEANUP] Subscriptions reset');
+
+      // Reset Nostr subscriptions.
+      if (context.mounted) {
+        context.read<ChatProvider>().resetNostrSubscriptions();
+      }
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Zellen-Daten zurückgesetzt'),
+            backgroundColor: Colors.grey,
           ),
         );
       }
