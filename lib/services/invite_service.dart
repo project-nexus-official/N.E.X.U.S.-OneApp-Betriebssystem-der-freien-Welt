@@ -247,6 +247,7 @@ class InviteService {
     Future<void> Function({
       required String toDid,
       required String message,
+      Map<String, dynamic>? metadata,
     })? sendDmNotification,
   }) async {
     // Accept both raw encoded and deep-link formats.
@@ -287,12 +288,20 @@ class InviteService {
       // Continue — contact might already exist; that is fine.
     }
 
-    // Notify the inviter (best-effort).
+    // Notify the inviter (best-effort) with a machine-readable marker so the
+    // inviter's device can update the InviteRecord status automatically.
     if (sendDmNotification != null && payload.did.isNotEmpty) {
+      print('[INVITE] Redemption DM sent to inviter: ${payload.did}');
       sendDmNotification(
         toDid: payload.did,
         message: 'Deine Einladung wurde angenommen von $myPseudonym! '
             'Wir sind jetzt in N.E.X.U.S. verbunden.',
+        metadata: {
+          'type': 'invite_redeemed',
+          'invite_code': payload.code,
+          'redeemer_pseudonym': myPseudonym,
+          'redeemer_did': myDid ?? '',
+        },
       ).catchError((e) {
         debugPrint('[INVITE] DM notification failed (ignored): $e');
       });

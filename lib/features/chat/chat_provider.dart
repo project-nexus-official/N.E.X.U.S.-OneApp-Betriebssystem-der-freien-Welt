@@ -39,6 +39,7 @@ import 'group_channel_service.dart';
 import '../dorfplatz/feed_service.dart';
 import '../governance/cell.dart';
 import '../governance/cell_service.dart';
+import '../../services/invite_service.dart';
 
 /// ViewModel for the chat feature.
 ///
@@ -620,6 +621,32 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
           );
         },
       );
+      return;
+    }
+
+    // ── Invite redemption notification ───────────────────────────────────────
+    if (msgType == 'invite_redeemed') {
+      final meta = processedMsg.metadata!;
+      final code = meta['invite_code'] as String? ?? '';
+      final redeemerPseudonym = meta['redeemer_pseudonym'] as String? ?? '';
+      final redeemerDid = meta['redeemer_did'] as String? ?? processedMsg.fromDid;
+      print('[INVITE] Incoming DM recognized as invite redemption for code: $code');
+
+      if (code.isNotEmpty) {
+        await InviteService.instance.markRedeemed(code, redeemerPseudonym);
+        print('[INVITE] InviteRecord updated: redeemedByPseudonym = $redeemerPseudonym');
+      }
+
+      // Add the redeemer as a contact on the inviter's side if not already known.
+      if (redeemerDid.isNotEmpty && ContactService.instance.findByDid(redeemerDid) == null) {
+        final encKey = meta['enc_key'] as String?;
+        await ContactService.instance.addContactFromQr(
+          did: redeemerDid,
+          pseudonym: redeemerPseudonym,
+          encryptionPublicKey: encKey?.isNotEmpty == true ? encKey : null,
+          nostrPubkey: null,
+        );
+      }
       return;
     }
 

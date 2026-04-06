@@ -58,8 +58,12 @@ class _RedeemScreenState extends State<RedeemScreen> {
     final result = await InviteService.instance.redeemEncoded(
       encoded: input,
       myPseudonym: myPseudonym,
-      sendDmNotification: ({required String toDid, required String message}) =>
-          chat.sendMessage(toDid, message),
+      sendDmNotification: ({
+        required String toDid,
+        required String message,
+        Map<String, dynamic>? metadata,
+      }) =>
+          chat.sendMessage(toDid, message, extraMeta: metadata),
     );
 
     if (!mounted) return;
