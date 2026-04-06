@@ -785,6 +785,18 @@ class _MyCellTile extends StatelessWidget {
                       ],
                     ],
                   ),
+                  if (cell.description.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      cell.description,
+                      style: TextStyle(
+                        color: AppColors.onDark.withValues(alpha: 0.55),
+                        fontSize: 12,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -814,6 +826,7 @@ class _DiscoveredCellTile extends StatelessWidget {
         border: Border.all(color: AppColors.surfaceVariant),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _CellTypeIcon(type: cell.cellType),
           const SizedBox(width: 12),
@@ -838,10 +851,21 @@ class _DiscoveredCellTile extends StatelessWidget {
                     fontSize: 12,
                   ),
                 ),
+                if (cell.description.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    cell.description,
+                    style: TextStyle(
+                      color: AppColors.onDark.withValues(alpha: 0.55),
+                      fontSize: 12,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
                 const SizedBox(height: 4),
                 Text(
-                  '${cell.memberCount}/${cell.maxMembers} Mitglieder · '
-                  '${cell.joinPolicy == JoinPolicy.approvalRequired ? 'Beitritt anfragen' : 'Nur auf Einladung'}',
+                  '${cell.memberCount}/${cell.maxMembers} Mitglieder',
                   style: TextStyle(
                     color: AppColors.onDark.withValues(alpha: 0.5),
                     fontSize: 11,
@@ -850,103 +874,296 @@ class _DiscoveredCellTile extends StatelessWidget {
               ],
             ),
           ),
+          const SizedBox(width: 8),
           if (alreadyMember)
             const Icon(Icons.check_circle, color: Colors.green, size: 20)
-          else if (applied)
-            Text(
-              'Angefragt ⏳',
-              style: TextStyle(color: AppColors.gold, fontSize: 12),
-            )
-          else if (cell.joinPolicy == JoinPolicy.approvalRequired &&
-              !cell.isFull)
+          else
             TextButton(
-              onPressed: () => _showJoinSheet(context, cell),
-              child: const Text('Anfragen'),
+              style: TextButton.styleFrom(
+                foregroundColor:
+                    applied ? AppColors.onDark.withValues(alpha: 0.4) : AppColors.gold,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: () => _showCellInfoSheet(context),
+              child: Text(
+                applied ? 'Ausstehend' : 'Anfragen / Info',
+                style: const TextStyle(fontSize: 12),
+              ),
             ),
         ],
       ),
     );
   }
 
-  void _showJoinSheet(BuildContext context, Cell cell) {
+  void _showCellInfoSheet(BuildContext pageContext) {
+    final alreadyMember = CellService.instance.isMember(cell.id);
+    final applied = CellService.instance.hasAppliedTo(cell.id);
+
+    // Contacts who are cell members
+    final contactDids =
+        ContactService.instance.contacts.map((c) => c.did).toSet();
+    final members = CellService.instance.membersOf(cell.id);
+    final commonCount =
+        members.where((m) => contactDids.contains(m.did)).length;
+
+    // Founder display name
+    final founderName =
+        ContactService.instance.getDisplayName(cell.createdBy);
+
     final msgCtrl = TextEditingController();
+
     showModalBottomSheet<void>(
-      context: context,
+      context: pageContext,
       isScrollControlled: true,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          left: 20,
-          right: 20,
-          top: 20,
-          bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Beitritt anfragen: ${cell.name}',
-              style: const TextStyle(
-                color: AppColors.onDark,
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-              ),
+      builder: (sheetCtx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        maxChildSize: 0.92,
+        minChildSize: 0.4,
+        builder: (_, scrollCtrl) => StatefulBuilder(
+          builder: (ctx, setSheetState) => ListView(
+            controller: scrollCtrl,
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 12,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: msgCtrl,
-              decoration: InputDecoration(
-                hintText: 'Warum möchtest du beitreten? (empfohlen)',
-                hintStyle:
-                    TextStyle(color: AppColors.onDark.withValues(alpha: 0.5)),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: AppColors.surfaceVariant),
-                ),
-                filled: true,
-                fillColor: AppColors.deepBlue,
-              ),
-              style: const TextStyle(color: AppColors.onDark),
-              maxLines: 3,
-              maxLength: 500,
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () async {
-                  Navigator.of(ctx).pop();
-                  await CellService.instance.sendJoinRequest(
-                    cell,
-                    message: msgCtrl.text.trim().isEmpty
-                        ? null
-                        : msgCtrl.text.trim(),
-                  );
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Anfrage an ${cell.name} gesendet.'),
-                        backgroundColor: AppColors.gold,
-                      ),
-                    );
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.gold,
-                  foregroundColor: Colors.black,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+            children: [
+              // Drag handle
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceVariant,
+                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
-                child: const Text('Anfrage senden'),
               ),
-            ),
-          ],
+
+              // ── Header ────────────────────────────────────────────────────
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _CellTypeIcon(type: cell.cellType),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          cell.name,
+                          style: const TextStyle(
+                            color: AppColors.onDark,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          cell.cellType == CellType.local
+                              ? (cell.locationName ?? 'Lokale Gemeinschaft')
+                              : (cell.category ?? 'Thematische Gemeinschaft'),
+                          style: TextStyle(
+                            color: AppColors.onDark.withValues(alpha: 0.6),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+
+              // ── Description ───────────────────────────────────────────────
+              if (cell.description.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                _SheetLabel('BESCHREIBUNG'),
+                const SizedBox(height: 6),
+                Text(
+                  cell.description,
+                  style: TextStyle(
+                    color: AppColors.onDark.withValues(alpha: 0.85),
+                    fontSize: 14,
+                    height: 1.5,
+                  ),
+                ),
+              ],
+
+              // ── Members ───────────────────────────────────────────────────
+              const SizedBox(height: 20),
+              _SheetLabel('MITGLIEDER'),
+              const SizedBox(height: 6),
+              Text(
+                '${cell.memberCount} / ${cell.maxMembers}',
+                style: const TextStyle(color: AppColors.onDark, fontSize: 14),
+              ),
+
+              // ── Founder ───────────────────────────────────────────────────
+              const SizedBox(height: 20),
+              _SheetLabel('GRÜNDER'),
+              const SizedBox(height: 6),
+              Text(
+                founderName,
+                style: const TextStyle(color: AppColors.onDark, fontSize: 14),
+              ),
+
+              // ── Common contacts ───────────────────────────────────────────
+              if (commonCount > 0) ...[
+                const SizedBox(height: 20),
+                _SheetLabel('BEREITS MITGLIED'),
+                const SizedBox(height: 6),
+                Text(
+                  commonCount == 1
+                      ? '1 deiner Kontakte ist Mitglied'
+                      : '$commonCount deiner Kontakte sind Mitglieder',
+                  style: TextStyle(color: AppColors.gold, fontSize: 14),
+                ),
+              ],
+
+              const SizedBox(height: 24),
+
+              // ── Join message field (only when user can request) ───────────
+              if (!alreadyMember &&
+                  !applied &&
+                  cell.joinPolicy == JoinPolicy.approvalRequired &&
+                  !cell.isFull) ...[
+                TextField(
+                  controller: msgCtrl,
+                  decoration: InputDecoration(
+                    hintText: 'Warum möchtest du beitreten? (empfohlen)',
+                    hintStyle: TextStyle(
+                        color: AppColors.onDark.withValues(alpha: 0.5)),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide:
+                          const BorderSide(color: AppColors.surfaceVariant),
+                    ),
+                    filled: true,
+                    fillColor: AppColors.deepBlue,
+                  ),
+                  style: const TextStyle(color: AppColors.onDark),
+                  maxLines: 3,
+                  maxLength: 500,
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              // ── Action button ─────────────────────────────────────────────
+              SizedBox(
+                width: double.infinity,
+                child: _buildJoinButton(
+                  sheetCtx,
+                  pageContext,
+                  alreadyMember,
+                  applied,
+                  msgCtrl,
+                ),
+              ),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildJoinButton(
+    BuildContext sheetCtx,
+    BuildContext pageCtx,
+    bool alreadyMember,
+    bool applied,
+    TextEditingController msgCtrl,
+  ) {
+    final disabledStyle = ElevatedButton.styleFrom(
+      disabledForegroundColor: Colors.grey.shade400,
+      disabledBackgroundColor: Colors.grey.shade800,
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    );
+
+    if (alreadyMember) {
+      return ElevatedButton(
+        onPressed: null,
+        style: disabledStyle,
+        child: const Text('Bereits Mitglied'),
+      );
+    }
+    if (applied) {
+      return ElevatedButton(
+        onPressed: null,
+        style: disabledStyle,
+        child: const Text('Anfrage ausstehend'),
+      );
+    }
+    if (cell.isFull) {
+      return ElevatedButton(
+        onPressed: null,
+        style: disabledStyle,
+        child: const Text('Zelle ist voll'),
+      );
+    }
+    if (cell.joinPolicy == JoinPolicy.inviteOnly) {
+      return ElevatedButton(
+        onPressed: null,
+        style: disabledStyle,
+        child: const Text('Nur auf Einladung'),
+      );
+    }
+    // Can request join
+    return ElevatedButton(
+      onPressed: () async {
+        Navigator.of(sheetCtx).pop();
+        await CellService.instance.sendJoinRequest(
+          cell,
+          message:
+              msgCtrl.text.trim().isEmpty ? null : msgCtrl.text.trim(),
+        );
+        if (pageCtx.mounted) {
+          ScaffoldMessenger.of(pageCtx).showSnackBar(
+            SnackBar(
+              content: Text('Anfrage an ${cell.name} gesendet.'),
+              backgroundColor: AppColors.gold,
+            ),
+          );
+        }
+      },
+      style: ElevatedButton.styleFrom(
+        backgroundColor: AppColors.gold,
+        foregroundColor: Colors.black,
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+      child: const Text(
+        'Beitritt anfragen',
+        style: TextStyle(fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+}
+
+/// Small gold section label used inside the cell info bottom sheet.
+class _SheetLabel extends StatelessWidget {
+  final String text;
+  const _SheetLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: TextStyle(
+        color: AppColors.gold.withValues(alpha: 0.8),
+        fontSize: 10,
+        fontWeight: FontWeight.bold,
+        letterSpacing: 1.2,
       ),
     );
   }
