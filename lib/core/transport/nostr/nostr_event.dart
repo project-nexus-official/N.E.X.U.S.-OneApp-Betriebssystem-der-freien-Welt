@@ -77,6 +77,16 @@ class NostrKind {
   /// Tags: ['t','nexus-cell-confirmed'], ['p', requesterNostrPubkey], ['cell', cellId]
   /// Content: JSON { 'cell': Cell.toJson(), 'member': CellMember.toJson() }
   static const int cellMembershipConfirmed = 31004;
+
+  /// NEXUS cell member update (leave / remove).
+  ///
+  /// Published by the leaving member (action='left') or by the founder /
+  /// moderator (action='removed').  All cell participants subscribe to
+  /// `#t: ['nexus-cell-member-update']` so they keep their local member list
+  /// in sync.
+  /// Tags: ['t','nexus-cell-member-update'], ['d', eventId], ['cell', cellId]
+  /// Content: JSON { 'cellId', 'targetDid', 'action': 'left'|'removed', 'reason'? }
+  static const int cellMemberUpdate = 31005;
 }
 
 /// A NIP-01 Nostr event.

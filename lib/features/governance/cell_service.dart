@@ -408,8 +408,18 @@ class CellService {
   }
 
   /// The local user leaves a cell (exit right always available).
+  ///
+  /// Publishes a Kind-31005 leave event so the founder's device can update its
+  /// member list.  Caller is responsible for leaving the cell-internal channels.
   Future<void> leaveCell(String cellId) async {
     final myDid = IdentityService.instance.currentIdentity!.did;
+
+    // Notify other members / founders via Nostr before removing local state.
+    if (onPublishMemberUpdate != null) {
+      onPublishMemberUpdate!(cellId: cellId, targetDid: myDid, action: 'left');
+      print('[CELL] Published leave event for cell: $cellId');
+    }
+
     await PodDatabase.instance.deleteCellMember(cellId, myDid);
     await PodDatabase.instance.deleteCell(cellId);
     // Clean up any outgoing pending request for this cell (zombie prevention).
@@ -420,6 +430,102 @@ class CellService {
     _requests.remove(cellId);
     _notify();
     debugPrint('[CELLS] Left cell $cellId');
+  }
+
+  /// Removes [memberDid] from [cellId] (founder / moderator action).
+  ///
+  /// Publishes a Kind-31005 removal event so the removed member's device can
+  /// clean up its local state.  The optional [reason] is included in the event
+  /// but never shown to the removed member (no UI feedback by design).
+  Future<void> removeMember(String cellId, String memberDid,
+      {String? reason}) async {
+    final myDid = IdentityService.instance.currentIdentity!.did;
+    final myMembership = myMembershipIn(cellId);
+    if (myMembership == null || !myMembership.canManageRequests) {
+      throw StateError('Insufficient permissions to remove members.');
+    }
+    // Cannot remove the founder or yourself.
+    final target = _members[cellId]?.where((m) => m.did == memberDid).firstOrNull;
+    if (target == null) return;
+    if (target.role == MemberRole.founder) {
+      throw StateError('Cannot remove the cell founder.');
+    }
+    if (memberDid == myDid) {
+      throw StateError('Use leaveCell() to leave a cell.');
+    }
+    // Moderators can only remove regular members, not other moderators.
+    if (myMembership.role == MemberRole.moderator &&
+        target.role == MemberRole.moderator) {
+      throw StateError('Moderators cannot remove other moderators.');
+    }
+
+    // Remove locally first.
+    await PodDatabase.instance.deleteCellMember(cellId, memberDid);
+    _members[cellId]?.removeWhere((m) => m.did == memberDid);
+
+    // Update member count on cell.
+    final cellIdx = _myCells.indexWhere((c) => c.id == cellId);
+    if (cellIdx >= 0) {
+      final memberCount = _members[cellId]?.length ?? 0;
+      _myCells[cellIdx] = _myCells[cellIdx].copyWith(memberCount: memberCount);
+      await PodDatabase.instance.upsertCell(
+          _myCells[cellIdx].id, _myCells[cellIdx].toJson());
+    }
+
+    _notify();
+    print('[CELL] Removed member $memberDid from cell $cellId');
+
+    // Notify the removed member via Nostr.
+    if (onPublishMemberUpdate != null) {
+      onPublishMemberUpdate!(
+          cellId: cellId,
+          targetDid: memberDid,
+          action: 'removed',
+          reason: reason);
+      print('[CELL] Published removal event for $memberDid in cell $cellId');
+    }
+  }
+
+  /// Called on ANY device when a Kind-31005 member-update event is received.
+  ///
+  /// - If [action] == `'left'`: the member voluntarily left → update member
+  ///   list on the founder's / other members' devices.
+  /// - If [action] == `'removed'` and [targetDid] == my DID: I was kicked →
+  ///   clean up my local state.
+  Future<void> handleMemberLeft(
+      String cellId, String targetDid, String action) async {
+    final myDid = IdentityService.instance.currentIdentity?.did;
+
+    if (action == 'removed' && targetDid == myDid) {
+      // I was removed — perform the same local cleanup as leaving voluntarily.
+      await PodDatabase.instance.deleteCellMember(cellId, myDid!);
+      await PodDatabase.instance.deleteCell(cellId);
+      _myRequests.removeWhere((r) => r.cellId == cellId);
+      await PodDatabase.instance.deleteCellJoinRequestsByCell(cellId);
+      _myCells.removeWhere((c) => c.id == cellId);
+      _members.remove(cellId);
+      _requests.remove(cellId);
+      _notify();
+      print('[CELL] I was removed from cell: $cellId — cleaned up local state');
+      return;
+    }
+
+    // Someone else left or was removed — update member list if we manage this cell.
+    if (!_myCells.any((c) => c.id == cellId)) return;
+    _members[cellId]?.removeWhere((m) => m.did == targetDid);
+    await PodDatabase.instance.deleteCellMember(cellId, targetDid);
+
+    // Update member count.
+    final cellIdx = _myCells.indexWhere((c) => c.id == cellId);
+    if (cellIdx >= 0) {
+      final memberCount = _members[cellId]?.length ?? 0;
+      _myCells[cellIdx] = _myCells[cellIdx].copyWith(memberCount: memberCount);
+      await PodDatabase.instance.upsertCell(
+          _myCells[cellIdx].id, _myCells[cellIdx].toJson());
+    }
+
+    _notify();
+    print('[CELL] Member $targetDid $action cell $cellId — member list updated');
   }
 
   /// Dissolves a cell entirely (superadmin / system-admin only).
@@ -568,6 +674,16 @@ class CellService {
     Map<String, dynamic> memberJson,
     String requesterNostrPubkeyHex,
   )? onPublishMembershipConfirmed;
+
+  /// Publishes a Kind-31005 cell member update event (leave / remove).
+  ///
+  /// Set by [ChatProvider] after the transport is ready.
+  void Function({
+    required String cellId,
+    required String targetDid,
+    required String action,
+    String? reason,
+  })? onPublishMemberUpdate;
 
   /// Clears all in-memory cell state. DEBUG use only — call after wiping the DB.
   Future<void> resetForDebug() async {

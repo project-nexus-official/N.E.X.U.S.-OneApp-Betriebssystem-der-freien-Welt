@@ -128,6 +128,15 @@ class NostrTransport implements MessageTransport {
 
   String? _cellJoinSubId;
   String? _cellMembershipSubId;
+  String? _cellMemberUpdateSubId;
+
+  final _cellMemberUpdateController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
+  /// Emits `{cellId, targetDid, action: 'left'|'removed', reason?}` when a
+  /// Kind-31005 member-update event arrives.
+  Stream<Map<String, dynamic>> get onCellMemberUpdate =>
+      _cellMemberUpdateController.stream;
 
   final _feedCommentController =
       StreamController<Map<String, dynamic>>.broadcast();
@@ -499,6 +508,39 @@ class NostrTransport implements MessageTransport {
     );
     _relayManager.publish(event);
     print('[CELL-DEL] Publishing cell deletion event: $cellId ($cellName)');
+  }
+
+  /// Publishes a Kind-31005 cell member update (leave or remove).
+  ///
+  /// [cellId] identifies the cell.
+  /// [targetDid] is the DID of the member who is leaving or being removed.
+  /// [action] is `'left'` (voluntary) or `'removed'` (kicked by founder/mod).
+  /// [reason] is an optional human-readable reason (only for 'removed').
+  void publishCellMemberUpdate({
+    required String cellId,
+    required String targetDid,
+    required String action,
+    String? reason,
+  }) {
+    if (_keys == null) return;
+    final payload = <String, dynamic>{
+      'cellId': cellId,
+      'targetDid': targetDid,
+      'action': action,
+      if (reason != null && reason.isNotEmpty) 'reason': reason,
+    };
+    final event = NostrEvent.create(
+      keys: _keys!,
+      kind: NostrKind.cellMemberUpdate,
+      content: jsonEncode(payload),
+      tags: [
+        ['t', 'nexus-cell-member-update'],
+        ['cell', cellId],
+      ],
+    );
+    _relayManager.publish(event);
+    print('[CELL] Published Kind-31005 member-$action event for cell: $cellId '
+        '(target: ${targetDid.length > 20 ? '${targetDid.substring(0, 20)}…' : targetDid})');
   }
 
   /// Publishes a NIP-25 Kind-7 reaction for [messageId].
@@ -946,6 +988,17 @@ class NostrTransport implements MessageTransport {
     });
     print('[JOIN] Subscribed to membership confirmations for $myPubkey, subId=$_cellMembershipSubId');
 
+    // Cell member updates (Kind-31005) — leave + remove events.
+    if (_cellMemberUpdateSubId != null) {
+      _relayManager.closeSubscription(_cellMemberUpdateSubId!);
+    }
+    _cellMemberUpdateSubId = _relayManager.subscribe({
+      'kinds': [NostrKind.cellMemberUpdate],
+      '#t': ['nexus-cell-member-update'],
+      'since': nowSeconds - 7 * 86400,
+    });
+    print('[CELL] Subscribed to member-update events, subId=$_cellMemberUpdateSubId');
+
     // Dorfplatz feed posts + comments (Kind-1/6 with nexus-dorfplatz* tags),
     // Kind-7 reactions — tag-based subscription for last 7 days.
     if (_feedSubId != null) _relayManager.closeSubscription(_feedSubId!);
@@ -1021,6 +1074,8 @@ class NostrTransport implements MessageTransport {
         _handleCellJoinRequestEvent(event);
       case NostrKind.cellMembershipConfirmed:
         _handleCellMembershipConfirmedEvent(event);
+      case NostrKind.cellMemberUpdate:
+        _handleCellMemberUpdateEvent(event);
     }
   }
 
@@ -1143,6 +1198,23 @@ class NostrTransport implements MessageTransport {
       _cellMembershipConfirmedController.add(data);
     } catch (e) {
       print('[JOIN] Cell membership confirmation parse FAILED: $e');
+    }
+  }
+
+  void _handleCellMemberUpdateEvent(NostrEvent event) {
+    if (_keys == null) return;
+    // Ignore our own events (we handle them locally already).
+    if (event.pubkey == _keys!.publicKeyHex) return;
+    try {
+      final data = jsonDecode(event.content) as Map<String, dynamic>;
+      final cellId = event.tagValue('cell') ?? data['cellId'] as String? ?? '?';
+      final action = data['action'] as String? ?? 'left';
+      final targetDid = data['targetDid'] as String? ?? '';
+      print('[CELL] Kind-31005 member-$action event received for cell: $cellId '
+          '(target: ${targetDid.length > 20 ? '${targetDid.substring(0, 20)}…' : targetDid})');
+      _cellMemberUpdateController.add(data);
+    } catch (e) {
+      print('[CELL] Cell member-update parse FAILED: $e');
     }
   }
 

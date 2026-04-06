@@ -358,6 +358,61 @@ class _CellInfoScreenState extends State<CellInfoScreen> {
     );
   }
 
+  Future<void> _removeMember(CellMember target) async {
+    final shortDid =
+        '…${target.did.substring(target.did.length > 12 ? target.did.length - 12 : 0)}';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Mitglied entfernen',
+            style: TextStyle(color: Colors.redAccent)),
+        content: Text(
+          'Möchtest du $shortDid aus der Zelle "${_cell.name}" entfernen? '
+          'Die Person verliert sofort den Zugang.',
+          style: TextStyle(color: AppColors.onDark.withValues(alpha: 0.85)),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abbrechen')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Entfernen',
+                  style: TextStyle(color: Colors.redAccent))),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await CellService.instance.removeMember(_cell.id, target.did);
+
+      // Post system message in discussion channel.
+      if (mounted) {
+        await context
+            .read<ChatProvider>()
+            .postCellSystemMessage(_cell.id, '$shortDid wurde aus der Zelle entfernt.');
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$shortDid wurde aus der Zelle entfernt.'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Fehler: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _transferFounderRole(CellMember target) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -567,11 +622,18 @@ class _CellInfoScreenState extends State<CellInfoScreen> {
                 m.did != _myDid &&
                 (m.role == MemberRole.member ||
                     m.role == MemberRole.moderator));
+            // Founder can remove mods+members; mod can remove only members.
+            final canRemove = m.did != _myDid &&
+                m.role != MemberRole.founder &&
+                (_isFounder ||
+                    (_isMod && m.role == MemberRole.member) ||
+                    _isAdminUser);
             return _MemberTile(
               member: m,
               isMe: m.did == _myDid,
               canPromote: _isFounder && m.role == MemberRole.member,
               canTransferFounder: canTransferFounder,
+              canRemove: canRemove,
               onPromote: _isFounder
                   ? () async {
                       await CellService.instance
@@ -581,6 +643,7 @@ class _CellInfoScreenState extends State<CellInfoScreen> {
               onTransferFounder: canTransferFounder
                   ? () => _transferFounderRole(m)
                   : null,
+              onRemove: canRemove ? () => _removeMember(m) : null,
             );
           }),
           const SizedBox(height: 24),
@@ -647,16 +710,20 @@ class _MemberTile extends StatelessWidget {
   final bool isMe;
   final bool canPromote;
   final bool canTransferFounder;
+  final bool canRemove;
   final VoidCallback? onPromote;
   final VoidCallback? onTransferFounder;
+  final VoidCallback? onRemove;
 
   const _MemberTile({
     required this.member,
     required this.isMe,
     required this.canPromote,
     required this.canTransferFounder,
+    required this.canRemove,
     this.onPromote,
     this.onTransferFounder,
+    this.onRemove,
   });
 
   @override
@@ -720,11 +787,18 @@ class _MemberTile extends StatelessWidget {
               onPressed: onPromote,
               child: const Text('Zum Moderator'),
             ),
+          if (canRemove)
+            IconButton(
+              icon: const Icon(Icons.person_remove_outlined,
+                  color: Colors.redAccent, size: 20),
+              tooltip: 'Mitglied entfernen',
+              onPressed: onRemove,
+            ),
         ],
       ),
     );
 
-    if (canTransferFounder) {
+    if (canTransferFounder || canRemove) {
       tile = GestureDetector(
         onLongPress: () => _showContextMenu(context, shortDid),
         child: tile,
@@ -745,15 +819,27 @@ class _MemberTile extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
-              leading: const Icon(Icons.stars, color: AppColors.gold),
-              title: Text('$name zum Gründer ernennen',
-                  style: const TextStyle(color: AppColors.onDark)),
-              onTap: () {
-                Navigator.pop(context);
-                onTransferFounder?.call();
-              },
-            ),
+            if (canTransferFounder)
+              ListTile(
+                leading: const Icon(Icons.stars, color: AppColors.gold),
+                title: Text('$name zum Gründer ernennen',
+                    style: const TextStyle(color: AppColors.onDark)),
+                onTap: () {
+                  Navigator.pop(context);
+                  onTransferFounder?.call();
+                },
+              ),
+            if (canRemove)
+              ListTile(
+                leading: const Icon(Icons.person_remove_outlined,
+                    color: Colors.redAccent),
+                title: Text('$name entfernen',
+                    style: const TextStyle(color: Colors.redAccent)),
+                onTap: () {
+                  Navigator.pop(context);
+                  onRemove?.call();
+                },
+              ),
           ],
         ),
       ),

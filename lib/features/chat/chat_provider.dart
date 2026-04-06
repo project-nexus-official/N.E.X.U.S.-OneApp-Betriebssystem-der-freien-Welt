@@ -209,9 +209,17 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
                   cellJson, memberJson, pubkeyHex);
       CellService.instance.onRegisterNostrMapping =
           (did, pubkey) => _nostrTransport?.registerDidMapping(did, pubkey);
+      CellService.instance.onPublishMemberUpdate =
+          ({required cellId, required targetDid, required action, reason}) =>
+              _nostrTransport?.publishCellMemberUpdate(
+                  cellId: cellId,
+                  targetDid: targetDid,
+                  action: action,
+                  reason: reason);
       _nostrTransport!.onCellJoinRequest.listen(_onCellJoinRequest);
       _nostrTransport!.onCellMembershipConfirmed
           .listen(_onCellMembershipConfirmed);
+      _nostrTransport!.onCellMemberUpdate.listen(_onCellMemberUpdate);
 
       // Subscribe to events before starting
       _msgSub = _manager.onMessageReceived.listen((msg) => _onMessageReceived(msg));
@@ -523,6 +531,33 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       body: 'Die Zelle "$cellName" wurde aufgelöst.',
       payload: 'cell_deleted:$cellId',
     );
+  }
+
+  /// Handles an incoming Kind-31005 cell member-update event from Nostr.
+  ///
+  /// action='left' → a member voluntarily left; update local member list.
+  /// action='removed' + targetDid==me → I was kicked; clean up + notify.
+  Future<void> _onCellMemberUpdate(Map<String, dynamic> data) async {
+    final cellId = data['cellId'] as String? ?? '';
+    final targetDid = data['targetDid'] as String? ?? '';
+    final action = data['action'] as String? ?? 'left';
+    if (cellId.isEmpty || targetDid.isEmpty) return;
+
+    final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+    final wasRemoved = action == 'removed' && targetDid == myDid;
+
+    await CellService.instance.handleMemberLeft(cellId, targetDid, action);
+
+    if (wasRemoved) {
+      // I was kicked — leave the cell-internal channels silently (no farewell msg).
+      await deleteCellChannels(cellId);
+      await NotificationService.instance.showGenericNotification(
+        title: 'Aus Zelle entfernt',
+        body: 'Du wurdest aus einer Zelle entfernt.',
+        payload: 'cell_removed:$cellId',
+      );
+      print('[CELL] Removed from cell $cellId — channels cleaned up, notification shown');
+    }
   }
 
   /// Re-runs Nostr subscriptions. Used after a debug data reset.
