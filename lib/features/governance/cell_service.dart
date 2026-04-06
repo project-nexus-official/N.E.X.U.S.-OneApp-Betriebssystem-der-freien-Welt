@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/contacts/contact_service.dart';
 import '../../core/identity/identity_service.dart';
@@ -33,6 +35,11 @@ class CellService {
 
   // Pending outgoing requests (cells the user applied to join).
   final List<CellJoinRequest> _myRequests = [];
+
+  // Cell IDs the user has left or that were dissolved — persisted so they
+  // never re-appear in the discovery list after a Nostr re-subscription.
+  final Set<String> _dismissedCellIds = {};
+  static const _dismissedKey = 'nexus_dismissed_cell_ids';
 
   final _streamCtrl = StreamController<void>.broadcast();
 
@@ -89,6 +96,15 @@ class CellService {
 
   Future<void> load() async {
     try {
+      // Load dismissed cell IDs first so discovery filter works immediately.
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_dismissedKey);
+      if (raw != null) {
+        final list = (jsonDecode(raw) as List<dynamic>).cast<String>();
+        _dismissedCellIds.addAll(list);
+      }
+      debugPrint('[CELLS] Dismissed cell IDs: ${_dismissedCellIds.length}');
+
       final rows = await PodDatabase.instance.listCells();
       _myCells
         ..clear()
@@ -193,8 +209,12 @@ class CellService {
   }
 
   /// Adds a discovered cell from Nostr (does not persist).
+  ///
+  /// Cells the user has left or that were dissolved are silently ignored —
+  /// they stay in the dismissed list and will never re-appear in discovery.
   void addDiscoveredCell(Cell cell) {
     if (_myCells.any((c) => c.id == cell.id)) return;
+    if (_dismissedCellIds.contains(cell.id)) return; // already left/deleted
     _discovered.removeWhere((c) => c.id == cell.id);
     _discovered.add(cell);
     _notify();
@@ -219,6 +239,9 @@ class CellService {
     for (final m in members) {
       await PodDatabase.instance.deleteCellMember(cellId, m.did);
     }
+
+    // Persist to dismissed list so the cell never re-appears in discovery.
+    await _dismissCell(cellId);
 
     // Remove from in-memory state.
     _myCells.removeWhere((c) => c.id == cellId);
@@ -407,6 +430,17 @@ class CellService {
     _notify();
   }
 
+  /// Persists [cellId] to the dismissed list so it never re-appears in
+  /// discovery after a Nostr re-subscription.
+  Future<void> _dismissCell(String cellId) async {
+    if (_dismissedCellIds.contains(cellId)) return;
+    _dismissedCellIds.add(cellId);
+    _discovered.removeWhere((c) => c.id == cellId);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+        _dismissedKey, jsonEncode(_dismissedCellIds.toList()));
+  }
+
   /// The local user leaves a cell (exit right always available).
   ///
   /// Publishes a Kind-31005 leave event so the founder's device can update its
@@ -420,6 +454,7 @@ class CellService {
       print('[CELL] Published leave event for cell: $cellId');
     }
 
+    await _dismissCell(cellId); // prevent re-appearing in discovery
     await PodDatabase.instance.deleteCellMember(cellId, myDid);
     await PodDatabase.instance.deleteCell(cellId);
     // Clean up any outgoing pending request for this cell (zombie prevention).
@@ -498,6 +533,7 @@ class CellService {
 
     if (action == 'removed' && targetDid == myDid) {
       // I was removed — perform the same local cleanup as leaving voluntarily.
+      await _dismissCell(cellId); // prevent re-appearing in discovery
       await PodDatabase.instance.deleteCellMember(cellId, myDid!);
       await PodDatabase.instance.deleteCell(cellId);
       _myRequests.removeWhere((r) => r.cellId == cellId);
@@ -692,6 +728,9 @@ class CellService {
     _members.clear();
     _requests.clear();
     _myRequests.clear();
+    _dismissedCellIds.clear();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_dismissedKey);
     _notify();
   }
 
