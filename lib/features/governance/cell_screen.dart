@@ -73,6 +73,146 @@ class _CellScreenState extends State<CellScreen>
 
   bool get _isFounder => _myMembership?.role == MemberRole.founder;
   bool get _isMod => _myMembership?.role == MemberRole.moderator;
+  bool get _isMember => _myMembership != null && _myMembership!.isConfirmed;
+
+  Future<void> _leaveCell(BuildContext context) async {
+    if (_isFounder) {
+      final otherMembers = CellService.instance.membersOf(_cell.id)
+          .where((m) => m.isConfirmed && m.did != _myDid)
+          .toList();
+
+      if (otherMembers.isEmpty) {
+        if (!context.mounted) return;
+        showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppColors.surface,
+            title: const Text('Zelle verlassen nicht möglich',
+                style: TextStyle(color: AppColors.onDark)),
+            content: const Text(
+              'Du bist das einzige Mitglied. Lösche die Zelle statt sie zu verlassen.',
+              style: TextStyle(color: AppColors.onDark),
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('OK')),
+            ],
+          ),
+        );
+        return;
+      }
+
+      // Founder must pick a successor.
+      final successor = await _pickSuccessor(context, otherMembers);
+      if (successor == null || !context.mounted) return;
+
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: const Text('Gründer-Rolle übertragen',
+              style: TextStyle(color: AppColors.onDark)),
+          content: Text(
+            'Möchtest du …${successor.did.substring(successor.did.length > 12 ? successor.did.length - 12 : 0)} '
+            'zum neuen Gründer ernennen und die Zelle verlassen?',
+            style: TextStyle(color: AppColors.onDark.withValues(alpha: 0.85)),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Abbrechen')),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Übertragen & Verlassen',
+                    style: TextStyle(color: Colors.orange))),
+          ],
+        ),
+      );
+      if (confirmed != true || !context.mounted) return;
+
+      await CellService.instance.transferFounderRole(_cell.id, successor.did);
+      final cellId = _cell.id;
+      await CellService.instance.leaveCell(cellId);
+      if (context.mounted) {
+        await context.read<ChatProvider>().leaveCellChannels(cellId);
+        Navigator.of(context).pop();
+      }
+      return;
+    }
+
+    // Regular member / moderator leave.
+    if (!context.mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Zelle verlassen',
+            style: TextStyle(color: AppColors.onDark)),
+        content: Text(
+          'Möchtest du die Zelle "${_cell.name}" wirklich verlassen?',
+          style: TextStyle(color: AppColors.onDark.withValues(alpha: 0.8)),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abbrechen')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Verlassen',
+                  style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (confirmed == true && context.mounted) {
+      final cellId = _cell.id;
+      await CellService.instance.leaveCell(cellId);
+      if (context.mounted) {
+        await context.read<ChatProvider>().leaveCellChannels(cellId);
+        Navigator.of(context).pop();
+      }
+    }
+  }
+
+  Future<CellMember?> _pickSuccessor(
+      BuildContext context, List<CellMember> candidates) {
+    return showDialog<CellMember>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Nachfolger wählen',
+            style: TextStyle(color: AppColors.onDark)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: candidates.length,
+            itemBuilder: (_, i) {
+              final m = candidates[i];
+              final shortDid =
+                  '…${m.did.substring(m.did.length > 12 ? m.did.length - 12 : 0)}';
+              return ListTile(
+                leading: const Icon(Icons.person, color: AppColors.gold),
+                title: Text(shortDid,
+                    style: const TextStyle(color: AppColors.onDark)),
+                subtitle: Text(
+                    m.role == MemberRole.moderator ? 'Moderator' : 'Mitglied',
+                    style: TextStyle(
+                        color: AppColors.onDark.withValues(alpha: 0.6),
+                        fontSize: 12)),
+                onTap: () => Navigator.pop(ctx, m),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Abbrechen')),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -85,11 +225,37 @@ class _CellScreenState extends State<CellScreen>
             backgroundColor: AppColors.deepBlue,
             title: Text(_cell.name),
             actions: [
-              if (_isFounder)
-                IconButton(
-                  icon: const Icon(Icons.settings_outlined),
-                  tooltip: 'Zelle bearbeiten',
-                  onPressed: () => _openSettings(context),
+              if (_isMember)
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert),
+                  color: AppColors.surface,
+                  onSelected: (value) {
+                    if (value == 'leave') _leaveCell(context);
+                    if (value == 'settings') _openSettings(context);
+                  },
+                  itemBuilder: (_) => [
+                    if (_isFounder)
+                      const PopupMenuItem(
+                        value: 'settings',
+                        child: Row(children: [
+                          Icon(Icons.settings_outlined,
+                              color: AppColors.gold, size: 18),
+                          SizedBox(width: 10),
+                          Text('Zelle bearbeiten',
+                              style: TextStyle(color: AppColors.onDark)),
+                        ]),
+                      ),
+                    const PopupMenuItem(
+                      value: 'leave',
+                      child: Row(children: [
+                        Icon(Icons.exit_to_app,
+                            color: Colors.redAccent, size: 18),
+                        SizedBox(width: 10),
+                        Text('Zelle verlassen',
+                            style: TextStyle(color: Colors.redAccent)),
+                      ]),
+                    ),
+                  ],
                 ),
             ],
             bottom: TabBar(
@@ -735,20 +901,77 @@ class _MitgliederTab extends StatelessWidget {
           ),
         ),
         ...members.map((m) {
+          final canRemove = m.did != myDid &&
+              m.role != MemberRole.founder &&
+              (isFounder ||
+                  (isMod && m.role == MemberRole.member));
           return _SimpleMemberTile(
             member: m,
             isMe: m.did == myDid,
             canPromote: isFounder && m.role == MemberRole.member,
+            canRemove: canRemove,
             onPromote: isFounder
                 ? () async {
                     await CellService.instance
                         .promoteModerator(cell.id, m.did);
                   }
                 : null,
+            onRemove: canRemove
+                ? () => _confirmRemove(context, cell, m)
+                : null,
           );
         }),
       ],
     );
+  }
+}
+
+void _confirmRemove(
+    BuildContext context, Cell cell, CellMember target) async {
+  final shortDid =
+      '…${target.did.substring(target.did.length > 12 ? target.did.length - 12 : 0)}';
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: AppColors.surface,
+      title: const Text('Mitglied entfernen',
+          style: TextStyle(color: Colors.redAccent)),
+      content: Text(
+        'Möchtest du $shortDid aus der Zelle "${cell.name}" entfernen?',
+        style:
+            TextStyle(color: AppColors.onDark.withValues(alpha: 0.85)),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Abbrechen')),
+        TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Entfernen',
+                style: TextStyle(color: Colors.redAccent))),
+      ],
+    ),
+  );
+  if (confirmed != true || !context.mounted) return;
+  try {
+    await CellService.instance.removeMember(cell.id, target.did);
+    if (context.mounted) {
+      await context
+          .read<ChatProvider>()
+          .postCellSystemMessage(
+              cell.id, '$shortDid wurde aus der Zelle entfernt.');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$shortDid wurde entfernt.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Fehler: $e')));
+    }
   }
 }
 
@@ -758,13 +981,17 @@ class _SimpleMemberTile extends StatelessWidget {
   final CellMember member;
   final bool isMe;
   final bool canPromote;
+  final bool canRemove;
   final VoidCallback? onPromote;
+  final VoidCallback? onRemove;
 
   const _SimpleMemberTile({
     required this.member,
     required this.isMe,
     required this.canPromote,
+    required this.canRemove,
     this.onPromote,
+    this.onRemove,
   });
 
   @override
@@ -826,6 +1053,13 @@ class _SimpleMemberTile extends StatelessWidget {
               onPressed: onPromote,
               child: const Text('Zum Moderator',
                   style: TextStyle(fontSize: 12)),
+            ),
+          if (canRemove)
+            IconButton(
+              icon: const Icon(Icons.person_remove_outlined,
+                  color: Colors.redAccent, size: 20),
+              tooltip: 'Mitglied entfernen',
+              onPressed: onRemove,
             ),
         ],
       ),
