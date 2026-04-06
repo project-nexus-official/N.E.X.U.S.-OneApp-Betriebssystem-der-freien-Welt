@@ -12,6 +12,7 @@ import '../core/contacts/contact_service.dart';
 import '../core/identity/bip39.dart';
 import '../core/identity/identity_service.dart';
 import '../core/storage/pod_encryption.dart';
+import '../core/transport/nostr/nostr_transport.dart';
 import '../features/chat/group_channel_service.dart';
 import '../features/governance/cell_service.dart';
 import '../services/notification_settings_service.dart';
@@ -401,6 +402,17 @@ class BackupService {
     if (principlesData != null && !PrinciplesService.instance.hasSeen) {
       await PrinciplesService.instance.restoreFromBackup(principlesData);
     }
+
+    print('[RESTORE] Backup applied, triggering subscription reset…');
+    print('[RESTORE] Resetting subscriptions with $restoredContacts contacts, '
+        '$restoredChannels channels, $restoredCells cells');
+
+    // Re-subscribe so that all restored contacts / channels / cells are
+    // included in the active Nostr filters.  Services have already merged
+    // their data into memory above, so _setupSubscriptions() will pick them up.
+    NostrTransport.instance.resetSubscriptions();
+
+    print('[RESTORE] Subscriptions successfully reset');
 
     return RestoreResult(
       success: true,

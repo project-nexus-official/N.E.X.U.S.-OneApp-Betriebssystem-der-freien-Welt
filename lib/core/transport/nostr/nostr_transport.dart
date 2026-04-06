@@ -855,6 +855,17 @@ class NostrTransport implements MessageTransport {
     }
   }
 
+  /// Re-runs [_setupSubscriptions] so that freshly restored contacts, channels,
+  /// and cells are included in the active Nostr filters.
+  ///
+  /// Call this after a backup restore once all services have finished merging
+  /// their data into memory.
+  void resetSubscriptions() {
+    print('[RESTORE] Resetting Nostr subscriptions after backup restore…');
+    _setupSubscriptions();
+    print('[RESTORE] Subscriptions successfully reset');
+  }
+
   void _onRelayEvent(NostrEvent event) {
     if (_keys == null) return;
 
