@@ -110,8 +110,17 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
   /// True when the peer is unknown / only discovered and a contact request
   /// must be sent before chatting.
+  ///
+  /// Never gates while messages are still loading, and never gates an existing
+  /// conversation (i.e. one that already has messages). This ensures that
+  /// contacts added before the contact-request feature was introduced keep
+  /// working without being forced through the request flow again.
   bool get _needsContactRequest {
     if (widget.isBroadcast) return false;
+    // Still loading – don't decide yet; avoids a false gate on startup.
+    if (_loading) return false;
+    // Existing conversation – never block access to previous messages.
+    if (_messages.isNotEmpty) return false;
     final contact = ContactService.instance.findByDid(widget.peerDid);
     return contact == null ||
         contact.trustLevel == TrustLevel.discovered;

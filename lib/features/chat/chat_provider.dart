@@ -607,12 +607,36 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     // ── Contact request routing ──────────────────────────────────────────────
     final msgType = processedMsg.metadata?['type'] as String?;
     if (msgType == 'contact_request') {
+      // Register the sender's Nostr pubkey immediately so we can send the
+      // acceptance reply even if their presence hasn't been received yet.
+      final crData =
+          processedMsg.metadata?['contact_request_data'] as Map<String, dynamic>?;
+      final senderNostrPubkey = crData?['fromNostrPubkey'] as String? ?? '';
+      if (senderNostrPubkey.isNotEmpty) {
+        _nostrTransport?.registerDidMapping(
+            processedMsg.fromDid, senderNostrPubkey);
+        ContactService.instance.setNostrPubkey(
+            processedMsg.fromDid, senderNostrPubkey);
+        debugPrint('[ContactRequest] Registered sender pubkey: '
+            '${senderNostrPubkey.substring(0, 8)}… for ${processedMsg.fromDid}');
+      }
       debugPrint('[ContactRequest] Incoming contact_request routed to service '
           'from ${processedMsg.fromDid}');
       await ContactRequestService.instance.handleIncomingRequest(processedMsg);
       return;
     }
     if (msgType == 'contact_request_accepted') {
+      // Register the acceptor's Nostr pubkey so subsequent messages work
+      // immediately without waiting for the next presence event.
+      final crData =
+          processedMsg.metadata?['contact_request_data'] as Map<String, dynamic>?;
+      final acceptorNostrPubkey = crData?['fromNostrPubkey'] as String? ?? '';
+      if (acceptorNostrPubkey.isNotEmpty) {
+        _nostrTransport?.registerDidMapping(
+            processedMsg.fromDid, acceptorNostrPubkey);
+        debugPrint('[ContactRequest] Registered acceptor pubkey: '
+            '${acceptorNostrPubkey.substring(0, 8)}… for ${processedMsg.fromDid}');
+      }
       await ContactRequestService.instance.handleAcceptance(
         processedMsg,
         addContactFn: (did, pseudonym, encKey, nostrPubkey) async {
