@@ -6,7 +6,10 @@
       "Bash(xargs grep:*)",
       "Bash(flutter test:*)",
       "Bash(flutter run:*)",
-      "Bash(flutter attach:*)"
+      "Bash(flutter attach:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   }
 }
