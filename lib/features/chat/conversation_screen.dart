@@ -18,6 +18,7 @@ import '../../core/crypto/encryption_keys.dart';
 import '../../core/identity/identity_service.dart';
 import '../../services/contact_request_service.dart';
 import '../contacts/contact_request.dart';
+import '../contacts/sent_requests_screen.dart';
 import '../../core/storage/retention_service.dart';
 import '../../core/transport/message_transport.dart';
 import '../../core/transport/nexus_message.dart';
@@ -3546,75 +3547,12 @@ class _ContactRequestGateScreenState
   }
 }
 
-/// Proxy widget that lazily imports SentRequestsScreen without circular deps.
+/// Proxy widget that opens the full SentRequestsScreen (with cancel support).
 class _SentRequestsProxy extends StatelessWidget {
   const _SentRequestsProxy();
 
   @override
-  Widget build(BuildContext context) {
-    // Import inline to avoid adding a top-level import for a rarely used screen.
-    return const _SentRequestsInline();
-  }
-}
-
-// Inline minimal sent-requests view accessible from the gate.
-class _SentRequestsInline extends StatelessWidget {
-  const _SentRequestsInline();
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<List<ContactRequest>>(
-      stream: ContactRequestService.instance.stream,
-      initialData: ContactRequestService.instance.sentRequests,
-      builder: (context, snap) {
-        final sent = ContactRequestService.instance.sentRequests;
-        return Scaffold(
-          appBar: AppBar(title: const Text('Gesendete Anfragen')),
-          body: sent.isEmpty
-              ? const Center(
-                  child: Text('Keine gesendeten Anfragen',
-                      style: TextStyle(color: Colors.grey)))
-              : ListView.builder(
-                  itemCount: sent.length,
-                  itemBuilder: (_, i) {
-                    final req = sent[i];
-                    final chipColor = switch (req.status) {
-                      ContactRequestStatus.accepted => Colors.green,
-                      ContactRequestStatus.pending => Colors.orange,
-                      _ => Colors.grey,
-                    };
-                    final chipLabel = switch (req.status) {
-                      ContactRequestStatus.accepted => 'Angenommen',
-                      ContactRequestStatus.pending => 'Ausstehend',
-                      _ => 'Unbekannt',
-                    };
-                    return ListTile(
-                      leading: const Icon(Icons.person_outline,
-                          color: AppColors.gold),
-                      title: Text(req.fromPseudonym.isNotEmpty
-                          ? req.fromPseudonym
-                          : req.fromDid),
-                      subtitle: Text(
-                        req.message,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.grey),
-                      ),
-                      trailing: Chip(
-                        label: Text(chipLabel,
-                            style:
-                                const TextStyle(fontSize: 11, color: Colors.white)),
-                        backgroundColor: chipColor,
-                        padding: EdgeInsets.zero,
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    );
-                  },
-                ),
-        );
-      },
-    );
-  }
+  Widget build(BuildContext context) => const SentRequestsScreen();
 }
 
 // ── Reactions row ─────────────────────────────────────────────────────────────
