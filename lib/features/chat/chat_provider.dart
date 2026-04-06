@@ -439,7 +439,8 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       results.any((r) =>
           r == ConnectivityResult.wifi ||
           r == ConnectivityResult.mobile ||
-          r == ConnectivityResult.ethernet);
+          r == ConnectivityResult.ethernet ||
+          r == ConnectivityResult.other); // Windows VPN / unusual adapters
 
   // ── App lifecycle & notification helpers ───────────────────────────────────
 
@@ -606,6 +607,8 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     // ── Contact request routing ──────────────────────────────────────────────
     final msgType = processedMsg.metadata?['type'] as String?;
     if (msgType == 'contact_request') {
+      debugPrint('[ContactRequest] Incoming contact_request routed to service '
+          'from ${processedMsg.fromDid}');
       await ContactRequestService.instance.handleIncomingRequest(processedMsg);
       return;
     }

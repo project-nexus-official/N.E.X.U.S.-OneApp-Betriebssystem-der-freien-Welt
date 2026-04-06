@@ -495,10 +495,16 @@ class NostrTransport implements MessageTransport {
 
   Future<void> _sendDm(NexusMessage message) async {
     final recipientNostrPubkey = _didToNostrPubkey[message.toDid];
+    final msgType = message.metadata?['type'] as String?;
     if (recipientNostrPubkey == null) {
       print('[NOSTR] DM send FAILED – no Nostr pubkey known for DID: '
           '${message.toDid}  (known DIDs: ${_didToNostrPubkey.keys.join(', ')})');
-      return;
+      if (msgType == 'contact_request') {
+        print('[ContactRequest] SEND FAILED – Windows Nostr pubkey not in map. '
+            'Ensure Windows has broadcast presence before sending request.');
+      }
+      // Throw so the TransportManager cascade can try the next transport.
+      throw StateError('No Nostr pubkey for recipient: ${message.toDid}');
     }
 
     print('[NOSTR] Sending DM → pubkey: '
@@ -989,6 +995,12 @@ class NostrTransport implements MessageTransport {
     // Ignore our own events
     if (event.pubkey == _keys!.publicKeyHex) return;
 
+    final myPubkey = _keys!.publicKeyHex;
+    final isForMe = event.tagValues('p').contains(myPubkey);
+    print('[ContactRequest] incoming event received: ${event.kind}');
+    print('[ContactRequest] for my pubkey: $isForMe '
+        '(mine: ${myPubkey.substring(0, 8)}… '
+        'p-tags: ${event.tagValues('p').map((k) => k.substring(0, 8)).join(', ')})');
     print('[NOSTR] DM received from pubkey: ${event.pubkey.substring(0, 8)}…, '
         'event: ${event.id.substring(0, 8)}…  decrypting…');
     print('[SYNC] Received event: ${event.id.substring(0, 8)} '
@@ -1000,12 +1012,18 @@ class NostrTransport implements MessageTransport {
       final msgJson = jsonDecode(plaintext) as Map<String, dynamic>;
       final message = NexusMessage.fromJson(msgJson);
 
-      print('[NOSTR] DM decrypted OK: ${message.fromDid} → ${message.toDid}');
+      final msgType = message.metadata?['type'] as String?;
+      print('[NOSTR] DM decrypted OK: ${message.fromDid} → ${message.toDid}'
+          '${msgType != null ? '  type=$msgType' : ''}');
+      if (msgType == 'contact_request') {
+        print('[ContactRequest] contact_request DM arrived – routing to service');
+      }
       print('[SYNC] Stored message: ${message.id}');
       _learnPeer(event.pubkey, message.fromDid, message.metadata);
       _msgController.add(message);
     } catch (e) {
       print('[NOSTR] DM decrypt FAILED (not for us or malformed): $e');
+      print('[ContactRequest] decrypt error detail: $e');
     }
   }
 
