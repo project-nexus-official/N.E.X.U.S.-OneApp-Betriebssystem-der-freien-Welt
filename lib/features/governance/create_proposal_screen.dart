@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/identity/identity_service.dart';
 import '../../shared/theme/app_theme.dart';
+import '../../shared/widgets/help_icon.dart';
 import 'cell.dart';
 import 'proposal.dart';
 import 'proposal_service.dart';
@@ -85,6 +86,10 @@ class _CreateProposalScreenState extends State<CreateProposalScreen> {
       appBar: AppBar(
         title: const Text('Neuer Antrag'),
         backgroundColor: AppColors.deepBlue,
+        actions: const [
+          HelpIcon(contextId: 'proposal_general'),
+          SizedBox(width: 8),
+        ],
       ),
       backgroundColor: AppColors.deepBlue,
       body: Form(
@@ -143,7 +148,7 @@ class _CreateProposalScreenState extends State<CreateProposalScreen> {
             const SizedBox(height: 16),
 
             // Scope
-            _SectionLabel('Reichweite'),
+            _SectionLabel('Reichweite', helpContextId: 'proposal_status'),
             _RadioOption<ProposalScope>(
               label: 'Nur diese Zelle (Standard)',
               value: ProposalScope.cell,
@@ -290,18 +295,25 @@ class _CreateProposalScreenState extends State<CreateProposalScreen> {
 
 class _SectionLabel extends StatelessWidget {
   final String text;
-  const _SectionLabel(this.text);
+  final String? helpContextId;
+  const _SectionLabel(this.text, {this.helpContextId});
 
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
-        child: Text(
-          text,
-          style: TextStyle(
-            color: AppColors.onDark.withValues(alpha: 0.7),
-            fontWeight: FontWeight.w600,
-            fontSize: 13,
-          ),
+        child: Row(
+          children: [
+            Text(
+              text,
+              style: TextStyle(
+                color: AppColors.onDark.withValues(alpha: 0.7),
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
+            if (helpContextId != null)
+              HelpIcon(contextId: helpContextId!, size: 15),
+          ],
         ),
       );
 }

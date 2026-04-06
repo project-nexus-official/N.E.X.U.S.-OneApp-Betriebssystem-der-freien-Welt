@@ -277,6 +277,11 @@ class CellService {
 
     _notify();
     debugPrint('[CELLS] Approved request ${req.id} for ${req.requesterPseudonym}');
+
+    // Post welcome message in discussion channel (fire-and-forget).
+    if (onMemberApproved != null) {
+      onMemberApproved!(req.cellId, req.requesterPseudonym);
+    }
   }
 
   /// Rejects a join request silently (no feedback sent to requester).
@@ -396,6 +401,12 @@ class CellService {
       body: 'Du bist jetzt Mitglied von ${cell.name}.',
       payload: 'cell_info:${cell.id}',
     );
+
+    // Notify ChatProvider to create/subscribe to cell-internal channels.
+    final myDid = IdentityService.instance.currentIdentity?.did;
+    if (myDid != null && onMembershipConfirmed != null) {
+      await onMembershipConfirmed!(cell, myDid);
+    }
   }
 
   // ── Trust-level check ──────────────────────────────────────────────────────
@@ -421,6 +432,20 @@ class CellService {
     }
     return false;
   }
+
+  /// Optional callback invoked when the local user's membership in a cell is
+  /// confirmed (join request accepted or direct invite accepted).
+  ///
+  /// Set by [ChatProvider] to auto-create cell-internal channels.
+  Future<void> Function(Cell cell, String myDid)? onMembershipConfirmed;
+
+  /// Optional callback invoked when a new member is approved into a cell
+  /// (called on the founder/moderator's device).
+  ///
+  /// Parameters: cellId, newMemberPseudonym.
+  /// Set by [ChatProvider] to post a welcome message in the discussion channel.
+  Future<void> Function(String cellId, String pseudonym)?
+      onMemberApproved;
 
   void _notify() => _streamCtrl.add(null);
 }

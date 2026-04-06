@@ -22,6 +22,7 @@ import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/update_bottom_sheet.dart';
 import '../chat/chat_provider.dart';
 import '../contacts/widgets/trust_badge.dart';
+import 'admin_cell_management_screen.dart';
 import 'admin_management_screen.dart';
 import 'nostr_settings_screen.dart';
 import 'notification_settings_screen.dart';
@@ -702,6 +703,22 @@ class _AdminSection extends StatelessWidget {
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
                 builder: (_) => const AdminManagementScreen(),
+              ),
+            ),
+          ),
+          ListTile(
+            leading:
+                const Icon(Icons.hexagon_outlined, color: Colors.redAccent),
+            title: const Text(
+              'Zellen verwalten',
+              style: TextStyle(color: Colors.redAccent),
+            ),
+            subtitle: const Text(
+                'Verwaiste Zellen löschen · Kind-5 Dissolution senden'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const AdminCellManagementScreen(),
               ),
             ),
           ),

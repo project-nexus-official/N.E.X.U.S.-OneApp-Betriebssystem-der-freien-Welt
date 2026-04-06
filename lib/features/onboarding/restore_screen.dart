@@ -4,6 +4,7 @@ import 'package:nexus_oneapp/core/identity/bip39_wordlist.dart';
 import 'package:nexus_oneapp/core/identity/identity_service.dart';
 import 'package:nexus_oneapp/main.dart' show initServicesAfterIdentity;
 import 'package:nexus_oneapp/shared/theme/app_theme.dart';
+import 'package:nexus_oneapp/shared/widgets/help_icon.dart';
 
 /// Screen to restore an existing NEXUS identity from a 12-word seed phrase.
 class RestoreScreen extends StatefulWidget {
@@ -151,11 +152,18 @@ class _RestoreScreenState extends State<RestoreScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Gib die Wörter in der richtigen Reihenfolge ein.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    color: AppColors.onDark, fontSize: 13, height: 1.5),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text(
+                    'Gib die Wörter in der richtigen Reihenfolge ein.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        color: AppColors.onDark, fontSize: 13, height: 1.5),
+                  ),
+                  const SizedBox(width: 4),
+                  const HelpIcon(contextId: 'seed_phrase', size: 16),
+                ],
               ),
               const SizedBox(height: 24),
               // 2-column × 6-row grid of word inputs

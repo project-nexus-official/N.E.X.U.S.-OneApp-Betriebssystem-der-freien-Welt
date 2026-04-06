@@ -196,8 +196,10 @@ class _CellInfoScreenState extends State<CellInfoScreen> {
     // Perform deletion.
     final cellName = _cell.name;
     final nostrTag = _cell.nostrTag;
-    await CellService.instance.deleteCell(_cell.id);
+    final cellId = _cell.id;
+    await CellService.instance.deleteCell(cellId);
     if (mounted) {
+      await context.read<ChatProvider>().deleteCellChannels(cellId);
       context.read<ChatProvider>().publishNostrCellDeletion(nostrTag, cellName);
     }
 
@@ -270,8 +272,12 @@ class _CellInfoScreenState extends State<CellInfoScreen> {
       if (confirmed != true || !mounted) return;
 
       await CellService.instance.transferFounderRole(_cell.id, successor.did);
-      await CellService.instance.leaveCell(_cell.id);
-      if (mounted) Navigator.of(context).pop();
+      final cellId = _cell.id;
+      await CellService.instance.leaveCell(cellId);
+      if (mounted) {
+        await context.read<ChatProvider>().leaveCellChannels(cellId);
+        Navigator.of(context).pop();
+      }
       return;
     }
 
@@ -298,8 +304,12 @@ class _CellInfoScreenState extends State<CellInfoScreen> {
       ),
     );
     if (confirmed == true && mounted) {
-      await CellService.instance.leaveCell(_cell.id);
-      if (mounted) Navigator.of(context).pop();
+      final cellId = _cell.id;
+      await CellService.instance.leaveCell(cellId);
+      if (mounted) {
+        await context.read<ChatProvider>().leaveCellChannels(cellId);
+        Navigator.of(context).pop();
+      }
     }
   }
 

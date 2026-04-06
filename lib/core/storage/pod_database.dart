@@ -55,7 +55,7 @@ class PodDatabase {
 
     _db = await openDatabase(
       dbPath,
-      version: 10,
+      version: 11,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -164,12 +164,14 @@ class PodDatabase {
     ''');
 
     // Group channels: named multi-user channels (e.g. #teneriffa)
+    // cell_id: when non-null, this is a cell-internal channel hidden from general list.
     await db.execute('''
       CREATE TABLE group_channels (
         id         TEXT PRIMARY KEY,
         enc        TEXT NOT NULL,
         created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
+        updated_at INTEGER NOT NULL,
+        cell_id    TEXT
       )
     ''');
 
@@ -449,6 +451,12 @@ class PodDatabase {
           status     TEXT NOT NULL DEFAULT 'draft'
         )
       ''');
+    }
+    if (oldVersion < 11) {
+      // Add cell_id column to group_channels for cell-internal channels.
+      await db.execute(
+        'ALTER TABLE group_channels ADD COLUMN cell_id TEXT',
+      );
     }
   }
 
@@ -782,14 +790,36 @@ class PodDatabase {
         'enc': enc,
         'created_at': now,
         'updated_at': now,
+        // Store cell_id as a plain column for efficient querying.
+        'cell_id': data['cellId'] as String?,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
 
+  /// Returns all channels (public + cell-internal).
   Future<List<Map<String, dynamic>>> listChannels() async {
     final rows =
         await _database.query('group_channels', orderBy: 'updated_at DESC');
+    final result = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      try {
+        final plain =
+            await PodEncryption.decrypt(row['enc'] as String, _key);
+        result.add(jsonDecode(plain) as Map<String, dynamic>);
+      } catch (_) {}
+    }
+    return result;
+  }
+
+  /// Returns only the cell-internal channels for [cellId].
+  Future<List<Map<String, dynamic>>> listCellChannels(String cellId) async {
+    final rows = await _database.query(
+      'group_channels',
+      where: 'cell_id = ?',
+      whereArgs: [cellId],
+      orderBy: 'updated_at DESC',
+    );
     final result = <Map<String, dynamic>>[];
     for (final row in rows) {
       try {
@@ -806,6 +836,15 @@ class PodDatabase {
       'group_channels',
       where: 'id = ?',
       whereArgs: [id],
+    );
+  }
+
+  /// Deletes all cell-internal channels for [cellId].
+  Future<void> deleteCellChannels(String cellId) async {
+    await _database.delete(
+      'group_channels',
+      where: 'cell_id = ?',
+      whereArgs: [cellId],
     );
   }
 

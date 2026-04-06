@@ -94,9 +94,16 @@ class _ConversationsScreenState extends State<ConversationsScreen>
       _conversations.where((c) => !c.isGroup).toList();
 
   /// Conversations shown in the "Kanäle" tab: group channels only,
+  /// excluding cell-internal channels (#cell-*-bulletin / #cell-*-discussion).
   /// #nexus-global pinned first, then by lastMessageTime desc.
   List<Conversation> get _channelConversations {
-    final channels = _conversations.where((c) => c.isGroup).toList();
+    final channels = _conversations.where((c) {
+      if (!c.isGroup) return false;
+      // Hide channels that belong to a cell (not for general Kanäle list).
+      final ch = GroupChannelService.instance.findByName(c.id);
+      if (ch?.cellId != null) return false;
+      return true;
+    }).toList();
     channels.sort((a, b) {
       if (a.id == '#nexus-global') return -1;
       if (b.id == '#nexus-global') return 1;

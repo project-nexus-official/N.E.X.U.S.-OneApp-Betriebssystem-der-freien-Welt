@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../services/contact_request_service.dart';
 import '../../shared/theme/app_theme.dart';
+import '../../shared/widgets/help_icon.dart';
 import '../../shared/widgets/peer_avatar.dart';
 import '../chat/chat_provider.dart';
 import 'contact_request.dart';
@@ -68,7 +69,13 @@ class _ContactRequestsScreenState extends State<ContactRequestsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Kontaktanfragen')),
+      appBar: AppBar(
+        title: const Text('Kontaktanfragen'),
+        actions: const [
+          HelpIcon(contextId: 'contact_request'),
+          SizedBox(width: 8),
+        ],
+      ),
       body: _pending.isEmpty
           ? _EmptyState()
           : ListView.builder(
@@ -91,16 +98,25 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.person_add_alt_1, color: Colors.grey, size: 56),
-          SizedBox(height: 16),
-          Text(
-            'Keine Kontaktanfragen',
-            style: TextStyle(color: Colors.grey, fontSize: 16),
-          ),
-        ],
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.person_add_alt_1, color: Colors.grey, size: 56),
+            SizedBox(height: 16),
+            Text(
+              'Keine offenen Anfragen',
+              style: TextStyle(color: Colors.grey, fontSize: 16),
+            ),
+            SizedBox(height: 8),
+            Text(
+              'Wenn dir jemand eine Kontaktanfrage schickt, erscheint sie hier.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey, fontSize: 13, height: 1.5),
+            ),
+          ],
+        ),
       ),
     );
   }

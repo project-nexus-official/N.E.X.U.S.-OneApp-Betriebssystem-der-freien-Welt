@@ -26,6 +26,14 @@ class GroupChannelService {
 
   List<GroupChannel> get joinedChannels => List.unmodifiable(_joined);
 
+  /// Joined channels that are NOT cell-internal (shown in the Kanäle tab).
+  List<GroupChannel> get joinedPublicChannels =>
+      _joined.where((c) => c.cellId == null).toList();
+
+  /// Returns cell-internal channels for the given [cellId].
+  List<GroupChannel> cellChannelsFor(String cellId) =>
+      _joined.where((c) => c.cellId == cellId).toList();
+
   /// Returns joined + newly discovered channels (deduped by name).
   List<GroupChannel> get allDiscovered {
     final joined = {for (final c in _joined) c.name};

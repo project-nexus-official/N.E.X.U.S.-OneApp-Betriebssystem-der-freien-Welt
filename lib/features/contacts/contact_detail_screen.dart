@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../features/chat/chat_provider.dart';
 import '../../features/chat/conversation_screen.dart';
+import '../../shared/widgets/help_icon.dart';
 
 import 'screens/key_verification_screen.dart';
 import 'widgets/trust_badge.dart';
@@ -388,7 +389,7 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
           const SizedBox(height: 8),
 
           // ── Trust level ──────────────────────────────────────────────────
-          _SectionHeader('VERTRAUENSSTUFE'),
+          _SectionHeader('VERTRAUENSSTUFE', helpContextId: 'trust_levels'),
           _InfoCard(
             children: [
               ListTile(
@@ -518,7 +519,7 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
           const SizedBox(height: 8),
 
           // ── Visible profile fields ───────────────────────────────────────
-          _SectionHeader('PROFILINFOS'),
+          _SectionHeader('PROFILINFOS', helpContextId: 'selective_disclosure'),
           _ProfileFieldsCard(contact: _contact),
 
           const SizedBox(height: 8),
@@ -626,21 +627,28 @@ class _ContactDetailScreenState extends State<ContactDetailScreen> {
 // ── Helper widgets ────────────────────────────────────────────────────────────
 
 class _SectionHeader extends StatelessWidget {
-  const _SectionHeader(this.label);
+  const _SectionHeader(this.label, {this.helpContextId});
   final String label;
+  final String? helpContextId;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: AppColors.gold.withValues(alpha: 0.7),
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 1.4,
-        ),
+      child: Row(
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: AppColors.gold.withValues(alpha: 0.7),
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.4,
+            ),
+          ),
+          if (helpContextId != null)
+            HelpIcon(contextId: helpContextId!, size: 14),
+        ],
       ),
     );
   }

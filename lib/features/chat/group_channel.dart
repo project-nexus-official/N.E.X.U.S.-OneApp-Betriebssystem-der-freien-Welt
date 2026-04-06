@@ -35,6 +35,10 @@ class GroupChannel {
   /// DIDs of members who have been granted access (admin always first).
   List<String> members;
 
+  /// If non-null, this channel is internal to a cell and should NOT appear
+  /// in the general Kanäle list. Only shown within [CellScreen].
+  final String? cellId;
+
   GroupChannel({
     required this.id,
     required this.name,
@@ -48,6 +52,7 @@ class GroupChannel {
     this.joinedAt,
     this.channelMode = ChannelMode.discussion,
     List<String>? members,
+    this.cellId,
   }) : members = members ?? [];
 
   /// The conversation_id used to store messages for this channel.
@@ -63,6 +68,7 @@ class GroupChannel {
     bool isPublic = true,
     bool isDiscoverable = true,
     ChannelMode channelMode = ChannelMode.discussion,
+    String? cellId,
   }) {
     final normalised = normaliseName(name);
     return GroupChannel(
@@ -78,6 +84,7 @@ class GroupChannel {
       joinedAt: DateTime.now().toUtc(),
       channelMode: channelMode,
       members: [createdBy],
+      cellId: cellId,
     );
   }
 
@@ -91,6 +98,7 @@ class GroupChannel {
     DateTime? joinedAt,
     ChannelMode? channelMode,
     List<String>? members,
+    String? cellId,
   }) {
     final newName = name ?? this.name;
     return GroupChannel(
@@ -106,6 +114,7 @@ class GroupChannel {
       joinedAt: joinedAt ?? this.joinedAt,
       channelMode: channelMode ?? this.channelMode,
       members: members ?? List.from(this.members),
+      cellId: cellId ?? this.cellId,
     );
   }
 
@@ -157,6 +166,7 @@ class GroupChannel {
         if (joinedAt != null) 'joinedAt': joinedAt!.millisecondsSinceEpoch,
         'channelMode': channelMode.value,
         if (members.isNotEmpty) 'members': members,
+        if (cellId != null) 'cellId': cellId,
       };
 
   factory GroupChannel.fromJson(Map<String, dynamic> json) => GroupChannel(
@@ -184,6 +194,7 @@ class GroupChannel {
                 ?.map((e) => e as String)
                 .toList() ??
             [],
+        cellId: json['cellId'] as String?,
       );
 
   @override

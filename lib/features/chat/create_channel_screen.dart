@@ -6,6 +6,7 @@ import '../../core/roles/permission_helper.dart';
 import '../../core/roles/role_enums.dart';
 import '../../services/role_service.dart';
 import '../../shared/theme/app_theme.dart';
+import '../../shared/widgets/help_icon.dart';
 import 'chat_provider.dart';
 import 'group_channel.dart';
 import 'group_channel_service.dart';
@@ -147,6 +148,21 @@ class _CreateChannelScreenState extends State<CreateChannelScreen> {
             ),
             const SizedBox(height: 24),
             // Zugangstyp selector.
+            Row(
+              children: [
+                Text(
+                  'Zugangstyp',
+                  style: TextStyle(
+                    color: Colors.grey[500],
+                    fontSize: 11,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                const HelpIcon(contextId: 'channel_privacy', size: 14),
+              ],
+            ),
+            const SizedBox(height: 6),
             Container(
               decoration: BoxDecoration(
                 color: AppColors.surfaceVariant,
@@ -244,10 +260,16 @@ class _CreateChannelScreenState extends State<CreateChannelScreen> {
                       children: [
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-                          child: Text(
-                            'Kanal-Modus',
-                            style: TextStyle(
-                                color: Colors.grey[500], fontSize: 11),
+                          child: Row(
+                            children: [
+                              Text(
+                                'Kanal-Modus',
+                                style: TextStyle(
+                                    color: Colors.grey[500], fontSize: 11),
+                              ),
+                              const SizedBox(width: 4),
+                              const HelpIcon(contextId: 'channel_types', size: 14),
+                            ],
                           ),
                         ),
                         _VisibilityOption(

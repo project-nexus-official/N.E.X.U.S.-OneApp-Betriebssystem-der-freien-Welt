@@ -9,6 +9,7 @@ import '../../core/crypto/encryption_keys.dart';
 import '../../core/identity/identity_service.dart';
 import '../../services/invite_service.dart';
 import '../../shared/theme/app_theme.dart';
+import '../../shared/widgets/help_icon.dart';
 import '../chat/chat_provider.dart';
 
 /// Full-screen invite hub: generate invite codes, share them, and view sent
@@ -91,6 +92,10 @@ class _InviteScreenState extends State<InviteScreen> {
         title: const Text('Freunde einladen'),
         backgroundColor: AppColors.deepBlue,
         foregroundColor: AppColors.gold,
+        actions: const [
+          HelpIcon(contextId: 'invite_code'),
+          SizedBox(width: 8),
+        ],
       ),
       body: SafeArea(
         child: _generating

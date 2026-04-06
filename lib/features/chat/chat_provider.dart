@@ -32,6 +32,7 @@ import '../../services/contact_request_service.dart';
 import '../../services/notification_service.dart';
 import '../../services/notification_settings.dart';
 import '../../shared/widgets/notification_banner.dart';
+import '../../core/roles/role_enums.dart';
 import 'channel_access_service.dart';
 import 'conversation_service.dart';
 import 'group_channel.dart';
@@ -250,12 +251,139 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
         }
       });
 
+      // Retrofit existing cells that don't yet have internal channels.
+      await _retrofitCellChannels(myDid);
+
+      // Wire up callback so new cell memberships auto-create channels.
+      CellService.instance.onMembershipConfirmed = (cell, did) =>
+          subscribeToCellChannels(cell, did);
+
+      // Wire up callback so approved members get a welcome post.
+      CellService.instance.onMemberApproved =
+          (cellId, pseudonym) async {
+        final msg = '$pseudonym ist der Zelle beigetreten! 🌱';
+        debugPrint('[CELL] Welcome message posted in discussion: $pseudonym');
+        await postCellSystemMessage(cellId, msg);
+      };
+
       // Republish all cells where the local user is FOUNDER so that other
       // devices can discover them. We delay by 3 s to let relays connect first.
       Future.delayed(const Duration(seconds: 3), _republishMyCells);
     } catch (e) {
       debugPrint('[CHAT] Channel init failed: $e');
     }
+  }
+
+  /// Creates Pinnwand + Diskussion channels for [cell] if they don't exist yet.
+  /// Subscribes to their Nostr tags and posts a welcome message in Diskussion.
+  Future<void> createCellInternalChannels(Cell cell, String myDid) async {
+    final existing = GroupChannelService.instance.cellChannelsFor(cell.id);
+    if (existing.length >= 2) {
+      debugPrint('[CELL] Cell ${cell.id} already has internal channels – skipping');
+      return;
+    }
+    debugPrint('[CELL] Creating cell internal channels for cellId: ${cell.id}');
+
+    // Bulletin (Pinnwand) – announcement mode, only founder/mod can post.
+    final bulletinName = '#cell-${cell.id}-bulletin';
+    if (!GroupChannelService.instance.isJoined(bulletinName)) {
+      final bulletin = GroupChannel.create(
+        name: bulletinName,
+        description: 'Pinnwand von ${cell.name}',
+        createdBy: myDid,
+        isPublic: false,
+        isDiscoverable: false,
+        channelMode: ChannelMode.announcement,
+        cellId: cell.id,
+      );
+      await GroupChannelService.instance.createChannel(bulletin);
+      _nostrTransport?.subscribeToChannel(bulletin.nostrTag);
+      debugPrint('[CELL] Pinnwand channel created: ${bulletin.id}');
+    }
+
+    // Discussion (Diskussion) – all members can post.
+    final discussionName = '#cell-${cell.id}-discussion';
+    if (!GroupChannelService.instance.isJoined(discussionName)) {
+      final discussion = GroupChannel.create(
+        name: discussionName,
+        description: 'Diskussion von ${cell.name}',
+        createdBy: myDid,
+        isPublic: false,
+        isDiscoverable: false,
+        channelMode: ChannelMode.discussion,
+        cellId: cell.id,
+      );
+      await GroupChannelService.instance.createChannel(discussion);
+      _nostrTransport?.subscribeToChannel(discussion.nostrTag);
+      debugPrint('[CELL] Discussion channel created: ${discussion.id}');
+    }
+  }
+
+  /// Subscribes to cell-internal channels for a cell the local user just joined.
+  Future<void> subscribeToCellChannels(Cell cell, String myDid) async {
+    final channels = GroupChannelService.instance.cellChannelsFor(cell.id);
+    if (channels.isEmpty) {
+      // Channels may not exist locally yet — create/subscribe from cellId convention.
+      await createCellInternalChannels(cell, myDid);
+      return;
+    }
+    for (final ch in channels) {
+      if (!GroupChannelService.instance.isJoined(ch.name)) {
+        await GroupChannelService.instance.joinChannel(ch);
+      }
+      _nostrTransport?.subscribeToChannel(ch.nostrTag);
+      debugPrint('[CELL] Member joined, subscribing to cell channels: ${cell.id}');
+    }
+  }
+
+  /// Posts a system message in the cell's discussion channel.
+  Future<void> postCellSystemMessage(String cellId, String text) async {
+    final channels = GroupChannelService.instance.cellChannelsFor(cellId);
+    final discussion = channels.where(
+      (c) => c.name.endsWith('-discussion'),
+    ).firstOrNull;
+    if (discussion == null) return;
+    await sendToChannel(discussion.name, text);
+  }
+
+  /// Checks all joined cells and creates internal channels for those missing them.
+  Future<void> _retrofitCellChannels(String myDid) async {
+    for (final cell in CellService.instance.myCells) {
+      final existing = GroupChannelService.instance.cellChannelsFor(cell.id);
+      if (existing.length < 2) {
+        debugPrint('[CELL] Retrofitting existing cell: ${cell.id}');
+        await createCellInternalChannels(cell, myDid);
+      }
+    }
+  }
+
+  /// Leaves cell-internal channels when the local user leaves a cell.
+  Future<void> leaveCellChannels(String cellId) async {
+    // Post farewell message before leaving.
+    final pseudonym =
+        IdentityService.instance.currentIdentity?.pseudonym ?? 'Jemand';
+    await postCellSystemMessage(cellId, '$pseudonym hat die Zelle verlassen.');
+
+    final channels = GroupChannelService.instance.cellChannelsFor(cellId);
+    for (final ch in channels) {
+      try {
+        await GroupChannelService.instance.leaveChannel(ch.name);
+      } catch (_) {}
+    }
+    debugPrint('[CELL] Left cell channels for $cellId');
+  }
+
+  /// Deletes cell-internal channels when a cell is dissolved.
+  Future<void> deleteCellChannels(String cellId) async {
+    await PodDatabase.instance.deleteCellChannels(cellId);
+    // Remove from in-memory joined list.
+    final channels = GroupChannelService.instance.cellChannelsFor(cellId);
+    for (final ch in channels) {
+      try {
+        await GroupChannelService.instance.leaveChannel(ch.name);
+      } catch (_) {}
+    }
+    debugPrint('[CELL] Deleted cell channels for $cellId');
   }
 
   void _onChannelAnnounced(Map<String, dynamic> data) {

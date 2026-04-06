@@ -14,7 +14,7 @@ import 'cell.dart';
 import 'cell_member.dart';
 import 'cell_service.dart';
 import 'create_cell_screen.dart';
-import 'cell_info_screen.dart';
+import 'cell_screen.dart';
 
 /// The "Meine Zelle" hub – entry point to the cell system.
 ///
@@ -84,7 +84,7 @@ class _CellHubScreenState extends State<CellHubScreen> {
 
   void _openCell(Cell cell) {
     Navigator.of(context, rootNavigator: true).push(
-      MaterialPageRoute<void>(builder: (_) => CellInfoScreen(cell: cell)),
+      MaterialPageRoute<void>(builder: (_) => CellScreen(cell: cell)),
     );
   }
 
@@ -129,7 +129,7 @@ class _CellHubScreenState extends State<CellHubScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Meine Zelle'),
+        title: const Text('Meine Zellen'),
         backgroundColor: AppColors.deepBlue,
       ),
       backgroundColor: AppColors.deepBlue,
@@ -232,9 +232,9 @@ class _EmptyState extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Eine Zelle ist eine Gemeinschaft von bis zu 150 Menschen. '
-                  'Lokal in deiner Nachbarschaft oder thematisch mit '
-                  'Gleichgesinnten weltweit.',
+                  'Du bist noch in keiner Zelle. Eine Zelle ist deine lokale '
+                  'oder thematische Gemeinschaft — wie ein digitales Dorf. '
+                  'Entdecke Zellen in deiner Nähe oder gründe eine eigene!',
                   style: TextStyle(
                     color: AppColors.onDark.withValues(alpha: 0.7),
                     height: 1.5,

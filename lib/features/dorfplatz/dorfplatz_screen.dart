@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../core/contacts/contact_service.dart';
 import '../../core/identity/identity_service.dart';
 import '../../shared/theme/app_theme.dart';
+import '../../shared/widgets/help_icon.dart';
 import 'create_post_screen.dart';
 import 'feed_post.dart';
 import 'feed_post_card.dart';
@@ -317,6 +318,10 @@ class _DorfplatzScreenState extends State<DorfplatzScreen>
     return Scaffold(
       appBar: AppBar(
         title: const Text('Dorfplatz'),
+        actions: const [
+          HelpIcon(contextId: 'dorfplatz_general'),
+          SizedBox(width: 8),
+        ],
         bottom: TabBar(
           controller: _tabCtrl,
           indicatorColor: AppColors.gold,
@@ -337,7 +342,9 @@ class _DorfplatzScreenState extends State<DorfplatzScreen>
                 _FeedList(
                   key: const PageStorageKey('feed_contacts'),
                   posts: _posts,
-                  emptyMessage: 'Noch keine Beiträge von deinen Kontakten.',
+                  emptyMessage:
+                      'Noch keine Beiträge. Der Dorfplatz ist der Treffpunkt der Menschheitsfamilie — teile Gedanken, Neuigkeiten oder Bilder.',
+                  emptyHelpContextId: 'dorfplatz_general',
                   onRefresh: _refresh,
                   onLoadMore: _loadMore,
                   onTap: _openDetail,
@@ -357,6 +364,7 @@ class _DorfplatzScreenState extends State<DorfplatzScreen>
                   ),
                   emptyMessage:
                       'Noch keine öffentlichen Beiträge im Netzwerk.',
+                  emptyHelpContextId: 'dorfplatz_general',
                   onRefresh: _refresh,
                   onLoadMore: _loadMore,
                   onTap: _openDetail,
@@ -380,6 +388,7 @@ class _DorfplatzScreenState extends State<DorfplatzScreen>
 class _FeedList extends StatefulWidget {
   final List<FeedPost> posts;
   final String emptyMessage;
+  final String? emptyHelpContextId;
   final Future<void> Function() onRefresh;
   final Future<void> Function() onLoadMore;
   final void Function(FeedPost) onTap;
@@ -390,6 +399,7 @@ class _FeedList extends StatefulWidget {
     super.key,
     required this.posts,
     required this.emptyMessage,
+    this.emptyHelpContextId,
     required this.onRefresh,
     required this.onLoadMore,
     required this.onTap,
@@ -493,12 +503,26 @@ class _FeedListState extends State<_FeedList>
           child: SizedBox(
             height: 300,
             child: Center(
-              child: Text(
-                widget.emptyMessage,
-                style: TextStyle(
-                  color: AppColors.onDark.withValues(alpha: 0.5),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      widget.emptyMessage,
+                      style: TextStyle(
+                        color: AppColors.onDark.withValues(alpha: 0.5),
+                        height: 1.5,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    if (widget.emptyHelpContextId != null) ...[
+                      const SizedBox(height: 12),
+                      HelpIcon(
+                          contextId: widget.emptyHelpContextId!, size: 20),
+                    ],
+                  ],
                 ),
-                textAlign: TextAlign.center,
               ),
             ),
           ),

@@ -6,6 +6,7 @@ import '../../core/identity/identity_service.dart';
 import '../../core/roles/permission_helper.dart';
 import '../../core/utils/geohash.dart';
 import '../../shared/theme/app_theme.dart';
+import '../../shared/widgets/help_icon.dart';
 import '../chat/chat_provider.dart';
 import 'cell.dart';
 import 'cell_service.dart';
@@ -139,6 +140,11 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
       );
 
       await CellService.instance.createCell(cell);
+
+      // Create internal Pinnwand + Diskussion channels for the new cell.
+      if (mounted) {
+        await context.read<ChatProvider>().createCellInternalChannels(cell, myDid);
+      }
 
       // Publish Nostr announcement so other nodes can discover this cell.
       if (mounted) {
@@ -313,7 +319,7 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
             ],
 
             // Join policy
-            _SectionLabel('Beitrittspolitik'),
+            _SectionLabel('Beitrittspolitik', helpContextId: 'cell_join_policy'),
             _RadioOption<JoinPolicy>(
               label: 'Beitritt anfragen (Standard)',
               subtitle: 'Interessierte können eine Anfrage schicken',
@@ -331,7 +337,7 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
             const SizedBox(height: 16),
 
             // Min trust level
-            _SectionLabel('Mindest-Vertrauensstufe'),
+            _SectionLabel('Mindest-Vertrauensstufe', helpContextId: 'cell_trust_level'),
             _RadioOption<MinTrustLevel>(
               label: 'Keine Einschränkung (Standard)',
               value: MinTrustLevel.none,
@@ -446,18 +452,25 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
 
 class _SectionLabel extends StatelessWidget {
   final String text;
-  const _SectionLabel(this.text);
+  final String? helpContextId;
+  const _SectionLabel(this.text, {this.helpContextId});
 
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
-        child: Text(
-          text,
-          style: TextStyle(
-            color: AppColors.onDark.withValues(alpha: 0.7),
-            fontWeight: FontWeight.w600,
-            fontSize: 13,
-          ),
+        child: Row(
+          children: [
+            Text(
+              text,
+              style: TextStyle(
+                color: AppColors.onDark.withValues(alpha: 0.7),
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
+            if (helpContextId != null)
+              HelpIcon(contextId: helpContextId!, size: 15),
+          ],
         ),
       );
 }

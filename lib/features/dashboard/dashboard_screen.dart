@@ -407,26 +407,26 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildCellCard(BuildContext context) {
-    final myCells = CellService.instance.myCells;
+    final myCells = CellService.instance.myCells
+        .where((c) => CellService.instance.isMember(c.id))
+        .toList();
     final isInCell = myCells.isNotEmpty;
 
     final String subtitle;
     if (!isInCell) {
-      subtitle = 'Finde deine Gemeinschaft';
-    } else if (myCells.length == 1) {
-      final cell = myCells.first;
-      final memberCount = CellService.instance.membersOf(cell.id).length;
-      subtitle = '$memberCount Mitglied${memberCount == 1 ? '' : 'er'}';
+      subtitle = 'Noch keine Zelle — Entdecke Zellen in deiner Nähe';
     } else {
-      subtitle = '${myCells.length} Zellen';
+      final totalMembers = myCells.fold<int>(
+        0,
+        (sum, c) => sum + CellService.instance.membersOf(c.id).length,
+      );
+      subtitle = '${myCells.length} Zelle${myCells.length == 1 ? '' : 'n'} · $totalMembers Mitglied${totalMembers == 1 ? '' : 'er'}';
     }
 
     return _FeatureCard(
       key: const Key('cell_card'),
       icon: Icons.groups_outlined,
-      title: isInCell
-          ? (myCells.length == 1 ? myCells.first.name : 'Meine Zellen')
-          : 'Meine Zelle',
+      title: 'Meine Zellen',
       subtitle: subtitle,
       onTap: () => Navigator.of(context, rootNavigator: true).push(
         MaterialPageRoute<void>(builder: (_) => const CellHubScreen()),

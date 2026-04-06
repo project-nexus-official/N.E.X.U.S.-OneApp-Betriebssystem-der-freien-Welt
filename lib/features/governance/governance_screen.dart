@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../shared/theme/app_theme.dart';
+import '../../shared/widgets/help_icon.dart';
 import 'cell.dart';
 import 'cell_service.dart';
 import 'cell_hub_screen.dart';
@@ -85,6 +86,10 @@ class _GovernanceScreenState extends State<GovernanceScreen>
       appBar: AppBar(
         title: const Text('Agora — Politik & Demokratie'),
         backgroundColor: AppColors.deepBlue,
+        actions: const [
+          HelpIcon(contextId: 'agora_general'),
+          SizedBox(width: 8),
+        ],
         bottom: myCells.isNotEmpty
             ? TabBar(
                 controller: _tabCtrl,

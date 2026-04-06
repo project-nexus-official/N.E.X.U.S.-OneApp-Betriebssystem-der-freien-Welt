@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../core/identity/identity_service.dart';
 import '../../shared/theme/app_theme.dart';
+import '../../shared/widgets/help_icon.dart';
 import '../../shared/widgets/identicon.dart';
 import 'feed_post.dart';
 import 'feed_service.dart';
@@ -432,14 +433,19 @@ class _VisibilitySelector extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'Sichtbarkeit',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.gold,
-                ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: const [
+                  Text(
+                    'Sichtbarkeit',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.gold,
+                    ),
+                  ),
+                  HelpIcon(contextId: 'dorfplatz_visibility', size: 15),
+                ],
               ),
             ),
             for (final v in FeedVisibility.values)
