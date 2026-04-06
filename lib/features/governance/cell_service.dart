@@ -113,6 +113,17 @@ class CellService {
         ..clear()
         ..addAll(outRows.map(CellJoinRequest.fromJson));
 
+      // Re-register nostrPubkey mappings from loaded inbound requests so
+      // that founder can "Nachfragen" even after an app restart.
+      for (final cellRequests in _requests.values) {
+        for (final req in cellRequests) {
+          final pubkey = req.requesterNostrPubkey;
+          if (pubkey != null && pubkey.isNotEmpty && onRegisterNostrMapping != null) {
+            onRegisterNostrMapping!(req.requesterDid, pubkey);
+          }
+        }
+      }
+
       debugPrint('[CELLS] Loaded ${_myCells.length} cells');
       _notify();
     } catch (e) {
@@ -191,20 +202,62 @@ class CellService {
 
   // ── Membership management ──────────────────────────────────────────────────
 
+  /// Withdraws a pending join request for [cellId].
+  ///
+  /// Deletes the local record and publishes a Kind-31003 withdraw event so
+  /// the founder's device removes the pending request too.
+  Future<void> withdrawJoinRequest(String cellId) async {
+    final req = _myRequests.where((r) => r.cellId == cellId && r.isPending).firstOrNull;
+    if (req == null) return;
+
+    _myRequests.removeWhere((r) => r.id == req.id);
+    await PodDatabase.instance.deleteCellJoinRequest(req.id);
+    _notify();
+
+    if (onPublishJoinRequest != null) {
+      onPublishJoinRequest!({...req.toJson(), 'action': 'withdraw'});
+      print('[JOIN] Request withdrawn by applicant: ${req.requesterPseudonym} for cell: $cellId');
+      print('[JOIN] Withdraw event sent to founder');
+    }
+  }
+
+  /// Called on the founder's device when an applicant withdraws their request.
+  Future<void> handleJoinRequestWithdrawn(String requestId, String cellId) async {
+    final reqList = _requests[cellId];
+    if (reqList == null) return;
+    reqList.removeWhere((r) => r.id == requestId);
+    await PodDatabase.instance.deleteCellJoinRequest(requestId);
+    _notify();
+    print('[JOIN] Withdraw received, removing pending request: $requestId');
+  }
+
   /// Sends a join request for [cell] (APPROVAL_REQUIRED policy).
-  Future<void> sendJoinRequest(Cell cell, {String? message}) async {
+  ///
+  /// The request is stored locally and published via Kind-31003 to Nostr
+  /// relays so that the founder receives it even without a contact
+  /// relationship.
+  Future<void> sendJoinRequest(Cell cell,
+      {String? message, String? localNostrPubkeyHex}) async {
     final identity = IdentityService.instance.currentIdentity!;
     final req = CellJoinRequest.create(
       cellId: cell.id,
       requesterDid: identity.did,
       requesterPseudonym: identity.pseudonym,
+      requesterNostrPubkey: localNostrPubkeyHex,
       message: message,
     );
     await PodDatabase.instance.upsertCellJoinRequest(
         req.id, req.cellId, req.toJson(), isSent: true);
     _myRequests.add(req);
     _notify();
-    debugPrint('[CELLS] Sent join request to ${cell.name}');
+
+    // Publish to Nostr so the founder's device receives it.
+    if (onPublishJoinRequest != null) {
+      onPublishJoinRequest!(req.toJson());
+      print('[JOIN] Request sent to cell: ${cell.name} (founder receives via Kind-31003)');
+    } else {
+      debugPrint('[JOIN-DIAG] onPublishJoinRequest is NULL — request NOT sent over network!');
+    }
   }
 
   /// Handles an incoming join request from Nostr (called by ChatProvider).
@@ -277,10 +330,24 @@ class CellService {
 
     _notify();
     debugPrint('[CELLS] Approved request ${req.id} for ${req.requesterPseudonym}');
+    print('[JOIN] Request approved by founder for: ${req.requesterPseudonym}');
+    print('[JOIN] Member added + cell channels subscribed');
+
+    // Send membership confirmation via Kind-31004 so the applicant's device
+    // learns about the approval without a contact relationship.
+    final requesterPubkey = req.requesterNostrPubkey ?? '';
+    if (onPublishMembershipConfirmed != null && requesterPubkey.isNotEmpty) {
+      final cell = _myCells.firstWhere((c) => c.id == req.cellId);
+      onPublishMembershipConfirmed!(cell.toJson(), newMember.toJson(), requesterPubkey);
+      print('[JOIN] Confirmation sent to applicant: ${requesterPubkey.substring(0, 8)}…');
+    } else if (requesterPubkey.isEmpty) {
+      debugPrint('[JOIN-DIAG] requesterNostrPubkey unknown — cannot send Kind-31004 confirmation');
+    }
 
     // Post welcome message in discussion channel (fire-and-forget).
     if (onMemberApproved != null) {
       onMemberApproved!(req.cellId, req.requesterPseudonym);
+      print('[JOIN] Welcome message posted');
     }
   }
 
@@ -313,6 +380,9 @@ class CellService {
     final myDid = IdentityService.instance.currentIdentity!.did;
     await PodDatabase.instance.deleteCellMember(cellId, myDid);
     await PodDatabase.instance.deleteCell(cellId);
+    // Clean up any outgoing pending request for this cell (zombie prevention).
+    _myRequests.removeWhere((r) => r.cellId == cellId);
+    await PodDatabase.instance.deleteCellJoinRequestsByCell(cellId);
     _myCells.removeWhere((c) => c.id == cellId);
     _members.remove(cellId);
     _requests.remove(cellId);
@@ -330,6 +400,9 @@ class CellService {
       await PodDatabase.instance.deleteCellMember(cellId, m.did);
     }
     await PodDatabase.instance.deleteCell(cellId);
+    // Also delete all join requests for this cell from DB (zombie prevention).
+    await PodDatabase.instance.deleteCellJoinRequestsByCell(cellId);
+    print('[JOIN] Cleaning up zombie requests for deleted cell: $cellId');
     _myCells.removeWhere((c) => c.id == cellId);
     _discovered.removeWhere((c) => c.id == cellId);
     _members.remove(cellId);
@@ -444,8 +517,25 @@ class CellService {
   ///
   /// Parameters: cellId, newMemberPseudonym.
   /// Set by [ChatProvider] to post a welcome message in the discussion channel.
-  Future<void> Function(String cellId, String pseudonym)?
-      onMemberApproved;
+  Future<void> Function(String cellId, String pseudonym)? onMemberApproved;
+
+  /// Publishes a Kind-31003 cell join request to Nostr relays.
+  /// Set by [ChatProvider] after the transport is ready.
+  void Function(Map<String, dynamic> reqJson)? onPublishJoinRequest;
+
+  /// Registers a DID → Nostr pubkey mapping in the transport layer.
+  /// Set by [ChatProvider] so CellService can restore mappings on load.
+  void Function(String did, String nostrPubkeyHex)? onRegisterNostrMapping;
+
+  /// Publishes a Kind-31004 membership confirmation to Nostr relays.
+  /// [requesterNostrPubkeyHex] is the applicant's Nostr pubkey so the relay
+  /// can route the event even without a direct DM channel.
+  /// Set by [ChatProvider] after the transport is ready.
+  void Function(
+    Map<String, dynamic> cellJson,
+    Map<String, dynamic> memberJson,
+    String requesterNostrPubkeyHex,
+  )? onPublishMembershipConfirmed;
 
   void _notify() => _streamCtrl.add(null);
 }

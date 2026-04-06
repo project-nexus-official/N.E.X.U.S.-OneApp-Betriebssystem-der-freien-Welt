@@ -15,6 +15,12 @@ class CellJoinRequest {
   final String cellId;
   final String requesterDid;
   final String requesterPseudonym;
+
+  /// The requester's Nostr public key (hex). Included so the founder can
+  /// send the Kind-31004 membership-confirmation event back without needing
+  /// a contact relationship.
+  final String? requesterNostrPubkey;
+
   final String? message;
   final DateTime requestedAt;
   final JoinRequestStatus status;
@@ -26,6 +32,7 @@ class CellJoinRequest {
     required this.cellId,
     required this.requesterDid,
     required this.requesterPseudonym,
+    this.requesterNostrPubkey,
     this.message,
     required this.requestedAt,
     this.status = JoinRequestStatus.pending,
@@ -37,6 +44,7 @@ class CellJoinRequest {
     required String cellId,
     required String requesterDid,
     required String requesterPseudonym,
+    String? requesterNostrPubkey,
     String? message,
   }) =>
       CellJoinRequest(
@@ -44,6 +52,7 @@ class CellJoinRequest {
         cellId: cellId,
         requesterDid: requesterDid,
         requesterPseudonym: requesterPseudonym,
+        requesterNostrPubkey: requesterNostrPubkey,
         message: message,
         requestedAt: DateTime.now().toUtc(),
       );
@@ -55,6 +64,7 @@ class CellJoinRequest {
         'cellId': cellId,
         'requesterDid': requesterDid,
         'requesterPseudonym': requesterPseudonym,
+        if (requesterNostrPubkey != null) 'requesterNostrPubkey': requesterNostrPubkey,
         if (message != null) 'message': message,
         'requestedAt': requestedAt.millisecondsSinceEpoch,
         'status': status.name,
@@ -68,6 +78,7 @@ class CellJoinRequest {
         cellId: json['cellId'] as String,
         requesterDid: json['requesterDid'] as String,
         requesterPseudonym: json['requesterPseudonym'] as String? ?? '',
+        requesterNostrPubkey: json['requesterNostrPubkey'] as String?,
         message: json['message'] as String?,
         requestedAt: DateTime.fromMillisecondsSinceEpoch(
             json['requestedAt'] as int,
@@ -93,6 +104,7 @@ class CellJoinRequest {
         cellId: cellId,
         requesterDid: requesterDid,
         requesterPseudonym: requesterPseudonym,
+        requesterNostrPubkey: requesterNostrPubkey,
         message: message,
         requestedAt: requestedAt,
         status: status ?? this.status,

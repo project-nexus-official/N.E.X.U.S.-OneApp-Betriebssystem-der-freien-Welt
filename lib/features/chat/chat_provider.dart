@@ -39,6 +39,8 @@ import 'group_channel.dart';
 import 'group_channel_service.dart';
 import '../dorfplatz/feed_service.dart';
 import '../governance/cell.dart';
+import '../governance/cell_join_request.dart';
+import '../governance/cell_member.dart';
 import '../governance/cell_service.dart';
 import '../../services/invite_service.dart';
 
@@ -102,6 +104,15 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   List<NexusPeer> get peers => _manager.peers;
+
+  /// The local Nostr public key as hex (available after transport start).
+  String? get nostrPubkeyHex => _nostrTransport?.localNostrPubkeyHex;
+
+  /// Registers a DID → Nostr pubkey mapping so DMs can be sent to peers
+  /// who are not yet contacts (e.g. cell-join applicants).
+  void registerPeerNostrPubkey(String did, String nostrPubkeyHex) {
+    _nostrTransport?.registerDidMapping(did, nostrPubkeyHex);
+  }
 
   // Per-conversation cached messages
   final Map<String, List<NexusMessage>> _conversationCache = {};
@@ -187,6 +198,20 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       _nostrTransport!.onFeedComment
           .listen((data) => FeedService.instance.handleIncomingComment(data));
       _nostrTransport!.onFeedReaction.listen(_handleIncomingReaction);
+
+      // Wire CellService to Nostr for join requests and membership confirmations.
+      // These bypass the contact system so strangers can apply to join cells.
+      CellService.instance.onPublishJoinRequest =
+          (reqJson) => _nostrTransport?.publishCellJoinRequest(reqJson);
+      CellService.instance.onPublishMembershipConfirmed =
+          (cellJson, memberJson, pubkeyHex) =>
+              _nostrTransport?.publishCellMembershipConfirmed(
+                  cellJson, memberJson, pubkeyHex);
+      CellService.instance.onRegisterNostrMapping =
+          (did, pubkey) => _nostrTransport?.registerDidMapping(did, pubkey);
+      _nostrTransport!.onCellJoinRequest.listen(_onCellJoinRequest);
+      _nostrTransport!.onCellMembershipConfirmed
+          .listen(_onCellMembershipConfirmed);
 
       // Subscribe to events before starting
       _msgSub = _manager.onMessageReceived.listen((msg) => _onMessageReceived(msg));
@@ -422,6 +447,61 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       CellService.instance.addDiscoveredCell(cell);
     } catch (e) {
       debugPrint('[CHAT] Cell announced parse error: $e');
+    }
+  }
+
+  /// Handles an incoming Kind-31003 cell join request (or withdrawal) from a non-contact.
+  Future<void> _onCellJoinRequest(Map<String, dynamic> data) async {
+    try {
+      final action = data['action'] as String?;
+      final senderPubkey = data['requesterNostrPubkey'] as String?;
+
+      if (action == 'withdraw') {
+        // Applicant withdrew their request — remove from founder's pending list.
+        final requestId = data['id'] as String? ?? '';
+        final cellId = data['cellId'] as String? ?? '';
+        if (requestId.isNotEmpty && cellId.isNotEmpty) {
+          await CellService.instance.handleJoinRequestWithdrawn(requestId, cellId);
+        }
+        return;
+      }
+
+      final req = CellJoinRequest.fromJson(data);
+      final isContact = ContactService.instance.findByDid(req.requesterDid) != null;
+      print('[JOIN] Incoming message from: ${req.requesterDid}');
+      print('[JOIN] Is sender a contact? $isContact');
+      print('[JOIN] Message type: cell_join_request');
+      print('[JOIN] Message filtered/blocked? false');
+      print('[JOIN] Reason for filter: ALLOWED — cell join requests bypass contact check');
+      print('[JOIN] Join request recognized: true');
+
+      // Register the requester's Nostr pubkey so the founder can send
+      // the Kind-31004 reply even without a contact relationship.
+      if (senderPubkey != null && senderPubkey.isNotEmpty) {
+        _nostrTransport?.registerDidMapping(req.requesterDid, senderPubkey);
+      }
+
+      await CellService.instance.handleIncomingJoinRequest(req);
+      print('[JOIN] Join request saved to DB: true');
+    } catch (e) {
+      debugPrint('[CHAT] Cell join request parse error: $e');
+      print('[JOIN] Join request saved to DB: false (parse error: $e)');
+    }
+  }
+
+  /// Handles an incoming Kind-31004 membership confirmation.
+  /// The applicant's device uses this to auto-join the cell.
+  Future<void> _onCellMembershipConfirmed(Map<String, dynamic> data) async {
+    try {
+      final cellJson = data['cell'] as Map<String, dynamic>?;
+      final memberJson = data['member'] as Map<String, dynamic>?;
+      if (cellJson == null || memberJson == null) return;
+      final cell = Cell.fromJson(cellJson);
+      final member = CellMember.fromJson(memberJson);
+      await CellService.instance.handleMembershipConfirmed(cell, member);
+      print('[JOIN] Membership confirmed — cell "${cell.name}" added to My Cells');
+    } catch (e) {
+      debugPrint('[CHAT] Cell membership confirmed parse error: $e');
     }
   }
 

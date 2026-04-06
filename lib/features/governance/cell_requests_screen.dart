@@ -1,9 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/contacts/contact_service.dart';
 import '../../shared/theme/app_theme.dart';
+import '../chat/chat_provider.dart';
+import '../chat/conversation_screen.dart';
 import 'cell_join_request.dart';
 import 'cell_service.dart';
 
@@ -214,6 +217,7 @@ class _RequestCard extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
+              // Ablehnen
               Expanded(
                 child: OutlinedButton(
                   onPressed: () =>
@@ -228,7 +232,24 @@ class _RequestCard extends StatelessWidget {
                   child: const Text('Ablehnen'),
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
+              // Nachfragen — opens a DM without requiring contact status
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _openInquiryChat(context),
+                  icon: const Icon(Icons.chat_bubble_outline, size: 16),
+                  label: const Text('Nachfragen'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.gold,
+                    side: const BorderSide(color: AppColors.gold),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Bestätigen
               Expanded(
                 child: ElevatedButton(
                   onPressed: () =>
@@ -240,12 +261,38 @@ class _RequestCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(8),
                     ),
                   ),
-                  child: const Text('Bestätigen'),
+                  child: const Text('Annehmen'),
                 ),
               ),
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  void _openInquiryChat(BuildContext context) {
+    // Register the requester's Nostr pubkey so DMs are routable even
+    // without a contact relationship.
+    final nostrPubkey = request.requesterNostrPubkey;
+    if (nostrPubkey != null && nostrPubkey.isNotEmpty) {
+      context.read<ChatProvider>().registerPeerNostrPubkey(
+            request.requesterDid,
+            nostrPubkey,
+          );
+    }
+    print('[JOIN] Founder opening chat with applicant: ${request.requesterPseudonym} (no contact required)');
+
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ChangeNotifierProvider.value(
+          value: context.read<ChatProvider>(),
+          child: ConversationScreen(
+            peerDid: request.requesterDid,
+            peerPseudonym: request.requesterPseudonym,
+            bypassContactGate: true,
+          ),
+        ),
       ),
     );
   }

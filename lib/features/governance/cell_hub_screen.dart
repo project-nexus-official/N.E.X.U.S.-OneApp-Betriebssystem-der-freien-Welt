@@ -2,8 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/contacts/contact_service.dart';
+import '../chat/chat_provider.dart';
 import '../../core/config/system_config.dart';
 import '../../core/identity/identity_service.dart';
 import '../../core/roles/permission_helper.dart';
@@ -877,19 +879,32 @@ class _DiscoveredCellTile extends StatelessWidget {
           const SizedBox(width: 8),
           if (alreadyMember)
             const Icon(Icons.check_circle, color: Colors.green, size: 20)
-          else
+          else if (applied)
             TextButton(
               style: TextButton.styleFrom(
-                foregroundColor:
-                    applied ? AppColors.onDark.withValues(alpha: 0.4) : AppColors.gold,
+                foregroundColor: Colors.orange,
                 padding:
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
               onPressed: () => _showCellInfoSheet(context),
-              child: Text(
-                applied ? 'Ausstehend' : 'Anfragen / Info',
-                style: const TextStyle(fontSize: 12),
+              child: const Text(
+                'Ausstehend · Info',
+                style: TextStyle(fontSize: 12),
+              ),
+            )
+          else
+            TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.gold,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: () => _showCellInfoSheet(context),
+              child: const Text(
+                'Anfragen / Info',
+                style: TextStyle(fontSize: 12),
               ),
             ),
         ],
@@ -1170,10 +1185,27 @@ class _DiscoveredCellTile extends StatelessWidget {
       );
     }
     if (applied) {
-      return ElevatedButton(
-        onPressed: null,
-        style: disabledStyle,
-        child: const Text('Anfrage ausstehend'),
+      return OutlinedButton.icon(
+        onPressed: () async {
+          Navigator.of(sheetCtx).pop();
+          await CellService.instance.withdrawJoinRequest(cell.id);
+          if (pageCtx.mounted) {
+            ScaffoldMessenger.of(pageCtx).showSnackBar(
+              const SnackBar(
+                content: Text('Anfrage zurückgezogen.'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        },
+        icon: const Icon(Icons.cancel_outlined, size: 16),
+        label: const Text('Anfrage zurückziehen'),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: Colors.orange,
+          side: const BorderSide(color: Colors.orange),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
       );
     }
     if (cell.isFull) {
@@ -1194,10 +1226,13 @@ class _DiscoveredCellTile extends StatelessWidget {
     return ElevatedButton(
       onPressed: () async {
         Navigator.of(sheetCtx).pop();
+        final nostrPubkey =
+            pageCtx.read<ChatProvider>().nostrPubkeyHex;
         await CellService.instance.sendJoinRequest(
           cell,
           message:
               msgCtrl.text.trim().isEmpty ? null : msgCtrl.text.trim(),
+          localNostrPubkeyHex: nostrPubkey,
         );
         if (pageCtx.mounted) {
           ScaffoldMessenger.of(pageCtx).showSnackBar(

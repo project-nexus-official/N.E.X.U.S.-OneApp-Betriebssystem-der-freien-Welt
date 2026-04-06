@@ -45,6 +45,7 @@ class ConversationScreen extends StatefulWidget {
     this.peer,
     this.scrollToMessageId,
     this.initialDraftText,
+    this.bypassContactGate = false,
   });
 
   final String peerDid;
@@ -55,6 +56,11 @@ class ConversationScreen extends StatefulWidget {
 
   /// Currently-online peer, if available (used for transport info).
   final NexusPeer? peer;
+
+  /// When true the contact-request gate is skipped entirely.
+  /// Used for cell-join "Nachfragen" chats where the founder opens
+  /// a DM with an applicant who is not yet a contact.
+  final bool bypassContactGate;
 
   /// When set (e.g. from global search), scroll to and highlight this message
   /// after loading the conversation.
@@ -117,6 +123,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
   /// working without being forced through the request flow again.
   bool get _needsContactRequest {
     if (widget.isBroadcast) return false;
+    // Explicitly bypassed (e.g. cell-join "Nachfragen" initiated by founder).
+    if (widget.bypassContactGate) return false;
     // Still loading – don't decide yet; avoids a false gate on startup.
     if (_loading) return false;
     // Existing conversation – never block access to previous messages.

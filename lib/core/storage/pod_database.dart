@@ -1349,6 +1349,22 @@ class PodDatabase {
 
   // ── Governance: Cell Join Requests ────────────────────────────────────────
 
+  Future<void> deleteCellJoinRequest(String id) async {
+    await _database.delete(
+      'cell_join_requests',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> deleteCellJoinRequestsByCell(String cellId) async {
+    await _database.delete(
+      'cell_join_requests',
+      where: 'cell_id = ?',
+      whereArgs: [cellId],
+    );
+  }
+
   Future<void> upsertCellJoinRequest(
       String id, String cellId, Map<String, dynamic> data,
       {required bool isSent}) async {

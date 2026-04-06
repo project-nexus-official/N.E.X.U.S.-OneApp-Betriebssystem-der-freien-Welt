@@ -60,6 +60,23 @@ class NostrKind {
   /// keeps only the latest event, so discovery always shows current data.
   /// Content: Cell.toJson(). Tags: t=nexus-cell.
   static const int cellAnnounce = 30000;
+
+  /// NEXUS cell join request.
+  ///
+  /// Published by an applicant who wants to join a cell.
+  /// Founders/moderators subscribe with `#t: ['nexus-cell-join']` —
+  /// no contact relationship required.
+  /// Tags: ['t','nexus-cell-join'], ['d', requestId], ['cell', cellId]
+  /// Content: CellJoinRequest JSON + field 'requesterNostrPubkey'
+  static const int cellJoinRequest = 31003;
+
+  /// NEXUS cell membership confirmation.
+  ///
+  /// Published by the founder/moderator after approving a join request.
+  /// The new member subscribes with `#p: [myNostrPubkey]`.
+  /// Tags: ['t','nexus-cell-confirmed'], ['p', requesterNostrPubkey], ['cell', cellId]
+  /// Content: JSON { 'cell': Cell.toJson(), 'member': CellMember.toJson() }
+  static const int cellMembershipConfirmed = 31004;
 }
 
 /// A NIP-01 Nostr event.

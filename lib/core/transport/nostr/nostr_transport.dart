@@ -102,6 +102,25 @@ class NostrTransport implements MessageTransport {
 
   String? _cellSubId;
 
+  final _cellJoinRequestController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
+  /// Emits a CellJoinRequest JSON map (+requesterNostrPubkey) when a
+  /// Kind-31003 join request arrives. Used by founders/moderators.
+  Stream<Map<String, dynamic>> get onCellJoinRequest =>
+      _cellJoinRequestController.stream;
+
+  final _cellMembershipConfirmedController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
+  /// Emits {cell: cellJson, member: memberJson} when a Kind-31004
+  /// membership-confirmation event addressed to this node arrives.
+  Stream<Map<String, dynamic>> get onCellMembershipConfirmed =>
+      _cellMembershipConfirmedController.stream;
+
+  String? _cellJoinSubId;
+  String? _cellMembershipSubId;
+
   final _feedCommentController =
       StreamController<Map<String, dynamic>>.broadcast();
 
@@ -403,6 +422,53 @@ class NostrTransport implements MessageTransport {
     );
     _relayManager.publish(event);
     print('[NOSTR] Published Kind-5 cell deletion for tag: $nostrTag');
+  }
+
+  /// Publishes a Kind-31003 cell join request.
+  ///
+  /// [reqJson] is the full `CellJoinRequest.toJson()` map, which must already
+  /// include a `requesterNostrPubkey` field so the founder can send the
+  /// Kind-31004 confirmation back.
+  void publishCellJoinRequest(Map<String, dynamic> reqJson) {
+    if (_keys == null) return;
+    final cellId = reqJson['cellId'] as String? ?? '';
+    final requestId = reqJson['id'] as String? ?? '';
+    final event = NostrEvent.create(
+      keys: _keys!,
+      kind: NostrKind.cellJoinRequest,
+      content: jsonEncode(reqJson),
+      tags: [
+        ['t', 'nexus-cell-join'],
+        ['d', requestId],
+        ['cell', cellId],
+      ],
+    );
+    _relayManager.publish(event);
+    print('[JOIN] Request sent to cell: $cellId (requestId: ${requestId.substring(0, 8)}…)');
+  }
+
+  /// Publishes a Kind-31004 membership confirmation to [requesterNostrPubkeyHex].
+  ///
+  /// [cellJson] is `Cell.toJson()`, [memberJson] is `CellMember.toJson()`.
+  void publishCellMembershipConfirmed(
+    Map<String, dynamic> cellJson,
+    Map<String, dynamic> memberJson,
+    String requesterNostrPubkeyHex,
+  ) {
+    if (_keys == null) return;
+    final cellId = cellJson['id'] as String? ?? '';
+    final event = NostrEvent.create(
+      keys: _keys!,
+      kind: NostrKind.cellMembershipConfirmed,
+      content: jsonEncode({'cell': cellJson, 'member': memberJson}),
+      tags: [
+        ['t', 'nexus-cell-confirmed'],
+        ['p', requesterNostrPubkeyHex],
+        ['cell', cellId],
+      ],
+    );
+    _relayManager.publish(event);
+    print('[JOIN] Confirmation sent to ${requesterNostrPubkeyHex.substring(0, 8)}… for cell: $cellId');
   }
 
   /// Publishes a NIP-25 Kind-7 reaction for [messageId].
@@ -830,6 +896,26 @@ class NostrTransport implements MessageTransport {
     });
     print('[CELL] Subscribed to cell announcements, subId=$_cellSubId');
 
+    // Cell join requests (Kind-31003) — founders receive these from non-contacts.
+    if (_cellJoinSubId != null) _relayManager.closeSubscription(_cellJoinSubId!);
+    _cellJoinSubId = _relayManager.subscribe({
+      'kinds': [NostrKind.cellJoinRequest],
+      '#t': ['nexus-cell-join'],
+      'since': nowSeconds - 7 * 86400,
+    });
+    print('[JOIN] Subscribed to cell join requests, subId=$_cellJoinSubId');
+
+    // Cell membership confirmations (Kind-31004) — applicants receive these.
+    if (_cellMembershipSubId != null) {
+      _relayManager.closeSubscription(_cellMembershipSubId!);
+    }
+    _cellMembershipSubId = _relayManager.subscribe({
+      'kinds': [NostrKind.cellMembershipConfirmed],
+      '#p': [myPubkey],
+      'since': nowSeconds - 7 * 86400,
+    });
+    print('[JOIN] Subscribed to membership confirmations for $myPubkey, subId=$_cellMembershipSubId');
+
     // Dorfplatz feed posts + comments (Kind-1/6 with nexus-dorfplatz* tags),
     // Kind-7 reactions — tag-based subscription for last 7 days.
     if (_feedSubId != null) _relayManager.closeSubscription(_feedSubId!);
@@ -901,6 +987,10 @@ class NostrTransport implements MessageTransport {
         _handlePresenceEvent(event);
       case NostrKind.cellAnnounce:
         _handleCellAnnounceEvent(event);
+      case NostrKind.cellJoinRequest:
+        _handleCellJoinRequestEvent(event);
+      case NostrKind.cellMembershipConfirmed:
+        _handleCellMembershipConfirmedEvent(event);
     }
   }
 
@@ -960,6 +1050,55 @@ class NostrTransport implements MessageTransport {
       });
     } catch (e) {
       print('[CELL] Cell announce parse FAILED: $e');
+    }
+  }
+
+  void _handleCellJoinRequestEvent(NostrEvent event) {
+    if (_keys == null) return;
+    // Ignore our own events (already stored locally by CellService).
+    if (event.pubkey == _keys!.publicKeyHex) return;
+    try {
+      final data = jsonDecode(event.content) as Map<String, dynamic>;
+      final cellId = event.tagValue('cell') ?? data['cellId'] as String? ?? '?';
+      final action = data['action'] as String?;
+
+      if (action == 'withdraw') {
+        // Requester is withdrawing a previously sent join request.
+        final requestId = data['id'] as String? ?? '';
+        print('[JOIN] Withdraw received, removing pending request: $requestId');
+        _cellJoinRequestController.add({
+          ...data,
+          'action': 'withdraw',
+          'requesterNostrPubkey': event.pubkey,
+        });
+        return;
+      }
+
+      final requesterPseudonym = data['requesterPseudonym'] as String? ?? '?';
+      print('[JOIN] Request received from non-contact: ${event.pubkey.substring(0, 8)}… '
+          '($requesterPseudonym) for cell: $cellId — ALLOWED (cell join)');
+      // Enrich with the sender's Nostr pubkey so the founder can send
+      // the Kind-31004 confirmation even without a contact relationship.
+      _cellJoinRequestController.add({
+        ...data,
+        'requesterNostrPubkey': event.pubkey,
+      });
+    } catch (e) {
+      print('[JOIN] Cell join request parse FAILED: $e');
+    }
+  }
+
+  void _handleCellMembershipConfirmedEvent(NostrEvent event) {
+    if (_keys == null) return;
+    // Only process events addressed to us.
+    if (!event.tagValues('p').contains(_keys!.publicKeyHex)) return;
+    try {
+      final data = jsonDecode(event.content) as Map<String, dynamic>;
+      final cellId = event.tagValue('cell') ?? '?';
+      print('[JOIN] Membership confirmation received for cell: $cellId');
+      _cellMembershipConfirmedController.add(data);
+    } catch (e) {
+      print('[JOIN] Cell membership confirmation parse FAILED: $e');
     }
   }
 
