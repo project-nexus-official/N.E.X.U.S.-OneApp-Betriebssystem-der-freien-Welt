@@ -923,12 +923,21 @@ class _AdminSection extends StatelessWidget {
       // Read cells BEFORE any deletion so we can publish Nostr events.
       final cells = await db.listCells();
       final cellCount = cells.length;
-      final allCellIds =
-          cells.map((c) => c['id'] as String? ?? '').where((id) => id.isNotEmpty).toList();
 
-      // ── STEP 1: Block all cell IDs so they never re-appear from Nostr ──
+      // IMPORTANT: also include in-memory discovered cells — they are NOT
+      // persisted to DB, so their IDs would otherwise never enter the block list
+      // and would re-appear on the next Nostr subscription round.
+      final discoveredIds =
+          CellService.instance.discoveredCells.map((c) => c.id).toList();
+      final allCellIds = {
+        ...cells.map((c) => c['id'] as String? ?? '').where((id) => id.isNotEmpty),
+        ...discoveredIds,
+      }.toList();
+
+      // ── STEP 1: Block ALL cell IDs so they never re-appear from Nostr ──
       await CellService.instance.dismissCells(allCellIds);
-      print('[CLEANUP] Blocked ${allCellIds.length} cellIds from re-import');
+      print('[CLEANUP] Blocked ${allCellIds.length} cellIds from re-import'
+          ' (${cellCount} persisted + ${discoveredIds.length} discovered)');
 
       // ── STEP 2: Publish dissolution events for cells where we are founder ──
       final founderCells =
