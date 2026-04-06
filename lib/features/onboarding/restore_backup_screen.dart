@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/identity/identity_service.dart';
+import '../../features/chat/chat_provider.dart';
 import '../../services/backup_service.dart';
 import '../../shared/theme/app_theme.dart';
 
@@ -51,8 +53,16 @@ class _RestoreBackupScreenState extends State<RestoreBackupScreen> {
       _restoring = true;
       _error     = null;
     });
-    final result =
-        await BackupService.instance.restoreFromFile(info.path, mnemonic);
+    final chat = mounted ? context.read<ChatProvider>() : null;
+    final result = await BackupService.instance.restoreFromFile(
+      info.path,
+      mnemonic,
+      onRestored: () async {
+        print('[RESTORE] Backup applied, triggering subscription reset...');
+        chat?.nostrTransport?.resetSubscriptions();
+        print('[RESTORE] Subscriptions successfully reset');
+      },
+    );
     if (!mounted) return;
     if (result.success) {
       setState(() {

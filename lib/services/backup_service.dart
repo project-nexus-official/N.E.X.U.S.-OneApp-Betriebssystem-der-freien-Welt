@@ -12,7 +12,6 @@ import '../core/contacts/contact_service.dart';
 import '../core/identity/bip39.dart';
 import '../core/identity/identity_service.dart';
 import '../core/storage/pod_encryption.dart';
-import '../core/transport/nostr/nostr_transport.dart';
 import '../features/chat/group_channel_service.dart';
 import '../features/governance/cell_service.dart';
 import '../services/notification_settings_service.dart';
@@ -297,13 +296,24 @@ class BackupService {
   ///
   /// Merge semantics: existing data is NEVER overwritten; only missing items
   /// are added.
-  Future<RestoreResult> restoreFromFile(String path, String mnemonic) async {
+  /// [onRestored] is called after all data has been merged into memory.
+  /// Use it to trigger side-effects that require a live context, e.g.
+  /// resetting Nostr subscriptions via `ChatProvider`.
+  Future<RestoreResult> restoreFromFile(
+    String path,
+    String mnemonic, {
+    Future<void> Function()? onRestored,
+  }) async {
     try {
       final key = deriveBackupKeySync(mnemonic);
       final encrypted = await File(path).readAsString();
       final plain = await PodEncryption.decrypt(encrypted, key);
       final data = jsonDecode(plain) as Map<String, dynamic>;
-      return await _applyBackup(data);
+      final result = await _applyBackup(data);
+      if (result.success && onRestored != null) {
+        await onRestored();
+      }
+      return result;
     } catch (e) {
       debugPrint('[BACKUP] restoreFromFile error: $e');
       return RestoreResult(success: false, error: '$e');
@@ -403,16 +413,8 @@ class BackupService {
       await PrinciplesService.instance.restoreFromBackup(principlesData);
     }
 
-    print('[RESTORE] Backup applied, triggering subscription reset…');
-    print('[RESTORE] Resetting subscriptions with $restoredContacts contacts, '
-        '$restoredChannels channels, $restoredCells cells');
-
-    // Re-subscribe so that all restored contacts / channels / cells are
-    // included in the active Nostr filters.  Services have already merged
-    // their data into memory above, so _setupSubscriptions() will pick them up.
-    NostrTransport.instance.resetSubscriptions();
-
-    print('[RESTORE] Subscriptions successfully reset');
+    print('[RESTORE] Backup applied: $restoredContacts contacts, '
+        '$restoredChannels channels, $restoredCells cells restored');
 
     return RestoreResult(
       success: true,
