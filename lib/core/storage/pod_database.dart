@@ -898,6 +898,15 @@ class PodDatabase {
     } catch (_) {}
   }
 
+  /// Permanently removes a contact request row from the database.
+  Future<void> deleteContactRequest(String id) async {
+    await _database.delete(
+      'contact_requests',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   // ── Export / Import ───────────────────────────────────────────────────────
 
   /// Exports all pod data as a single AES-256-GCM encrypted JSON blob.

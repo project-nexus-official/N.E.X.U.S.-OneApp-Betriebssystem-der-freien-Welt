@@ -623,6 +623,10 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       );
       return;
     }
+    if (msgType == 'contact_request_cancelled') {
+      await ContactRequestService.instance.handleCancellation(processedMsg.fromDid);
+      return;
+    }
 
     // ── Invite redemption notification ───────────────────────────────────────
     if (msgType == 'invite_redeemed') {
@@ -939,6 +943,29 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
           metadata: meta,
         );
         await _manager.sendMessage(msg, recipientDid: req.fromDid);
+      },
+    );
+  }
+
+  /// Cancels an outgoing contact request: removes it locally and sends a
+  /// cancellation DM so the recipient's pending list updates too.
+  Future<void> cancelContactRequest(String requestId) async {
+    final identity = IdentityService.instance.currentIdentity;
+    final myDid = identity?.did ?? '';
+
+    await ContactRequestService.instance.cancelRequest(
+      requestId,
+      sendCancellationFn: (toDid) async {
+        final meta = <String, dynamic>{
+          'type': 'contact_request_cancelled',
+        };
+        final msg = NexusMessage.create(
+          fromDid: myDid,
+          toDid: toDid,
+          body: '',
+          metadata: meta,
+        );
+        await _manager.sendMessage(msg, recipientDid: toDid);
       },
     );
   }

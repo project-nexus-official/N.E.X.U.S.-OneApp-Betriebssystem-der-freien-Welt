@@ -307,6 +307,46 @@ class ContactRequestService {
     _notify();
   }
 
+  /// Cancels an outgoing request: removes it locally and optionally notifies
+  /// the recipient so they can hide the pending request on their side.
+  ///
+  /// Only works on requests where [isSent] is true.
+  Future<void> cancelRequest(
+    String requestId, {
+    Future<void> Function(String toDid)? sendCancellationFn,
+  }) async {
+    final idx = _requests.indexWhere((r) => r.id == requestId && r.isSent);
+    if (idx < 0) return;
+
+    final req = _requests[idx];
+
+    // Notify the recipient (best-effort) so their pending list updates too.
+    if (sendCancellationFn != null) {
+      sendCancellationFn(req.fromDid).catchError((e) {
+        debugPrint('[CR] cancelRequest sendCancellationFn failed: $e');
+      });
+    }
+
+    _requests.removeAt(idx);
+    await PodDatabase.instance.deleteContactRequest(requestId);
+    _notify();
+  }
+
+  /// Removes a pending *incoming* request when the sender cancelled it.
+  Future<void> handleCancellation(String fromDid) async {
+    final idx = _requests.indexWhere(
+      (r) =>
+          !r.isSent &&
+          r.fromDid == fromDid &&
+          r.status == ContactRequestStatus.pending,
+    );
+    if (idx < 0) return;
+    final id = _requests[idx].id;
+    _requests.removeAt(idx);
+    await PodDatabase.instance.deleteContactRequest(id);
+    _notify();
+  }
+
   /// Silently rejects a request (the sender is never notified).
   Future<void> rejectRequest(String requestId) async {
     await _updateStatus(requestId, ContactRequestStatus.rejected);

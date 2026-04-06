@@ -1,7 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../../features/chat/chat_provider.dart';
 import '../../services/contact_request_service.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/peer_avatar.dart';
@@ -41,11 +43,48 @@ class _SentRequestsScreenState extends State<SentRequestsScreen> {
     super.dispose();
   }
 
+  Future<void> _cancelRequest(ContactRequest req) async {
+    final name = req.fromPseudonym.isNotEmpty ? req.fromPseudonym : req.fromDid;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text(
+          'Anfrage zurückziehen?',
+          style: TextStyle(color: AppColors.onDark),
+        ),
+        content: Text(
+          'Kontaktanfrage an $name zurückziehen?',
+          style: const TextStyle(color: Colors.grey),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Abbrechen',
+                style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Zurückziehen',
+                style: TextStyle(color: AppColors.gold)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await context.read<ChatProvider>().cancelContactRequest(req.id);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Only show pending requests – accepted ones are now contacts.
+    final displayed =
+        _sent.where((r) => r.status == ContactRequestStatus.pending).toList();
+
     return Scaffold(
       appBar: AppBar(title: const Text('Gesendete Anfragen')),
-      body: _sent.isEmpty
+      body: displayed.isEmpty
           ? const Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -53,33 +92,31 @@ class _SentRequestsScreenState extends State<SentRequestsScreen> {
                   Icon(Icons.send_outlined, color: Colors.grey, size: 56),
                   SizedBox(height: 16),
                   Text(
-                    'Keine gesendeten Anfragen',
+                    'Keine ausstehenden Anfragen',
                     style: TextStyle(color: Colors.grey, fontSize: 16),
                   ),
                 ],
               ),
             )
           : ListView.builder(
-              itemCount: _sent.length,
-              itemBuilder: (_, i) => _SentRequestTile(request: _sent[i]),
+              itemCount: displayed.length,
+              itemBuilder: (_, i) => _SentRequestTile(
+                request: displayed[i],
+                onCancel: () => _cancelRequest(displayed[i]),
+              ),
             ),
     );
   }
 }
 
 class _SentRequestTile extends StatelessWidget {
-  const _SentRequestTile({required this.request});
+  const _SentRequestTile({required this.request, required this.onCancel});
 
   final ContactRequest request;
+  final VoidCallback onCancel;
 
   @override
   Widget build(BuildContext context) {
-    // Never reveal rejected/ignored status to the sender.
-    final isAccepted =
-        request.status == ContactRequestStatus.accepted;
-    final chipLabel = isAccepted ? 'Angenommen' : 'Ausstehend';
-    final chipColor = isAccepted ? Colors.green : Colors.orange;
-
     final dateStr = _formatDate(request.receivedAt);
 
     return Padding(
@@ -110,14 +147,38 @@ class _SentRequestTile extends StatelessWidget {
                     ),
                     const SizedBox(width: 8),
                     Chip(
-                      label: Text(
-                        chipLabel,
-                        style:
-                            const TextStyle(fontSize: 11, color: Colors.white),
+                      label: const Text(
+                        'Ausstehend',
+                        style: TextStyle(fontSize: 11, color: Colors.white),
                       ),
-                      backgroundColor: chipColor,
+                      backgroundColor: Colors.orange,
                       padding: EdgeInsets.zero,
                       visualDensity: VisualDensity.compact,
+                    ),
+                    const SizedBox(width: 6),
+                    GestureDetector(
+                      onTap: onCancel,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.red.shade400),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.close,
+                                size: 12, color: Colors.red.shade400),
+                            const SizedBox(width: 3),
+                            Text(
+                              'Abbrechen',
+                              style: TextStyle(
+                                  fontSize: 11, color: Colors.red.shade400),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -135,8 +196,7 @@ class _SentRequestTile extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   'Gesendet $dateStr',
-                  style:
-                      const TextStyle(color: Colors.grey, fontSize: 11),
+                  style: const TextStyle(color: Colors.grey, fontSize: 11),
                 ),
               ],
             ),
