@@ -187,18 +187,43 @@ class FeedService {
   // ── Incoming Nostr posts ──────────────────────────────────────────────────
 
   /// Processes an incoming feed post from NostrTransport.
+  ///
+  /// Handles three cases:
+  /// 1. Brand-new post → insert into DB + cache.
+  /// 2. Known post with expanded visibility → update DB + cache so the post
+  ///    moves to the correct tab immediately (no restart required).
+  /// 3. Exact duplicate (same ID, same or lower visibility) → ignore.
   Future<void> handleIncomingPost(Map<String, dynamic> data) async {
     try {
       final post = FeedPost.fromJson(data);
-      // Deduplicate
-      if (_posts.any((p) =>
-          p.id == post.id ||
-          (post.nostrEventId != null &&
-              p.nostrEventId == post.nostrEventId))) return;
+
+      // ── Case 2: post already known — check for visibility expansion ────────
+      final existingIdx = _posts.indexWhere((p) => p.id == post.id);
+      if (existingIdx != -1) {
+        final existing = _posts[existingIdx];
+        if (post.visibility.index > existing.visibility.index) {
+          // Visibility was expanded by the author — update DB and in-memory cache.
+          final updated = existing.copyWith(visibility: post.visibility);
+          await PodDatabase.instance.updateFeedPost(existing.id, updated.toJson());
+          _posts[existingIdx] = updated;
+          _streamController.add(null);
+          debugPrint('[FEED] Visibility updated ${post.id}: '
+              '${existing.visibility.name} → ${post.visibility.name}');
+        }
+        // Either updated above or truly a duplicate — either way, stop here.
+        return;
+      }
+
+      // ── Deduplicate by Nostr event ID (retransmissions from relay) ─────────
+      if (post.nostrEventId != null &&
+          _posts.any((p) => p.nostrEventId == post.nostrEventId)) {
+        return;
+      }
 
       // Skip muted authors
       if (_mutedAuthors.contains(post.authorDid)) return;
 
+      // ── Case 1: new post ───────────────────────────────────────────────────
       await PodDatabase.instance.insertFeedPost(post.toJson());
       _posts
         ..insert(0, post)
