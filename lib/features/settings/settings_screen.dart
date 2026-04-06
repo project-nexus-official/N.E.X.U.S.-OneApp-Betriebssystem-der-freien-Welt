@@ -1,4 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
+
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -934,10 +937,39 @@ class _AdminSection extends StatelessWidget {
         ...discoveredIds,
       }.toList();
 
-      // ── STEP 1: Block ALL cell IDs so they never re-appear from Nostr ──
+      // ── ZOMBIE-DIAG: Cleanup pressed ────────────────────────────────────
+      print('[ZOMBIE-DIAG] === CLEANUP PRESSED ===');
+      print('[ZOMBIE-DIAG] DB cells to clean: $cellCount');
+      for (final c in cells) {
+        print('[ZOMBIE-DIAG]   DB cell: "${c['name']}" id=${c['id']}');
+      }
+      print('[ZOMBIE-DIAG] Discovered cells (in-memory): ${discoveredIds.length}');
+      for (final id in discoveredIds) {
+        print('[ZOMBIE-DIAG]   Discovered id: $id');
+      }
+      print('[ZOMBIE-DIAG] allCellIds to block: $allCellIds');
+      // ────────────────────────────────────────────────────────────────────
+
+      // ── STEP 1: Block ALL cell IDs + record wipe timestamp ──
+      // The wipe timestamp causes any cell announcement older than NOW to be
+      // silently ignored on future Nostr deliveries — covering zombie cells
+      // whose IDs we don't even know yet (e.g., not discovered in this session).
+      await CellService.instance.recordWipe();
       await CellService.instance.dismissCells(allCellIds);
       print('[CLEANUP] Blocked ${allCellIds.length} cellIds from re-import'
           ' (${cellCount} persisted + ${discoveredIds.length} discovered)');
+
+      // ── ZOMBIE-DIAG: Verify what was actually saved ───────────────────
+      final verifyPrefs = await SharedPreferences.getInstance();
+      final savedRaw = verifyPrefs.getString('nexus_dismissed_cell_ids');
+      final savedWipe = verifyPrefs.getInt('nexus_cell_wipe_at');
+      final savedIds = savedRaw != null
+          ? (jsonDecode(savedRaw) as List<dynamic>).cast<String>()
+          : <String>[];
+      print('[ZOMBIE-DIAG] Block list AFTER save: ${savedIds.length} entries');
+      print('[ZOMBIE-DIAG] Block list content: $savedIds');
+      print('[ZOMBIE-DIAG] Wipe timestamp saved: ${savedWipe ?? "NOT SAVED"}');
+      // ─────────────────────────────────────────────────────────────────
 
       // ── STEP 2: Publish dissolution events for cells where we are founder ──
       final founderCells =

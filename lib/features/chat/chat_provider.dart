@@ -448,12 +448,13 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   void _onCellAnnounced(Map<String, dynamic> data) {
     try {
+      final nostrCreatedAt = data['_created_at'] as int?;
       // Remove internal nostr fields before passing to Cell.fromJson.
       final cellJson = Map<String, dynamic>.from(data)
         ..remove('_nostr_pubkey')
         ..remove('_created_at');
       final cell = Cell.fromJson(cellJson);
-      CellService.instance.addDiscoveredCell(cell);
+      CellService.instance.addDiscoveredCell(cell, nostrCreatedAt: nostrCreatedAt);
     } catch (e) {
       debugPrint('[CHAT] Cell announced parse error: $e');
     }
