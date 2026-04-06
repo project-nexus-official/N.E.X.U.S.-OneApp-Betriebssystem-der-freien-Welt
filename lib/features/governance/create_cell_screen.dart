@@ -353,7 +353,7 @@ class _CreateCellScreenState extends State<CreateCellScreen> {
             const SizedBox(height: 16),
 
             // Proposal wait days
-            _SectionLabel('Wartezeit vor Proposals'),
+            _SectionLabel('Wartezeit vor Anträgen'),
             _RadioOption<int>(
               label: 'Sofort (Standard)',
               value: 0,

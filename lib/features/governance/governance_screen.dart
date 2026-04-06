@@ -106,7 +106,7 @@ class _GovernanceScreenState extends State<GovernanceScreen>
               backgroundColor: AppColors.gold,
               foregroundColor: Colors.black,
               icon: const Icon(Icons.add),
-              label: const Text('Neues Proposal'),
+              label: const Text('Neuer Antrag'),
             )
           : null,
       body: myCells.isEmpty
@@ -267,7 +267,7 @@ class _ProposalList extends StatelessWidget {
 
     if (proposals.isEmpty) {
       return const Center(
-        child: Text('Keine Proposals.',
+        child: Text('Keine Anträge.',
             style: TextStyle(color: AppColors.surfaceVariant)),
       );
     }
@@ -287,7 +287,7 @@ class _MyProposalList extends StatelessWidget {
 
     if (proposals.isEmpty) {
       return const Center(
-        child: Text('Du hast noch keine Proposals erstellt.',
+        child: Text('Du hast noch keine Anträge erstellt.',
             style: TextStyle(color: AppColors.surfaceVariant)),
       );
     }

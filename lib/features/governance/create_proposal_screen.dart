@@ -61,7 +61,7 @@ class _CreateProposalScreenState extends State<CreateProposalScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(publish
-                ? 'Proposal veröffentlicht!'
+                ? 'Antrag veröffentlicht!'
                 : 'Entwurf gespeichert.'),
             backgroundColor: Colors.green,
           ),
@@ -83,7 +83,7 @@ class _CreateProposalScreenState extends State<CreateProposalScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Neues Proposal'),
+        title: const Text('Neuer Antrag'),
         backgroundColor: AppColors.deepBlue,
       ),
       backgroundColor: AppColors.deepBlue,
@@ -136,7 +136,7 @@ class _CreateProposalScreenState extends State<CreateProposalScreen> {
             _SectionLabel('Beschreibung (Markdown unterstützt)'),
             TextFormField(
               controller: _descCtrl,
-              decoration: _inputDeco('Beschreibe dein Proposal ausführlich …'),
+              decoration: _inputDeco('Beschreibe deinen Antrag ausführlich …'),
               style: const TextStyle(color: AppColors.onDark),
               maxLines: 6,
             ),

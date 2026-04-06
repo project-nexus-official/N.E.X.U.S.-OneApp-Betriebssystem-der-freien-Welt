@@ -315,7 +315,7 @@ class _CellEditScreenState extends State<CellEditScreen> {
             const SizedBox(height: 16),
 
             // Proposal wait days
-            _Label('Wartezeit vor Proposals'),
+            _Label('Wartezeit vor Anträgen'),
             _Radio<int>(
               label: 'Sofort',
               value: 0,

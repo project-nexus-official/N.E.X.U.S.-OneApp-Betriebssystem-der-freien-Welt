@@ -46,7 +46,7 @@ class _ProposalDetailScreenState extends State<ProposalDetailScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Proposal'),
+        title: const Text('Antrag'),
         backgroundColor: AppColors.deepBlue,
         actions: [
           _PublishButton(proposal: _proposal),
@@ -144,7 +144,7 @@ class _PublishButton extends StatelessWidget {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Proposal veröffentlicht!'),
+              content: Text('Antrag veröffentlicht!'),
               backgroundColor: Colors.green,
             ),
           );

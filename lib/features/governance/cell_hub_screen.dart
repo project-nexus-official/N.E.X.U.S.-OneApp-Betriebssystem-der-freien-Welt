@@ -914,6 +914,39 @@ class _DiscoveredCellTile extends StatelessWidget {
 
     final msgCtrl = TextEditingController();
 
+    // Helper: type label
+    final typeLabel =
+        cell.cellType == CellType.local ? 'Lokal' : 'Thematisch';
+
+    // Helper: subtitle in header  (Typ · Kategorie/Standort)
+    final headerSub = () {
+      final parts = <String>[typeLabel];
+      if (cell.cellType == CellType.local && cell.locationName != null) {
+        parts.add(cell.locationName!);
+      } else if (cell.cellType == CellType.thematic &&
+          cell.category != null) {
+        parts.add(cell.category!);
+      }
+      return parts.join(' · ');
+    }();
+
+    // Helper: join policy label
+    final joinLabel = switch (cell.joinPolicy) {
+      JoinPolicy.approvalRequired => 'Genehmigung erforderlich',
+      JoinPolicy.inviteOnly => 'Nur Einladung',
+    };
+
+    // Helper: proposal wait label
+    final waitLabel = switch (cell.proposalWaitDays) {
+      0 => 'Sofort',
+      _ => '${cell.proposalWaitDays} Tage nach Beitritt',
+    };
+
+    // Helper: formatted date
+    final dt = cell.createdAt.toLocal();
+    final dateLabel =
+        '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}.${dt.year}';
+
     showModalBottomSheet<void>(
       context: pageContext,
       isScrollControlled: true,
@@ -923,7 +956,7 @@ class _DiscoveredCellTile extends StatelessWidget {
       ),
       builder: (sheetCtx) => DraggableScrollableSheet(
         expand: false,
-        initialChildSize: 0.6,
+        initialChildSize: 0.65,
         maxChildSize: 0.92,
         minChildSize: 0.4,
         builder: (_, scrollCtrl) => StatefulBuilder(
@@ -969,9 +1002,7 @@ class _DiscoveredCellTile extends StatelessWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          cell.cellType == CellType.local
-                              ? (cell.locationName ?? 'Lokale Gemeinschaft')
-                              : (cell.category ?? 'Thematische Gemeinschaft'),
+                          headerSub,
                           style: TextStyle(
                             color: AppColors.onDark.withValues(alpha: 0.6),
                             fontSize: 13,
@@ -998,34 +1029,76 @@ class _DiscoveredCellTile extends StatelessWidget {
                 ),
               ],
 
-              // ── Members ───────────────────────────────────────────────────
+              // ── Details ───────────────────────────────────────────────────
               const SizedBox(height: 20),
-              _SheetLabel('MITGLIEDER'),
-              const SizedBox(height: 6),
-              Text(
-                '${cell.memberCount} / ${cell.maxMembers}',
-                style: const TextStyle(color: AppColors.onDark, fontSize: 14),
+              _SheetLabel('DETAILS'),
+              const SizedBox(height: 10),
+              _InfoRow(label: 'Typ', value: typeLabel),
+              if (cell.cellType == CellType.local &&
+                  cell.locationName != null)
+                _InfoRow(label: 'Standort', value: cell.locationName!),
+              if (cell.cellType == CellType.thematic &&
+                  cell.category != null)
+                _InfoRow(label: 'Kategorie', value: cell.category!),
+              _InfoRow(label: 'Beitritt', value: joinLabel),
+              _InfoRow(
+                label: 'Mitglieder',
+                value: '${cell.memberCount} / ${cell.maxMembers}',
               ),
+              _InfoRow(label: 'Gegründet', value: dateLabel),
+
+              // ── Governance ────────────────────────────────────────────────
+              const SizedBox(height: 16),
+              Divider(color: AppColors.surfaceVariant.withValues(alpha: 0.5)),
+              const SizedBox(height: 16),
+              _SheetLabel('GOVERNANCE'),
+              const SizedBox(height: 10),
+              _InfoRow(label: 'Wartezeit für Anträge', value: waitLabel),
 
               // ── Founder ───────────────────────────────────────────────────
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
+              Divider(color: AppColors.surfaceVariant.withValues(alpha: 0.5)),
+              const SizedBox(height: 16),
               _SheetLabel('GRÜNDER'),
-              const SizedBox(height: 6),
-              Text(
-                founderName,
-                style: const TextStyle(color: AppColors.onDark, fontSize: 14),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 18,
+                    backgroundColor: AppColors.gold.withValues(alpha: 0.2),
+                    child: Text(
+                      founderName.isNotEmpty
+                          ? founderName[0].toUpperCase()
+                          : '?',
+                      style: const TextStyle(
+                        color: AppColors.gold,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    founderName,
+                    style: const TextStyle(
+                        color: AppColors.onDark, fontSize: 14),
+                  ),
+                ],
               ),
 
               // ── Common contacts ───────────────────────────────────────────
               if (commonCount > 0) ...[
-                const SizedBox(height: 20),
-                _SheetLabel('BEREITS MITGLIED'),
-                const SizedBox(height: 6),
+                const SizedBox(height: 16),
+                Divider(
+                    color: AppColors.surfaceVariant.withValues(alpha: 0.5)),
+                const SizedBox(height: 16),
+                _SheetLabel('GEMEINSAME KONTAKTE'),
+                const SizedBox(height: 8),
                 Text(
                   commonCount == 1
                       ? '1 deiner Kontakte ist Mitglied'
-                      : '$commonCount deiner Kontakte sind Mitglieder',
-                  style: TextStyle(color: AppColors.gold, fontSize: 14),
+                      : '$commonCount deiner Kontakte sind Mitglied',
+                  style: const TextStyle(color: AppColors.gold, fontSize: 14),
                 ),
               ],
 
@@ -1164,6 +1237,45 @@ class _SheetLabel extends StatelessWidget {
         fontSize: 10,
         fontWeight: FontWeight.bold,
         letterSpacing: 1.2,
+      ),
+    );
+  }
+}
+
+/// A detail row inside the cell info sheet: gold label above, value below.
+class _InfoRow extends StatelessWidget {
+  final String label;
+  final String value;
+  const _InfoRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 130,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: AppColors.onDark.withValues(alpha: 0.5),
+                fontSize: 13,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                color: AppColors.onDark,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

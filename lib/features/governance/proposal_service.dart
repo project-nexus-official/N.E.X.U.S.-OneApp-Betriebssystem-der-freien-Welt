@@ -100,7 +100,7 @@ class ProposalService {
     // Notify all cell members.
     await _notifyAllMembers(
       p.cellId,
-      title: 'Neues Proposal',
+      title: 'Neuer Antrag',
       body: p.title,
       payload: 'proposal:${p.id}',
     );

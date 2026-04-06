@@ -448,11 +448,11 @@ class _DashboardScreenState extends State<DashboardScreen>
         ? 'Tritt einer Zelle bei, um mitzumachen.'
         : [
             if (activeProposals > 0)
-              '$activeProposals aktive${activeProposals == 1 ? 's' : ''} Proposal${activeProposals == 1 ? '' : 's'}',
+              '$activeProposals ${activeProposals == 1 ? 'aktiver Antrag' : 'aktive Anträge'}',
             if (pendingRequests > 0)
               '+$pendingRequests Beitrittsanfrage${pendingRequests == 1 ? '' : 'n'}',
             if (activeProposals == 0 && pendingRequests == 0)
-              'Keine aktiven Proposals',
+              'Keine aktiven Anträge',
           ].join(', ');
 
     return _FeatureCard(
