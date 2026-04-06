@@ -92,7 +92,7 @@ class _AdminCellManagementScreenState
       await chatProvider.deleteCellChannels(cell.id);
 
       // Kind-5: asks relays to delete the original announcement.
-      chatProvider.publishNostrCellDeletion(cell.nostrTag, cell.name);
+      chatProvider.publishNostrCellDeletion(cell.id, cell.name);
       // Kind-30000 with deleted:true: notifies all member devices.
       chatProvider.publishNostrCellDissolution(cell.toJson());
 

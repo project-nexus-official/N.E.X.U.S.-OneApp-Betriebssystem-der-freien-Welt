@@ -1701,9 +1701,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     _nostrTransport?.publishDeletion(messageId);
   }
 
-  /// Publishes a Kind-5 dissolution event for a cell identified by [nostrTag].
-  void publishNostrCellDeletion(String nostrTag, String cellName) {
-    _nostrTransport?.publishCellDeletion(nostrTag, cellName);
+  /// Publishes a Kind-5 deletion event for a cell (NIP-09 `a`-tag approach).
+  void publishNostrCellDeletion(String cellId, String cellName) {
+    _nostrTransport?.publishCellDeletion(cellId, cellName);
   }
 
   /// Sends a voice message to [recipientDid].

@@ -918,12 +918,36 @@ class _AdminSection extends StatelessWidget {
 
     try {
       final db = PodDatabase.instance;
+      final myDid = IdentityService.instance.currentIdentity?.did ?? '';
 
-      // Count before deletion for logging.
+      // Read cells BEFORE any deletion so we can publish Nostr events.
       final cells = await db.listCells();
       final cellCount = cells.length;
+      final allCellIds =
+          cells.map((c) => c['id'] as String? ?? '').where((id) => id.isNotEmpty).toList();
 
-      // Delete all cells and their members.
+      // ── STEP 1: Block all cell IDs so they never re-appear from Nostr ──
+      await CellService.instance.dismissCells(allCellIds);
+      print('[CLEANUP] Blocked ${allCellIds.length} cellIds from re-import');
+
+      // ── STEP 2: Publish dissolution events for cells where we are founder ──
+      final founderCells =
+          cells.where((c) => (c['createdBy'] as String? ?? '') == myDid).toList();
+      if (founderCells.isNotEmpty && context.mounted) {
+        final chatProvider = context.read<ChatProvider>();
+        for (final cellJson in founderCells) {
+          final cellId = cellJson['id'] as String? ?? '';
+          final cellName = cellJson['name'] as String? ?? cellId;
+          if (cellId.isEmpty) continue;
+          // Kind-5 NIP-09: tells relays to delete the original announcement.
+          chatProvider.publishNostrCellDeletion(cellId, cellName);
+          // Kind-30000 with deleted:true + tag: propagates to all member devices.
+          chatProvider.publishNostrCellDissolution(cellJson);
+        }
+        print('[CLEANUP] Publishing delete events for ${founderCells.length} owned cells');
+      }
+
+      // ── STEP 3: Delete all cells and their members from local DB ──
       for (final cellJson in cells) {
         final cellId = cellJson['id'] as String? ?? '';
         if (cellId.isEmpty) continue;
@@ -945,9 +969,8 @@ class _AdminSection extends StatelessWidget {
       await db.deleteAllCellJoinRequests();
       print('[CLEANUP] Deleted pending join requests');
 
-      // Reset in-memory state in CellService.
+      // ── STEP 4: Reset in-memory state (block list is preserved!) ──
       await CellService.instance.resetForDebug();
-      print('[CLEANUP] Subscriptions reset');
 
       // Reset Nostr subscriptions.
       if (context.mounted) {
@@ -956,8 +979,11 @@ class _AdminSection extends StatelessWidget {
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Zellen-Daten zurückgesetzt'),
+          SnackBar(
+            content: Text(
+              'Zellen-Daten zurückgesetzt'
+              '${founderCells.isNotEmpty ? ' · ${founderCells.length} Delete-Events gesendet' : ''}',
+            ),
             backgroundColor: Colors.grey,
           ),
         );

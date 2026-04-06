@@ -423,22 +423,26 @@ class NostrTransport implements MessageTransport {
         'to ${_relayManager.statuses.where((s) => s.state == RelayState.connected).length} relays');
   }
 
-  /// Publishes a Kind-5 deletion event for a cell identified by [nostrTag].
+  /// Publishes a Kind-5 deletion event for a cell (NIP-09).
   ///
-  /// Uses a `t` tag so subscribers watching the cell's nostrTag will receive
-  /// the dissolution signal.  Best-effort, same caveats as [publishDeletion].
-  void publishCellDeletion(String nostrTag, String cellName) {
+  /// Uses the proper NIP-09 `a` tag for parameterized replaceable events:
+  /// `['a', '30000:{pubkeyHex}:{cellId}']` so compliant relays actually
+  /// remove the original Kind-30000 announcement.
+  void publishCellDeletion(String cellId, String cellName) {
     if (_keys == null) return;
+    // NIP-09: 'a' tag identifies the parameterized replaceable event to delete.
+    final aTag = '${NostrKind.cellAnnounce}:${_keys!.publicKeyHex}:$cellId';
     final event = NostrEvent.create(
       keys: _keys!,
       kind: NostrKind.deletion,
       content: 'Zelle "$cellName" wurde aufgelöst.',
       tags: [
-        ['t', nostrTag],
+        ['a', aTag],
+        ['t', 'nexus-cell'], // keep for backward-compat with older clients
       ],
     );
     _relayManager.publish(event);
-    print('[NOSTR] Published Kind-5 cell deletion for tag: $nostrTag');
+    print('[CELL-DEL] Publishing Kind-5 delete for cell: $cellId');
   }
 
   /// Publishes a Kind-31003 cell join request.
@@ -504,10 +508,11 @@ class NostrTransport implements MessageTransport {
       tags: [
         ['d', cellId],
         ['t', 'nexus-cell'],
+        ['deleted', 'true'], // explicit tag so receivers can filter without parsing JSON
       ],
     );
     _relayManager.publish(event);
-    print('[CELL-DEL] Publishing cell deletion event: $cellId ($cellName)');
+    print('[CELL-DEL] Publishing deleted-flag Kind-30000: $cellId ($cellName)');
   }
 
   /// Publishes a Kind-31005 cell member update (leave or remove).
@@ -1123,15 +1128,20 @@ class NostrTransport implements MessageTransport {
 
   void _handleCellAnnounceEvent(NostrEvent event) {
     try {
+      // IMPORT FILTER — check the 'deleted' tag BEFORE parsing JSON content.
+      // This is faster and works even if the content is malformed.
+      final isDeletedByTag = event.tagValue('deleted') == 'true';
+
       final data = jsonDecode(event.content) as Map<String, dynamic>;
-      final cellId = data['id'] as String? ?? '?';
+      final cellId = data['id'] as String? ?? event.tagValue('d') ?? '?';
       final cellName = data['name'] as String? ?? '?';
 
-      // Dissolution marker: founder published Kind-30000 with deleted:true.
-      if (data['deleted'] == true) {
+      // Dissolution marker: either via content JSON or via explicit tag.
+      if (isDeletedByTag || data['deleted'] == true) {
+        print('[CELL-DEL] Import blocked for cell $cellId (deleted flag)');
         // Ignore if it's our own dissolution event (already handled locally).
         if (_keys != null && event.pubkey == _keys!.publicKeyHex) return;
-        print('[CELL-DEL] Received cell deletion for: $cellId ($cellName)');
+        print('[CELL-DEL] Received delete for cell: $cellId — removing');
         _cellDeletedController.add({
           'id': cellId,
           'name': cellName,

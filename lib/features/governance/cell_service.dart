@@ -214,7 +214,10 @@ class CellService {
   /// they stay in the dismissed list and will never re-appear in discovery.
   void addDiscoveredCell(Cell cell) {
     if (_myCells.any((c) => c.id == cell.id)) return;
-    if (_dismissedCellIds.contains(cell.id)) return; // already left/deleted
+    if (_dismissedCellIds.contains(cell.id)) {
+      print('[CELL-DEL] Import blocked for cell ${cell.id} (on block list)');
+      return;
+    }
     _discovered.removeWhere((c) => c.id == cell.id);
     _discovered.add(cell);
     _notify();
@@ -439,6 +442,7 @@ class CellService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
         _dismissedKey, jsonEncode(_dismissedCellIds.toList()));
+    print('[CELL-DEL] Adding $cellId to block list');
   }
 
   /// The local user leaves a cell (exit right always available).
@@ -721,16 +725,37 @@ class CellService {
     String? reason,
   })? onPublishMemberUpdate;
 
+  /// Adds [cellIds] to the persistent block list so they never re-appear in
+  /// discovery after a Nostr re-subscription.  Call this BEFORE wiping the DB
+  /// so the IDs are remembered even after the rest of the state is cleared.
+  Future<void> dismissCells(List<String> cellIds) async {
+    var changed = false;
+    for (final id in cellIds) {
+      if (id.isEmpty) continue;
+      if (!_dismissedCellIds.contains(id)) {
+        _dismissedCellIds.add(id);
+        changed = true;
+      }
+    }
+    _discovered.removeWhere((c) => cellIds.contains(c.id));
+    if (changed) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_dismissedKey, jsonEncode(_dismissedCellIds.toList()));
+      print('[CELL-DEL] Adding ${cellIds.length} cellIds to block list');
+    }
+  }
+
   /// Clears all in-memory cell state. DEBUG use only — call after wiping the DB.
+  ///
+  /// NOTE: The dismissed-cell block list is intentionally kept so that
+  /// zombie cells from Nostr relays do NOT re-appear after a debug reset.
   Future<void> resetForDebug() async {
     _myCells.clear();
     _discovered.clear();
     _members.clear();
     _requests.clear();
     _myRequests.clear();
-    _dismissedCellIds.clear();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_dismissedKey);
+    // _dismissedCellIds intentionally NOT cleared — persistent block list.
     _notify();
   }
 
