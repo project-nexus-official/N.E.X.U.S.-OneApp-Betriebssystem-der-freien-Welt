@@ -339,38 +339,53 @@ class CellService {
   Future<void> handleCellDeleted(String cellId, String cellName) async {
     print('[ZOMBIE-V2] Event received: kind=30000, cellId=$cellId,'
         ' action=dissolution');
+    print('[LIVE-DEL] Incoming cell deletion: $cellId ($cellName)');
     print('[ZOMBIE-V2] Current state:'
         ' inMyCells=${_myCells.any((c) => c.id == cellId)}'
         ' inDiscovered=${_discovered.any((c) => c.id == cellId)}'
         ' inTombstones=${_deletedCellIds.contains(cellId)}');
 
-    // Step 1: Persist tombstone FIRST (in-memory write is synchronous).
-    await _saveTombstone(cellId);
+    // ── Step 1: Synchronous in-memory tombstone (no await — visible to
+    //    any coroutine that checks after this point in the event loop). ───────
+    _deletedCellIds.add(cellId);
+    _dismissedCellIds.add(cellId);
+    print('[LIVE-DEL] Tombstone stored (in-memory, synchronous)');
 
-    // Step 2: Always remove from DB + memory — no early return.
-    // DB deletions are idempotent; nothing breaks if the cell isn't there.
-    await PodDatabase.instance.deleteCell(cellId);
-    await PodDatabase.instance.deleteCellJoinRequestsByCell(cellId);
-    final members = List<CellMember>.from(_members[cellId] ?? []);
-    for (final m in members) {
-      await PodDatabase.instance.deleteCellMember(cellId, m.did);
-    }
+    // ── Step 2: Snapshot member list BEFORE clearing memory. ────────────────
+    final membersToDelete =
+        List<CellMember>.from(_members[cellId] ?? []);
 
+    // ── Step 3: Remove from ALL in-memory structures — no await before here.
+    //    This keeps the live-update path entirely synchronous so the UI
+    //    reflects the deletion in the same microtask batch as the event. ──────
     _myCells.removeWhere((c) => c.id == cellId);
     _discovered.removeWhere((c) => c.id == cellId);
     _members.remove(cellId);
     _requests.remove(cellId);
     _myRequests.removeWhere((r) => r.cellId == cellId);
+    print('[LIVE-DEL] Removed from _myCells and _discovered');
 
-    // Step 3: Notify UI.
+    // ── Step 4: Notify UI IMMEDIATELY — no awaits have occurred above. ───────
     _notify();
+    print('[LIVE-DEL] Stream notified — UI should update now');
+
+    // ── Step 5: Async persistence — UI is already updated. ──────────────────
+    await _saveTombstone(cellId); // idempotent; also saves dismissed list
+    print('[LIVE-DEL] Tombstone persisted to SharedPrefs');
+
+    // ── Step 6: DB cleanup — idempotent, safe to call even if cell absent. ──
+    await PodDatabase.instance.deleteCell(cellId);
+    print('[LIVE-DEL] Deleted from DB');
+    await PodDatabase.instance.deleteCellJoinRequestsByCell(cellId);
+    for (final m in membersToDelete) {
+      await PodDatabase.instance.deleteCellMember(cellId, m.did);
+    }
 
     final dbCount = (await PodDatabase.instance.listCells()).length;
     print('[ZOMBIE-V2] Decision: DELETED (reason: dissolution event)');
     print('[ZOMBIE-V2] DB state after: $dbCount cells in DB');
-    print('[CELL-DEL] Removing cell + channels from local DB: $cellId');
-    print('[CELL-DEL] Cleaning up pending join requests for deleted cell: $cellId');
-    print('[CELL-DEL] UI updated — cell removed from Meine Zellen: $cellName');
+    print('[LIVE-DEL] Subscriptions stopped (via deleteCellChannels in ChatProvider)');
+    print('[LIVE-DEL] UI should now update — Meine Zellen no longer shows: $cellName');
   }
 
   /// Withdraws a pending join request for [cellId].
@@ -586,22 +601,28 @@ class CellService {
   Future<void> leaveCell(String cellId) async {
     final myDid = IdentityService.instance.currentIdentity!.did;
 
-    // Notify other members / founders via Nostr before removing local state.
+    // Publish leave event BEFORE local cleanup (founder needs to see it).
     if (onPublishMemberUpdate != null) {
       onPublishMemberUpdate!(cellId: cellId, targetDid: myDid, action: 'left');
       print('[CELL] Published leave event for cell: $cellId');
     }
 
-    await _dismissCell(cellId); // prevent re-appearing in discovery
-    await PodDatabase.instance.deleteCellMember(cellId, myDid);
-    await PodDatabase.instance.deleteCell(cellId);
-    // Clean up any outgoing pending request for this cell (zombie prevention).
-    _myRequests.removeWhere((r) => r.cellId == cellId);
-    await PodDatabase.instance.deleteCellJoinRequestsByCell(cellId);
+    // Dismiss in-memory immediately (synchronous).
+    _dismissedCellIds.add(cellId);
+    _discovered.removeWhere((c) => c.id == cellId);
+
+    // Remove from memory + notify UI immediately (no await before here).
     _myCells.removeWhere((c) => c.id == cellId);
+    _myRequests.removeWhere((r) => r.cellId == cellId);
     _members.remove(cellId);
     _requests.remove(cellId);
     _notify();
+
+    // Async persistence + DB cleanup after UI is updated.
+    await _dismissCell(cellId); // persists dismissed list (idempotent)
+    await PodDatabase.instance.deleteCellMember(cellId, myDid);
+    await PodDatabase.instance.deleteCell(cellId);
+    await PodDatabase.instance.deleteCellJoinRequestsByCell(cellId);
     debugPrint('[CELLS] Left cell $cellId');
   }
 
@@ -670,16 +691,22 @@ class CellService {
     final myDid = IdentityService.instance.currentIdentity?.did;
 
     if (action == 'removed' && targetDid == myDid) {
-      // I was removed — perform the same local cleanup as leaving voluntarily.
-      await _dismissCell(cellId); // prevent re-appearing in discovery
-      await PodDatabase.instance.deleteCellMember(cellId, myDid!);
-      await PodDatabase.instance.deleteCell(cellId);
-      _myRequests.removeWhere((r) => r.cellId == cellId);
-      await PodDatabase.instance.deleteCellJoinRequestsByCell(cellId);
+      // I was removed — dismiss in-memory immediately (synchronous).
+      _dismissedCellIds.add(cellId);
+      _discovered.removeWhere((c) => c.id == cellId);
+
+      // Remove from memory + notify UI immediately (no await before here).
       _myCells.removeWhere((c) => c.id == cellId);
+      _myRequests.removeWhere((r) => r.cellId == cellId);
       _members.remove(cellId);
       _requests.remove(cellId);
       _notify();
+
+      // Async persistence + DB cleanup after UI is updated.
+      await _dismissCell(cellId); // idempotent persist
+      await PodDatabase.instance.deleteCellMember(cellId, myDid!);
+      await PodDatabase.instance.deleteCell(cellId);
+      await PodDatabase.instance.deleteCellJoinRequestsByCell(cellId);
       print('[CELL] I was removed from cell: $cellId — cleaned up local state');
       return;
     }
@@ -707,19 +734,30 @@ class CellService {
   /// Removes all members and the cell itself from the local DB.
   /// The caller is responsible for publishing the Kind-5 Nostr deletion event.
   Future<void> deleteCell(String cellId) async {
-    final members = List<CellMember>.from(_members[cellId] ?? []);
-    for (final m in members) {
-      await PodDatabase.instance.deleteCellMember(cellId, m.did);
-    }
-    await PodDatabase.instance.deleteCell(cellId);
-    // Also delete all join requests for this cell from DB (zombie prevention).
-    await PodDatabase.instance.deleteCellJoinRequestsByCell(cellId);
-    print('[JOIN] Cleaning up zombie requests for deleted cell: $cellId');
+    // Snapshot member list before clearing memory.
+    final membersToDelete = List<CellMember>.from(_members[cellId] ?? []);
+
+    // Tombstone in-memory first so replayed announcements/confirmations
+    // are blocked even before the DB cleanup finishes.
+    _deletedCellIds.add(cellId);
+    _dismissedCellIds.add(cellId);
+
+    // Remove from memory + notify UI immediately (no await before here).
     _myCells.removeWhere((c) => c.id == cellId);
     _discovered.removeWhere((c) => c.id == cellId);
     _members.remove(cellId);
     _requests.remove(cellId);
+    _myRequests.removeWhere((r) => r.cellId == cellId);
     _notify();
+
+    // Persist tombstone + DB cleanup asynchronously after UI is updated.
+    await _saveTombstone(cellId);
+    for (final m in membersToDelete) {
+      await PodDatabase.instance.deleteCellMember(cellId, m.did);
+    }
+    await PodDatabase.instance.deleteCell(cellId);
+    await PodDatabase.instance.deleteCellJoinRequestsByCell(cellId);
+    print('[JOIN] Cleaning up zombie requests for deleted cell: $cellId');
     debugPrint('[CELLS] Deleted cell $cellId (admin action)');
   }
 
