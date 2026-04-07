@@ -41,6 +41,13 @@ class CellService {
   final Set<String> _dismissedCellIds = {};
   static const _dismissedKey = 'nexus_dismissed_cell_ids';
 
+  // Tombstone list: cell IDs of cells that were DISSOLVED by their founder.
+  // This list is NEVER cleared — even across app restarts and on every device.
+  // A tombstoned cell can NEVER be re-imported via ANY event type, regardless
+  // of event order.  This is the primary defence against zombie cells.
+  final Set<String> _deletedCellIds = {};
+  static const _deletedCellsKey = 'nexus_deleted_cell_ids';
+
   // Unix-seconds timestamp of the last data wipe.  Cell announcements whose
   // Nostr created_at predates this are silently ignored so old zombie cells
   // from the relay do not re-appear after a cleanup.
@@ -106,47 +113,54 @@ class CellService {
       // works immediately before any Nostr events arrive.
       final prefs = await SharedPreferences.getInstance();
 
-      // ── ZOMBIE-DIAG: raw SharedPreferences state at startup ──────────────
+      // ── Load tombstone + dismissed lists BEFORE any Nostr events arrive ────
+      final rawDeleted = prefs.getString(_deletedCellsKey);
       final rawDismissed = prefs.getString(_dismissedKey);
       final rawWipeAt = prefs.getInt(_wipeKey);
-      final diagDismissedIds = rawDismissed != null
-          ? (jsonDecode(rawDismissed) as List<dynamic>).cast<String>()
-          : <String>[];
-      print('[ZOMBIE-DIAG] === APP START CELL DIAGNOSIS ===');
-      print('[ZOMBIE-DIAG] Dismissed IDs count: ${diagDismissedIds.length}');
-      print('[ZOMBIE-DIAG] Dismissed IDs: $diagDismissedIds');
-      print('[ZOMBIE-DIAG] Wipe timestamp (raw int): ${rawWipeAt ?? "NOT SET"}');
-      // ─────────────────────────────────────────────────────────────────────
 
-      final raw = rawDismissed;
-      if (raw != null) {
-        final list = (jsonDecode(raw) as List<dynamic>).cast<String>();
+      if (rawDeleted != null) {
+        final list = (jsonDecode(rawDeleted) as List<dynamic>).cast<String>();
+        _deletedCellIds.addAll(list);
+      }
+      if (rawDismissed != null) {
+        final list = (jsonDecode(rawDismissed) as List<dynamic>).cast<String>();
         _dismissedCellIds.addAll(list);
       }
       _wipeAt = rawWipeAt;
-      debugPrint('[CELLS] Dismissed cell IDs: ${_dismissedCellIds.length}'
-          '${_wipeAt != null ? " · wipe_at=$_wipeAt" : ""}');
+
+      // ── ZOMBIE-V2: startup diagnosis ──────────────────────────────────────
+      print('[ZOMBIE-V2] === APP START CELL DIAGNOSIS ===');
+      print('[ZOMBIE-V2] Loaded ${_deletedCellIds.length} tombstones: $_deletedCellIds');
+      print('[ZOMBIE-V2] Loaded ${_dismissedCellIds.length} dismissed: $_dismissedCellIds');
+      print('[ZOMBIE-V2] Wipe timestamp: ${rawWipeAt ?? "NOT SET"}');
+      // ─────────────────────────────────────────────────────────────────────
 
       final rows = await PodDatabase.instance.listCells();
       _myCells.clear();
 
-      // ── ZOMBIE-DIAG: DB contents at startup ───────────────────────────────
-      print('[ZOMBIE-DIAG] DB cells count: ${rows.length}');
+      // ── ZOMBIE-V2: DB contents at startup ────────────────────────────────
+      print('[ZOMBIE-V2] DB cells count: ${rows.length}');
       for (final row in rows) {
         final cId = row['id'] as String? ?? '?';
         final cName = row['name'] as String? ?? '?';
-        print('[ZOMBIE-DIAG] DB cell: "$cName" | id: $cId'
+        print('[ZOMBIE-V2] DB cell: "$cName" | id: $cId'
+            '  tombstoned=${_deletedCellIds.contains(cId)}'
             '  dismissed=${_dismissedCellIds.contains(cId)}');
       }
       // ─────────────────────────────────────────────────────────────────────
 
-      // Filter out any cells that are in the dismissed list.
-      // This handles the case where a cell was left (dismissed) but later
-      // re-added to the DB by a replayed Kind-31004 (before the fix).
+      // Filter out cells that are tombstoned (dissolved) or dismissed (left).
+      // Handles the case where a cell was dissolved/left but still in DB due
+      // to a prior race condition (fixed by persistent tombstone list).
       for (final row in rows) {
         final cell = Cell.fromJson(row);
+        if (_deletedCellIds.contains(cell.id)) {
+          print('[ZOMBIE-V2] Removing tombstoned DB cell: "${cell.name}" ${cell.id}');
+          await PodDatabase.instance.deleteCell(cell.id);
+          continue;
+        }
         if (_dismissedCellIds.contains(cell.id)) {
-          print('[ZOMBIE-DIAG] Removing stale DB cell (dismissed): "${cell.name}" ${cell.id}');
+          print('[ZOMBIE-V2] Removing dismissed DB cell: "${cell.name}" ${cell.id}');
           await PodDatabase.instance.deleteCell(cell.id);
           continue;
         }
@@ -238,10 +252,12 @@ class CellService {
   }
 
   /// Restores a cell membership from a backup JSON map (merge – only adds if
-  /// not already a member).  Called by [BackupService].
+  /// not already a member and not tombstoned).  Called by [BackupService].
   Future<void> restoreFromBackup(Map<String, dynamic> json) async {
     try {
       final cell = Cell.fromJson(json);
+      if (_deletedCellIds.contains(cell.id)) return; // dissolved — never restore
+      if (_dismissedCellIds.contains(cell.id)) return; // left — never restore
       if (_myCells.any((c) => c.id == cell.id)) return;
       _myCells.add(cell);
       await PodDatabase.instance.upsertCell(cell.id, json);
@@ -259,20 +275,27 @@ class CellService {
   /// Announcements older than the last wipe are silently ignored so zombie
   /// cells from relays do not re-appear after a debug reset or cleanup.
   void addDiscoveredCell(Cell cell, {int? nostrCreatedAt}) {
-    // ── ZOMBIE-DIAG ───────────────────────────────────────────────────────
-    print('[ZOMBIE-DIAG] addDiscoveredCell: "${cell.name}" id=${cell.id}');
-    print('[ZOMBIE-DIAG]   nostrCreatedAt=$nostrCreatedAt  wipeAt=$_wipeAt');
-    print('[ZOMBIE-DIAG]   inDismissed=${_dismissedCellIds.contains(cell.id)}'
-        '  inMyCells=${_myCells.any((c) => c.id == cell.id)}');
-    // ─────────────────────────────────────────────────────────────────────
+    print('[ZOMBIE-V2] Event received: kind=30000, cellId=${cell.id},'
+        ' action=announcement, timestamp=$nostrCreatedAt');
+    print('[ZOMBIE-V2] Current state:'
+        ' inMyCells=${_myCells.any((c) => c.id == cell.id)}'
+        ' inDiscovered=${_discovered.any((c) => c.id == cell.id)}'
+        ' inTombstones=${_deletedCellIds.contains(cell.id)}'
+        ' inDismissed=${_dismissedCellIds.contains(cell.id)}');
 
+    // Check tombstone first — dissolved cells NEVER come back.
+    if (_deletedCellIds.contains(cell.id)) {
+      print('[ZOMBIE-V2] Import blocked by tombstone: ${cell.id}');
+      print('[ZOMBIE-V2] Decision: REJECTED (reason: cell tombstoned/dissolved)');
+      return;
+    }
     if (_myCells.any((c) => c.id == cell.id)) {
-      print('[ZOMBIE-DIAG]   RESULT: REJECTED (already in myCells)');
+      print('[ZOMBIE-V2] Decision: REJECTED (reason: already in myCells)');
       return;
     }
     if (_dismissedCellIds.contains(cell.id)) {
       print('[CELL-DEL] Import blocked for cell ${cell.id} (on block list)');
-      print('[ZOMBIE-DIAG]   RESULT: REJECTED (block list)');
+      print('[ZOMBIE-V2] Decision: REJECTED (reason: dismissed/left)');
       return;
     }
     if (nostrCreatedAt != null &&
@@ -280,13 +303,13 @@ class CellService {
         nostrCreatedAt < _wipeAt!) {
       print('[CELL-DEL] Import blocked for cell ${cell.id} '
           '(event $nostrCreatedAt < wipe $_wipeAt)');
-      print('[ZOMBIE-DIAG]   RESULT: REJECTED (older than wipe)');
+      print('[ZOMBIE-V2] Decision: REJECTED (reason: older than wipe timestamp)');
       return;
     }
-    print('[ZOMBIE-DIAG]   RESULT: ADDED to discovered');
     _discovered.removeWhere((c) => c.id == cell.id);
     _discovered.add(cell);
     _notify();
+    print('[ZOMBIE-V2] Decision: ADDED to discovered');
   }
 
   /// Records the current timestamp as the last wipe point.
@@ -303,39 +326,48 @@ class CellService {
   /// Called on member devices when a cell dissolution event is received from
   /// Nostr (Kind-30000 with deleted:true).  Removes all local state for the
   /// cell: membership, join requests, discovered entry.
+  ///
+  /// Order of operations (MUST NOT be reordered):
+  ///   1. Save tombstone persistently (synchronous in-memory write first)
+  ///   2. Clean up DB + memory (always — no wasInMyList short-circuit)
+  ///   3. Notify UI
+  ///
+  /// The DB/memory cleanup is intentionally always executed (not skipped when
+  /// the cell is "unknown locally").  A racing Kind-31004 membership
+  /// confirmation may be mid-await when this runs and will add the cell to
+  /// myCells after the cleanup — the tombstone check re-catches that case.
   Future<void> handleCellDeleted(String cellId, String cellName) async {
-    // Always add to block list first — even if this cell is unknown locally.
-    // This prevents zombie re-appearances from relays that haven't yet
-    // propagated the dissolution event (e.g., a relay still serving the old
-    // Kind-30000 announcement alongside the newer deleted one).
-    await _dismissCell(cellId);
+    print('[ZOMBIE-V2] Event received: kind=30000, cellId=$cellId,'
+        ' action=dissolution');
+    print('[ZOMBIE-V2] Current state:'
+        ' inMyCells=${_myCells.any((c) => c.id == cellId)}'
+        ' inDiscovered=${_discovered.any((c) => c.id == cellId)}'
+        ' inTombstones=${_deletedCellIds.contains(cellId)}');
 
-    // Skip expensive DB/memory cleanup if we never had this cell locally.
-    final wasInMyList = _myCells.any((c) => c.id == cellId) ||
-        _discovered.any((c) => c.id == cellId);
-    if (!wasInMyList) {
-      print('[CELL-DEL] Cell $cellId unknown locally — added to block list only');
-      return;
-    }
+    // Step 1: Persist tombstone FIRST (in-memory write is synchronous).
+    await _saveTombstone(cellId);
 
-    // Remove from DB.
+    // Step 2: Always remove from DB + memory — no early return.
+    // DB deletions are idempotent; nothing breaks if the cell isn't there.
     await PodDatabase.instance.deleteCell(cellId);
     await PodDatabase.instance.deleteCellJoinRequestsByCell(cellId);
-    // Remove members stored for this cell.
     final members = List<CellMember>.from(_members[cellId] ?? []);
     for (final m in members) {
       await PodDatabase.instance.deleteCellMember(cellId, m.did);
     }
 
-    // Remove from in-memory state.
     _myCells.removeWhere((c) => c.id == cellId);
     _discovered.removeWhere((c) => c.id == cellId);
     _members.remove(cellId);
     _requests.remove(cellId);
-    // Clean up any outgoing pending request (zombie prevention).
     _myRequests.removeWhere((r) => r.cellId == cellId);
 
+    // Step 3: Notify UI.
     _notify();
+
+    final dbCount = (await PodDatabase.instance.listCells()).length;
+    print('[ZOMBIE-V2] Decision: DELETED (reason: dissolution event)');
+    print('[ZOMBIE-V2] DB state after: $dbCount cells in DB');
     print('[CELL-DEL] Removing cell + channels from local DB: $cellId');
     print('[CELL-DEL] Cleaning up pending join requests for deleted cell: $cellId');
     print('[CELL-DEL] UI updated — cell removed from Meine Zellen: $cellName');
@@ -514,8 +546,29 @@ class CellService {
     _notify();
   }
 
+  /// Saves [cellId] to the permanent tombstone list AND the dismissed list.
+  ///
+  /// Called when a cell dissolution event is received.  Writing the tombstone
+  /// BEFORE any await means the ID is immediately visible to concurrent async
+  /// operations (e.g. a racing Kind-31004 that has already passed its guard
+  /// but not yet written to memory/DB).
+  Future<void> _saveTombstone(String cellId) async {
+    final isNew = _deletedCellIds.add(cellId); // in-memory first, synchronous
+    _dismissedCellIds.add(cellId);             // also add to dismissed
+    _discovered.removeWhere((c) => c.id == cellId);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+        _deletedCellsKey, jsonEncode(_deletedCellIds.toList()));
+    await prefs.setString(
+        _dismissedKey, jsonEncode(_dismissedCellIds.toList()));
+    if (isNew) {
+      print('[ZOMBIE-V2] Storing tombstone for cellId: $cellId');
+      print('[ZOMBIE-V2] Tombstone list size: ${_deletedCellIds.length}');
+    }
+  }
+
   /// Persists [cellId] to the dismissed list so it never re-appears in
-  /// discovery after a Nostr re-subscription.
+  /// discovery after a Nostr re-subscription.  Used for voluntary leave/remove.
   Future<void> _dismissCell(String cellId) async {
     if (_dismissedCellIds.contains(cellId)) return;
     _dismissedCellIds.add(cellId);
@@ -713,32 +766,52 @@ class CellService {
   }
 
   /// Handles a confirmed membership notification from Nostr.
+  ///
+  /// Race-condition-safe: checks the tombstone/dismissed lists both BEFORE
+  /// and AFTER every await so a concurrent dissolution event cannot sneak in
+  /// between the guard check and the actual DB/memory write.
   Future<void> handleMembershipConfirmed(Cell cell, CellMember member) async {
-    // ── ZOMBIE-DIAG ───────────────────────────────────────────────────────
-    print('[ZOMBIE-DIAG] Incoming Kind-31004 for cell: "${cell.name}" id=${cell.id}');
-    print('[ZOMBIE-DIAG]   inDismissed=${_dismissedCellIds.contains(cell.id)}'
-        '  inMyCells=${_myCells.any((c) => c.id == cell.id)}');
-    // ─────────────────────────────────────────────────────────────────────
+    print('[ZOMBIE-V2] Event received: kind=31004, cellId=${cell.id},'
+        ' action=membership_confirmed');
+    print('[ZOMBIE-V2] Current state:'
+        ' inMyCells=${_myCells.any((c) => c.id == cell.id)}'
+        ' inTombstones=${_deletedCellIds.contains(cell.id)}'
+        ' inDismissed=${_dismissedCellIds.contains(cell.id)}');
 
-    // Ignore confirmations for cells the user has already left or that were
-    // dissolved.  The Kind-31004 may still be on the relay (7-day window) and
-    // would otherwise silently re-add a left cell to Meine Zellen.
-    if (_dismissedCellIds.contains(cell.id)) {
-      print('[JOIN] Ignoring membership confirmation for dismissed cell: ${cell.id}');
-      print('[ZOMBIE-DIAG]   RESULT: BLOCKED (dismissed)');
+    // Guard 1 (pre-await): check tombstone + dismissed.
+    if (_deletedCellIds.contains(cell.id)) {
+      print('[ZOMBIE-V2] Import blocked by tombstone: ${cell.id}');
+      print('[ZOMBIE-V2] Decision: REJECTED (reason: cell tombstoned/dissolved)');
       return;
     }
-    // Check if we already know this cell.
+    if (_dismissedCellIds.contains(cell.id)) {
+      print('[JOIN] Ignoring membership confirmation for dismissed cell: ${cell.id}');
+      print('[ZOMBIE-V2] Decision: REJECTED (reason: dismissed/left)');
+      return;
+    }
+
     if (!_myCells.any((c) => c.id == cell.id)) {
-      print('[ZOMBIE-DIAG] WRITING CELL TO DB: "${cell.name}" id=${cell.id} source=membership_confirmed');
       await PodDatabase.instance.upsertCell(cell.id, cell.toJson());
+
+      // Guard 2 (post-await): a dissolution event may have arrived and saved
+      // its tombstone while we were waiting for the DB write above.
+      if (_deletedCellIds.contains(cell.id) ||
+          _dismissedCellIds.contains(cell.id)) {
+        // Undo the DB insert — tombstone wins.
+        await PodDatabase.instance.deleteCell(cell.id);
+        print('[ZOMBIE-V2] Post-await guard triggered for ${cell.id} —'
+            ' tombstone arrived during DB write, rolling back');
+        print('[ZOMBIE-V2] Decision: REJECTED (reason: tombstone arrived during await)');
+        return;
+      }
+
+      print('[ZOMBIE-V2] Decision: ADDED to myCells (source: membership_confirmed)');
       _myCells.add(cell);
       _members[cell.id] = [];
       _requests[cell.id] = [];
     }
-    print('[ZOMBIE-DIAG]   RESULT: PROCESSED (cell added/updated in myCells)');
-    (_members[cell.id] ??= [])
-        .removeWhere((m) => m.did == member.did);
+
+    (_members[cell.id] ??= []).removeWhere((m) => m.did == member.did);
     (_members[cell.id] ??= []).add(member);
     await PodDatabase.instance.upsertCellMember(
         cell.id, member.did, member.toJson());
