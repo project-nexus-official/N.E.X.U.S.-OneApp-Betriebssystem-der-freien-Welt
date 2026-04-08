@@ -1135,6 +1135,16 @@ class NostrTransport implements MessageTransport {
       final data = jsonDecode(event.content) as Map<String, dynamic>;
       final cellId = data['id'] as String? ?? event.tagValue('d') ?? '?';
       final cellName = data['name'] as String? ?? '?';
+      final isOwnPubkey = _keys != null && event.pubkey == _keys!.publicKeyHex;
+
+      // ── ZOMBIE-V3 ────────────────────────────────────────────────────────
+      print('[ZOMBIE-V3] Nostr event: kind=30000, id=${event.id.substring(0, 8)}…,'
+          ' cellId=$cellId, name="$cellName",'
+          ' from=${event.pubkey.substring(0, 8)}…,'
+          ' self=$isOwnPubkey,'
+          ' deleted=$isDeletedByTag,'
+          ' createdAt=${event.createdAt}');
+      // ────────────────────────────────────────────────────────────────────
 
       // ── ZOMBIE-DIAG ─────────────────────────────────────────────────────
       print('[ZOMBIE-DIAG] Incoming Kind-30000: "$cellName" id=$cellId'

@@ -135,6 +135,12 @@ class CellService {
       print('[ZOMBIE-V2] Wipe timestamp: ${rawWipeAt ?? "NOT SET"}');
       // ─────────────────────────────────────────────────────────────────────
 
+      // ── ZOMBIE-V3: tombstone state at load time ───────────────────────────
+      print('[ZOMBIE-V3] Tombstones at load: ${_deletedCellIds.length} -> ${_deletedCellIds.toList()}');
+      print('[ZOMBIE-V3] Dismissed at load: ${_dismissedCellIds.length} -> ${_dismissedCellIds.toList()}');
+      print('[ZOMBIE-V3] WipeAt at load: ${rawWipeAt ?? "NOT SET"}');
+      // ─────────────────────────────────────────────────────────────────────
+
       final rows = await PodDatabase.instance.listCells();
       _myCells.clear();
 
@@ -164,6 +170,10 @@ class CellService {
           await PodDatabase.instance.deleteCell(cell.id);
           continue;
         }
+        print('[ZOMBIE-V3] WRITE PATH: db_import, cellId=${cell.id}, name="${cell.name}"');
+        print('[ZOMBIE-V3] Is in tombstones? ${_deletedCellIds.contains(cell.id)}');
+        print('[ZOMBIE-V3] Is in dismissed? ${_dismissedCellIds.contains(cell.id)}');
+        print('[ZOMBIE-V3] Decision: ALLOWED (loaded from DB)');
         _myCells.add(cell);
       }
 
@@ -256,9 +266,22 @@ class CellService {
   Future<void> restoreFromBackup(Map<String, dynamic> json) async {
     try {
       final cell = Cell.fromJson(json);
-      if (_deletedCellIds.contains(cell.id)) return; // dissolved — never restore
-      if (_dismissedCellIds.contains(cell.id)) return; // left — never restore
-      if (_myCells.any((c) => c.id == cell.id)) return;
+      print('[ZOMBIE-V3] WRITE PATH: restoreFromBackup, cellId=${cell.id}, name="${cell.name}", source=backup');
+      print('[ZOMBIE-V3] Is in tombstones? ${_deletedCellIds.contains(cell.id)}');
+      print('[ZOMBIE-V3] Is in dismissed? ${_dismissedCellIds.contains(cell.id)}');
+      if (_deletedCellIds.contains(cell.id)) {
+        print('[ZOMBIE-V3] Decision: BLOCKED (tombstoned)');
+        return; // dissolved — never restore
+      }
+      if (_dismissedCellIds.contains(cell.id)) {
+        print('[ZOMBIE-V3] Decision: BLOCKED (dismissed)');
+        return; // left — never restore
+      }
+      if (_myCells.any((c) => c.id == cell.id)) {
+        print('[ZOMBIE-V3] Decision: BLOCKED (already in myCells)');
+        return;
+      }
+      print('[ZOMBIE-V3] Decision: ALLOWED (restored from backup)');
       _myCells.add(cell);
       await PodDatabase.instance.upsertCell(cell.id, json);
       _notify();
@@ -275,6 +298,10 @@ class CellService {
   /// Announcements older than the last wipe are silently ignored so zombie
   /// cells from relays do not re-appear after a debug reset or cleanup.
   void addDiscoveredCell(Cell cell, {int? nostrCreatedAt}) {
+    print('[ZOMBIE-V3] WRITE PATH: addDiscoveredCell, cellId=${cell.id}, name="${cell.name}", source=Kind30000');
+    print('[ZOMBIE-V3] Is in tombstones? ${_deletedCellIds.contains(cell.id)}');
+    print('[ZOMBIE-V3] Is in dismissed? ${_dismissedCellIds.contains(cell.id)}');
+    print('[ZOMBIE-V3] WipeAt=$_wipeAt, nostrCreatedAt=$nostrCreatedAt, blocked_by_wipe=${_wipeAt != null && nostrCreatedAt != null && nostrCreatedAt < _wipeAt!}');
     print('[ZOMBIE-V2] Event received: kind=30000, cellId=${cell.id},'
         ' action=announcement, timestamp=$nostrCreatedAt');
     print('[ZOMBIE-V2] Current state:'
@@ -309,6 +336,7 @@ class CellService {
     _discovered.removeWhere((c) => c.id == cell.id);
     _discovered.add(cell);
     _notify();
+    print('[ZOMBIE-V3] Decision: ALLOWED (added to discovered)');
     print('[ZOMBIE-V2] Decision: ADDED to discovered');
   }
 
@@ -809,6 +837,9 @@ class CellService {
   /// and AFTER every await so a concurrent dissolution event cannot sneak in
   /// between the guard check and the actual DB/memory write.
   Future<void> handleMembershipConfirmed(Cell cell, CellMember member) async {
+    print('[ZOMBIE-V3] WRITE PATH: handleMembershipConfirmed, cellId=${cell.id}, name="${cell.name}", source=Kind31004');
+    print('[ZOMBIE-V3] Is in tombstones? ${_deletedCellIds.contains(cell.id)}');
+    print('[ZOMBIE-V3] Is in dismissed? ${_dismissedCellIds.contains(cell.id)}');
     print('[ZOMBIE-V2] Event received: kind=31004, cellId=${cell.id},'
         ' action=membership_confirmed');
     print('[ZOMBIE-V2] Current state:'
@@ -843,6 +874,7 @@ class CellService {
         return;
       }
 
+      print('[ZOMBIE-V3] Decision: ALLOWED (added to myCells, source: Kind31004)');
       print('[ZOMBIE-V2] Decision: ADDED to myCells (source: membership_confirmed)');
       _myCells.add(cell);
       _members[cell.id] = [];
