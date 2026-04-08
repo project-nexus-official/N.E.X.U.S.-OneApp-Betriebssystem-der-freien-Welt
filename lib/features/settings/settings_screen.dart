@@ -25,7 +25,11 @@ import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/update_bottom_sheet.dart';
 import '../chat/chat_provider.dart';
 import '../contacts/widgets/trust_badge.dart';
+import '../../features/governance/cell_member.dart';
 import '../../features/governance/cell_service.dart';
+import '../../features/governance/proposal.dart';
+import '../../features/governance/proposal_service.dart';
+import '../../features/governance/vote.dart';
 import 'admin_cell_management_screen.dart';
 import 'admin_management_screen.dart';
 import 'nostr_settings_screen.dart';
@@ -126,6 +130,7 @@ class SettingsScreen extends StatelessWidget {
             onTap: () => _showAbout(context),
           ),
           const _AppVersionSection(),
+          const _G2DebugSection(),
         ],
       ),
     );
@@ -1214,5 +1219,335 @@ class _BackupSectionState extends State<_BackupSection> {
         ),
       ],
     );
+  }
+}
+
+// ── G2 Debug Section (temporär – wird nach Prompt 1C entfernt) ─────────────────
+
+/// Nur sichtbar für Superadmin.  Enthält Buttons zum manuellen Testen der
+/// G2-Governance-Funktionalität ohne UI (Prompt 1C kommt später).
+class _G2DebugSection extends StatelessWidget {
+  const _G2DebugSection();
+
+  @override
+  Widget build(BuildContext context) {
+    final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+    if (!RoleService.instance.isSuperadmin(myDid)) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionHeader('🧪 G2 Debug (temporär)'),
+        _debugTile(
+          context,
+          icon: Icons.add_task,
+          label: 'G2 Test-Antrag erstellen',
+          onTap: () => _createTestProposal(context),
+        ),
+        _debugTile(
+          context,
+          icon: Icons.how_to_vote_outlined,
+          label: 'G2 Test-Antrag → Voting starten',
+          onTap: () => _startTestVoting(context),
+        ),
+        _debugTile(
+          context,
+          icon: Icons.thumb_up_outlined,
+          label: 'G2 Test-Vote: JA',
+          onTap: () => _castTestVote(context, VoteChoice.YES, 'Debug Test JA'),
+        ),
+        _debugTile(
+          context,
+          icon: Icons.thumb_down_outlined,
+          label: 'G2 Test-Vote: NEIN',
+          onTap: () => _castTestVote(context, VoteChoice.NO, 'Debug Test NEIN'),
+        ),
+        _debugTile(
+          context,
+          icon: Icons.fast_forward,
+          label: 'G2 Test-Voting beenden (Force)',
+          onTap: () => _forceFinalize(context),
+        ),
+        _debugTile(
+          context,
+          icon: Icons.receipt_long,
+          label: 'G2 Audit-Log anzeigen',
+          onTap: () => _showAuditLog(context),
+        ),
+        _debugTile(
+          context,
+          icon: Icons.delete_sweep,
+          label: '🗑️ G2 Test-Anträge löschen',
+          onTap: () => _cleanupTestProposals(context),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: Text(
+            'Diese Buttons werden nach Prompt 1C (UI) entfernt.',
+            style: TextStyle(
+              fontSize: 11,
+              color: Colors.amber.withValues(alpha: 0.6),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _debugTile(BuildContext context,
+      {required IconData icon,
+      required String label,
+      required VoidCallback onTap}) {
+    return ListTile(
+      dense: true,
+      leading: Icon(icon, color: Colors.amber, size: 20),
+      title: Text(label,
+          style: const TextStyle(color: Colors.amber, fontSize: 14)),
+      onTap: onTap,
+    );
+  }
+
+  // ── Helpers ─────────────────────────────────────────────────────────────────
+
+  Proposal? _findTestProposal(ProposalStatus status) {
+    final proposals = ProposalService.instance.allProposals
+        .where((p) =>
+            p.title.startsWith('G2 Test-Antrag') && p.status == status)
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return proposals.firstOrNull;
+  }
+
+  void _snack(BuildContext context, String msg,
+      {bool error = false}) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: error ? Colors.red.shade700 : Colors.green.shade700,
+      duration: const Duration(seconds: 4),
+    ));
+  }
+
+  // ── Button handlers ──────────────────────────────────────────────────────────
+
+  Future<void> _createTestProposal(BuildContext context) async {
+    print('[G2-DEBUG] _createTestProposal called');
+    final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+    final myPseudonym = IdentityService.instance.currentIdentity?.pseudonym ?? '';
+
+    // Finde erste Zelle in der der User bestätigtes Mitglied ist.
+    final cells = CellService.instance.myCells;
+    String? cellId;
+    for (final cell in cells) {
+      final membership = CellService.instance.myMembershipIn(cell.id);
+      if (membership != null &&
+          membership.isConfirmed &&
+          membership.role != MemberRole.pending) {
+        cellId = cell.id;
+        break;
+      }
+    }
+
+    if (cellId == null) {
+      print('[G2-DEBUG] No cell found');
+      _snack(context, 'Erstelle zuerst eine Zelle', error: true);
+      return;
+    }
+
+    try {
+      final proposal = await ProposalService.instance.createDraft(
+        cellId: cellId,
+        creatorDid: myDid,
+        creatorPseudonym: myPseudonym,
+        title: 'G2 Test-Antrag ${DateTime.now().toIso8601String().substring(0, 19)}',
+        description: 'Dies ist ein automatischer Test-Antrag für G2. '
+            'Status wird sofort auf DISCUSSION gesetzt.',
+        category: 'Sonstiges',
+      );
+      print('[G2-DEBUG] Draft created: ${proposal.id}');
+
+      await ProposalService.instance.publishToDiscussion(proposal.id);
+      print('[G2-DEBUG] Published to DISCUSSION: ${proposal.id}');
+
+      _snack(context,
+          '✅ Test-Antrag erstellt und publiziert: ${proposal.id.substring(0, 8)}…');
+    } catch (e) {
+      print('[G2-DEBUG] _createTestProposal error: $e');
+      _snack(context, '❌ Fehler: $e', error: true);
+    }
+  }
+
+  Future<void> _startTestVoting(BuildContext context) async {
+    print('[G2-DEBUG] _startTestVoting called');
+    final p = _findTestProposal(ProposalStatus.DISCUSSION);
+    if (p == null) {
+      _snack(context, 'Kein Test-Antrag in DISCUSSION gefunden', error: true);
+      return;
+    }
+    try {
+      // proposalWaitDays überspringen: Zelle hat normalerweise 0 Tage für Tests.
+      await ProposalService.instance.startVoting(p.id);
+      print('[G2-DEBUG] Voting started: ${p.id}');
+      _snack(context, '✅ Voting gestartet für: ${p.title.substring(0, 30)}…');
+    } catch (e) {
+      print('[G2-DEBUG] _startTestVoting error: $e');
+      _snack(context, '❌ Fehler: $e', error: true);
+    }
+  }
+
+  Future<void> _castTestVote(
+      BuildContext context, VoteChoice choice, String reasoning) async {
+    print('[G2-DEBUG] _castTestVote: $choice');
+    final p = _findTestProposal(ProposalStatus.VOTING);
+    if (p == null) {
+      _snack(context, 'Kein Test-Antrag in VOTING gefunden', error: true);
+      return;
+    }
+    try {
+      await ProposalService.instance.castVote(p.id, choice, reasoning: reasoning);
+      print('[G2-DEBUG] Vote cast: $choice on ${p.id}');
+      _snack(context,
+          '✅ Stimme abgegeben: ${choice.name} für "${p.title.substring(0, 30)}…"');
+    } catch (e) {
+      print('[G2-DEBUG] _castTestVote error: $e');
+      _snack(context, '❌ Fehler: $e', error: true);
+    }
+  }
+
+  Future<void> _forceFinalize(BuildContext context) async {
+    print('[G2-DEBUG] _forceFinalize called');
+    final p = _findTestProposal(ProposalStatus.VOTING);
+    if (p == null) {
+      _snack(context, 'Kein Test-Antrag in VOTING gefunden', error: true);
+      return;
+    }
+    try {
+      // Voting-Deadline auf jetzt setzen damit Grace-Period sofort endet.
+      p.votingEndsAt = DateTime.now().toUtc().subtract(const Duration(seconds: 1));
+      p.gracePeriodHours = 0;
+      await PodDatabase.instance.upsertProposal(p.id, p.cellId, p.toMap());
+      print('[G2-DEBUG] votingEndsAt forced to now, gracePeriodHours=0');
+
+      await ProposalService.instance.processGracePeriodStart(p.id);
+      print('[G2-DEBUG] Grace period started');
+
+      await ProposalService.instance.finalizeProposal(p.id);
+      print('[G2-DEBUG] Proposal finalized');
+
+      final result = p.resultSummary ?? '?';
+      _snack(context, '✅ Antrag finalisiert: $result '
+          '(J:${p.resultYes ?? 0} N:${p.resultNo ?? 0} '
+          'E:${p.resultAbstain ?? 0})');
+    } catch (e) {
+      print('[G2-DEBUG] _forceFinalize error: $e');
+      _snack(context, '❌ Fehler: $e', error: true);
+    }
+  }
+
+  Future<void> _showAuditLog(BuildContext context) async {
+    print('[G2-DEBUG] _showAuditLog called');
+
+    // Finde neuesten Test-Antrag (beliebiger Status außer DRAFT).
+    final proposals = ProposalService.instance.allProposals
+        .where((p) => p.title.startsWith('G2 Test-Antrag'))
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+    if (proposals.isEmpty) {
+      _snack(context, 'Kein Test-Antrag gefunden', error: true);
+      return;
+    }
+
+    final p = proposals.first;
+    final entries = await ProposalService.instance.getAuditLog(p.id);
+    final recent = entries.reversed.take(20).toList();
+
+    if (!context.mounted) return;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: Text(
+          'Audit-Log: ${p.title.substring(0, p.title.length.clamp(0, 30))}…',
+          style: const TextStyle(color: Colors.amber, fontSize: 14),
+        ),
+        content: SizedBox(
+          width: 400,
+          height: 400,
+          child: recent.isEmpty
+              ? const Center(
+                  child: Text('Keine Einträge',
+                      style: TextStyle(color: Colors.white54)))
+              : ListView.separated(
+                  itemCount: recent.length,
+                  separatorBuilder: (_, __) => const Divider(
+                      height: 1, color: Colors.white12),
+                  itemBuilder: (_, i) {
+                    final e = recent[i];
+                    final ts = e.timestamp
+                        .toLocal()
+                        .toIso8601String()
+                        .substring(11, 19);
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Text(
+                        '[$ts] ${e.eventType.name}\n  → ${e.actorPseudonym.isEmpty ? e.actorDid.substring(0, 12) : e.actorPseudonym}',
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 11),
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Schließen',
+                style: TextStyle(color: Colors.amber)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _cleanupTestProposals(BuildContext context) async {
+    print('[G2-DEBUG] _cleanupTestProposals called');
+    final all = ProposalService.instance.allProposals
+        .where((p) => p.title.startsWith('G2 Test-Antrag'))
+        .toList();
+
+    print('[G2-DEBUG] Cleanup found ${all.length} test proposals');
+
+    if (all.isEmpty) {
+      _snack(context, 'Keine Test-Anträge gefunden');
+      return;
+    }
+
+    int deleted = 0;
+    for (final p in all) {
+      try {
+        print('[G2-DEBUG] Withdrawing test proposal: ${p.id}');
+        // Withdraw and publish Kind-31010 with status "withdrawn" so other
+        // devices also clean up, but only if not already withdrawn/archived.
+        if (p.status != ProposalStatus.WITHDRAWN &&
+            p.status != ProposalStatus.ARCHIVED) {
+          await ProposalService.instance.withdrawProposal(p.id);
+        }
+        // Hard-delete all local data for this proposal.
+        await PodDatabase.instance.deleteProposal(p.id);
+        await PodDatabase.instance.deleteVotesForProposal(p.id);
+        await PodDatabase.instance.deleteEditsForProposal(p.id);
+        await PodDatabase.instance.deleteAuditLogForProposal(p.id);
+        await PodDatabase.instance.deleteDecisionRecord(p.id);
+        deleted++;
+      } catch (e) {
+        print('[G2-DEBUG] Cleanup error for ${p.id}: $e');
+      }
+    }
+
+    print('[G2-DEBUG] Cleanup complete: $deleted deleted');
+    if (context.mounted) {
+      _snack(context, '✅ $deleted Test-Anträge gelöscht und bereinigt');
+    }
   }
 }

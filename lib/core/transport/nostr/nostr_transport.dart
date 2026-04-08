@@ -145,6 +145,27 @@ class NostrTransport implements MessageTransport {
   Stream<Map<String, dynamic>> get onFeedComment =>
       _feedCommentController.stream;
 
+  // G2 governance streams ───────────────────────────────────────────────────
+
+  final _proposalEventController = StreamController<NostrEvent>.broadcast();
+  final _voteEventController = StreamController<NostrEvent>.broadcast();
+  final _decisionRecordController = StreamController<NostrEvent>.broadcast();
+
+  /// Emits Kind-31010 proposal events received from Nostr.
+  Stream<NostrEvent> get onProposalEvent => _proposalEventController.stream;
+
+  /// Emits Kind-31011 vote events received from Nostr.
+  Stream<NostrEvent> get onVoteEvent => _voteEventController.stream;
+
+  /// Emits Kind-31013 decision record events received from Nostr.
+  Stream<NostrEvent> get onDecisionRecordEvent =>
+      _decisionRecordController.stream;
+
+  // Active subscription IDs for governance events (cell-filtered).
+  String? _proposalSubId;
+  String? _voteSubId;
+  String? _decisionSubId;
+
   final _feedReactionController =
       StreamController<Map<String, dynamic>>.broadcast();
 
@@ -290,6 +311,12 @@ class NostrTransport implements MessageTransport {
       _relayManager.closeSubscription(_channelDiscoverySubId!);
     }
     if (_feedSubId != null) _relayManager.closeSubscription(_feedSubId!);
+    if (_proposalSubId != null) _relayManager.closeSubscription(_proposalSubId!);
+    if (_voteSubId != null) _relayManager.closeSubscription(_voteSubId!);
+    if (_decisionSubId != null) _relayManager.closeSubscription(_decisionSubId!);
+    _proposalSubId = null;
+    _voteSubId = null;
+    _decisionSubId = null;
     for (final subId in _channelSubIds.values) {
       _relayManager.closeSubscription(subId);
     }
@@ -578,6 +605,205 @@ class NostrTransport implements MessageTransport {
     _relayManager.publish(event);
     print('[NOSTR] Feed Kind-$kind published: ${event.id.substring(0, 8)}…');
     return event.id;
+  }
+
+  // ── G2 Governance publishing ──────────────────────────────────────────────
+
+  /// Publishes a Kind-31010 proposal lifecycle event (NIP-33 parameterized
+  /// replaceable). Returns true on success, false if keys are not ready.
+  Future<bool> publishProposalEvent({
+    required String proposalId,
+    required String cellId,
+    required String type,
+    required String status,
+    required String title,
+    required String description,
+    required String creatorDid,
+    required String creatorPseudonym,
+    required DateTime createdAt,
+    required int version,
+    String? category,
+    DateTime? votingEndsAt,
+    String? editReason,
+  }) async {
+    if (_keys == null) return false;
+    print('[PROPOSAL] Publishing Kind-31010 d-tag=$proposalId v=$version '
+        'status=$status');
+    try {
+      final tags = <List<String>>[
+        ['d', proposalId],
+        ['t', 'nexus-proposal'],
+        ['cell', cellId],
+        ['type', type.toLowerCase()],
+        ['status', status.toLowerCase()],
+        ['version', version.toString()],
+      ];
+      if (votingEndsAt != null) {
+        tags.add([
+          'voting_ends_at',
+          (votingEndsAt.millisecondsSinceEpoch ~/ 1000).toString(),
+        ]);
+      }
+      if (category != null && category.isNotEmpty) {
+        tags.add(['category', category]);
+      }
+      final content = <String, dynamic>{
+        'title': title,
+        'description': description,
+        'creatorDid': creatorDid,
+        'creatorPseudonym': creatorPseudonym,
+        'createdAt': createdAt.millisecondsSinceEpoch ~/ 1000,
+        'version': version,
+        if (editReason != null) 'editReason': editReason,
+      };
+      final event = NostrEvent.create(
+        keys: _keys!,
+        kind: NostrKind.proposalEvent,
+        content: jsonEncode(content),
+        tags: tags,
+      );
+      _relayManager.publish(event);
+      return true;
+    } catch (e) {
+      print('[PROPOSAL] publishProposalEvent error: $e');
+      return false;
+    }
+  }
+
+  /// Publishes a Kind-31011 vote event (NIP-33 parameterized replaceable).
+  /// The d-tag is "${proposalId}:${voterPubkeyHex}" to ensure at-most-one
+  /// vote per voter per proposal on compliant relays.
+  /// Returns true on success, false if keys are not ready.
+  Future<bool> publishVoteEvent({
+    required String proposalId,
+    required String cellId,
+    required String voteId,
+    required String choiceName,
+    required String voterDid,
+    required String voterPseudonym,
+    required DateTime createdAt,
+    String? reasoning,
+  }) async {
+    if (_keys == null) return false;
+    final voterPubkey = _keys!.publicKeyHex;
+    final dTag = '$proposalId:$voterPubkey';
+    print('[VOTE] Publishing Kind-31011 d-tag=$dTag choice=$choiceName');
+    try {
+      final tags = <List<String>>[
+        ['d', dTag],
+        ['t', 'nexus-vote'],
+        ['cell', cellId],
+        ['e', proposalId],
+        ['choice', choiceName.toLowerCase()],
+        ['weight', '1'],
+      ];
+      final content = <String, dynamic>{
+        'voteId': voteId,
+        'voterDid': voterDid,
+        'voterPseudonym': voterPseudonym,
+        'createdAt': createdAt.millisecondsSinceEpoch ~/ 1000,
+        if (reasoning != null) 'reasoning': reasoning,
+      };
+      final event = NostrEvent.create(
+        keys: _keys!,
+        kind: NostrKind.voteEvent,
+        content: jsonEncode(content),
+        tags: tags,
+      );
+      _relayManager.publish(event);
+      return true;
+    } catch (e) {
+      print('[VOTE] publishVoteEvent error: $e');
+      return false;
+    }
+  }
+
+  /// Publishes a Kind-31013 decision record (normal, non-replaceable event).
+  /// Returns true on success, false if keys are not ready.
+  Future<bool> publishDecisionRecord({
+    required String proposalId,
+    required String cellId,
+    required Map<String, dynamic> recordContent,
+    required String result,
+    required String contentHash,
+    String? previousDecisionHash,
+  }) async {
+    if (_keys == null) return false;
+    print('[PROPOSAL] Publishing Kind-31013 record for proposal=$proposalId '
+        'result=$result hash=${contentHash.substring(0, 8)}…');
+    try {
+      final tags = <List<String>>[
+        ['t', 'nexus-decision'],
+        ['cell', cellId],
+        ['e', proposalId],
+        ['result', result],
+        ['prev_hash', previousDecisionHash ?? ''],
+        ['content_hash', contentHash],
+      ];
+      final event = NostrEvent.create(
+        keys: _keys!,
+        kind: NostrKind.decisionRecord,
+        content: jsonEncode(recordContent),
+        tags: tags,
+      );
+      _relayManager.publish(event);
+      return true;
+    } catch (e) {
+      print('[PROPOSAL] publishDecisionRecord error: $e');
+      return false;
+    }
+  }
+
+  /// Refreshes governance (proposal/vote/decision) subscriptions for the
+  /// given cell IDs.  Call this after joining or leaving a cell.
+  void refreshGovernanceSubscriptions(List<String> cellIds) {
+    if (_keys == null) return;
+    if (cellIds.isEmpty) {
+      // No cells — close existing subs if any.
+      if (_proposalSubId != null) {
+        _relayManager.closeSubscription(_proposalSubId!);
+        _proposalSubId = null;
+      }
+      if (_voteSubId != null) {
+        _relayManager.closeSubscription(_voteSubId!);
+        _voteSubId = null;
+      }
+      if (_decisionSubId != null) {
+        _relayManager.closeSubscription(_decisionSubId!);
+        _decisionSubId = null;
+      }
+      return;
+    }
+
+    final nowSeconds = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
+    final since = nowSeconds - 30 * 86400; // 30 days back
+
+    if (_proposalSubId != null) _relayManager.closeSubscription(_proposalSubId!);
+    _proposalSubId = _relayManager.subscribe({
+      'kinds': [NostrKind.proposalEvent],
+      '#t': ['nexus-proposal'],
+      '#cell': cellIds,
+      'since': since,
+    });
+    print('[PROPOSAL] Proposal sub: $_proposalSubId  (${cellIds.length} cells)');
+
+    if (_voteSubId != null) _relayManager.closeSubscription(_voteSubId!);
+    _voteSubId = _relayManager.subscribe({
+      'kinds': [NostrKind.voteEvent],
+      '#t': ['nexus-vote'],
+      '#cell': cellIds,
+      'since': since,
+    });
+    print('[VOTE] Vote sub: $_voteSubId  (${cellIds.length} cells)');
+
+    if (_decisionSubId != null) _relayManager.closeSubscription(_decisionSubId!);
+    _decisionSubId = _relayManager.subscribe({
+      'kinds': [NostrKind.decisionRecord],
+      '#t': ['nexus-decision'],
+      '#cell': cellIds,
+      'since': since,
+    });
+    print('[PROPOSAL] Decision sub: $_decisionSubId  (${cellIds.length} cells)');
   }
 
   // ── Sending ───────────────────────────────────────────────────────────────
@@ -1033,6 +1259,45 @@ class NostrTransport implements MessageTransport {
       print('[NOSTR] Feed author-sync sub: ${feedAuthors.length} authors '
           '(own + contacts), last 30 days');
     }
+
+    // G2 governance — proposals, votes, decision records for all joined cells.
+    // Import is deferred to avoid circular dependency; access via late import.
+    _setupGovernanceSubscriptions();
+  }
+
+  /// Sets up proposal/vote/decision subscriptions for all cells the local user
+  /// is currently a member of.  Called from [_setupSubscriptions] and also
+  /// by [refreshGovernanceSubscriptions] when the cell list changes.
+  void _setupGovernanceSubscriptions() {
+    // Lazy import pattern: access CellService via its singleton.
+    // We need the cellIds of all cells the user has joined.
+    try {
+      // CellService is initialized before NostrTransport starts, so this is safe.
+      // We import it dynamically to avoid a circular dependency at the file level.
+      // The import is already present in the file (cell_service is separate package).
+      // We use a helper that ChatProvider can set to provide the cell ID list.
+      final cellIds = _governanceCellIds;
+      if (cellIds.isEmpty) {
+        print('[PROPOSAL] No cells to subscribe to governance events');
+        return;
+      }
+      refreshGovernanceSubscriptions(cellIds);
+    } catch (e) {
+      print('[PROPOSAL] _setupGovernanceSubscriptions error: $e');
+    }
+  }
+
+  /// Cell IDs to subscribe governance events for.  Set by [ChatProvider] after
+  /// joining/leaving cells so subscriptions stay accurate.
+  List<String> _governanceCellIds = [];
+
+  /// Updates the list of cell IDs used for governance subscriptions and
+  /// refreshes the subscriptions immediately.
+  void updateGovernanceCellIds(List<String> cellIds) {
+    _governanceCellIds = List.from(cellIds);
+    if (_keys != null && _state == TransportState.connected) {
+      refreshGovernanceSubscriptions(_governanceCellIds);
+    }
   }
 
   /// Re-runs [_setupSubscriptions] so that freshly restored contacts, channels,
@@ -1081,7 +1346,28 @@ class NostrTransport implements MessageTransport {
         _handleCellMembershipConfirmedEvent(event);
       case NostrKind.cellMemberUpdate:
         _handleCellMemberUpdateEvent(event);
+      case NostrKind.proposalEvent:
+        _handleProposalEvent(event);
+      case NostrKind.voteEvent:
+        _handleVoteEvent(event);
+      case NostrKind.decisionRecord:
+        _handleDecisionRecordEvent(event);
     }
+  }
+
+  void _handleProposalEvent(NostrEvent event) {
+    print('[PROPOSAL] Kind-31010 received: ${event.id}');
+    _proposalEventController.add(event);
+  }
+
+  void _handleVoteEvent(NostrEvent event) {
+    print('[VOTE] handleIncomingVote: ${event.id}');
+    _voteEventController.add(event);
+  }
+
+  void _handleDecisionRecordEvent(NostrEvent event) {
+    print('[PROPOSAL] Kind-31013 decision record received: ${event.id}');
+    _decisionRecordController.add(event);
   }
 
   void _handleFeedPost(NostrEvent event) {

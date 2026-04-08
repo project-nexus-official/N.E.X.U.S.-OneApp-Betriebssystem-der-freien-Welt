@@ -87,6 +87,38 @@ class NostrKind {
   /// Tags: ['t','nexus-cell-member-update'], ['d', eventId], ['cell', cellId]
   /// Content: JSON { 'cellId', 'targetDid', 'action': 'left'|'removed', 'reason'? }
   static const int cellMemberUpdate = 31005;
+
+  /// G2 governance – proposal lifecycle event (Parameterized Replaceable, NIP-33).
+  ///
+  /// d-tag: proposalId. Replaces the previous event on relays when the
+  /// proposal is edited or its status changes.
+  /// Tags: ['d',id], ['t','nexus-proposal'], ['cell',cellId],
+  ///        ['type',type], ['status',status], ['version',v],
+  ///        optionally ['voting_ends_at',ts], ['category',cat]
+  /// Content: JSON { title, description, creatorDid, creatorPseudonym,
+  ///                 createdAt, version, editReason? }
+  static const int proposalEvent = 31010;
+
+  /// G2 governance – vote event (Parameterized Replaceable, NIP-33).
+  ///
+  /// d-tag: "${proposalId}:${voterPubkeyHex}" — ensures exactly one vote per
+  /// voter per proposal.  A later event with the same d-tag replaces the old
+  /// one automatically on compliant relays, implementing change-vote.
+  /// Tags: ['d',"${pid}:${pubkey}"], ['t','nexus-vote'], ['cell',cellId],
+  ///        ['e',proposalId], ['choice',yes|no|abstain], ['weight','1']
+  /// Content: JSON { voteId, voterDid, voterPseudonym, reasoning?, createdAt }
+  static const int voteEvent = 31011;
+
+  /// G2 governance – immutable decision record (normal event, NOT replaceable).
+  ///
+  /// Published once after a proposal is finalised.
+  /// Tags: ['t','nexus-decision'], ['cell',cellId], ['e',proposalId],
+  ///        ['result',approved|rejected|invalid],
+  ///        ['prev_hash',previousHash|''], ['content_hash',sha256hex]
+  /// Content: JSON { proposalId, finalTitle, finalDescription, result,
+  ///                 yesVotes, noVotes, abstainVotes, participation,
+  ///                 decidedAt, allVotes[] }
+  static const int decisionRecord = 31013;
 }
 
 /// A NIP-01 Nostr event.

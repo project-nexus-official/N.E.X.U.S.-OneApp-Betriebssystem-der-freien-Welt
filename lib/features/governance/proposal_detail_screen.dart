@@ -166,26 +166,65 @@ class _Timeline extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now().toUtc();
-    final events = [
-      _TimelineEvent(
-        label: 'Erstellt',
-        date: proposal.createdAt,
-        done: true,
-      ),
-      if (proposal.discussionStartedAt != null)
-        _TimelineEvent(
-          label: 'Diskussion gestartet',
-          date: proposal.discussionStartedAt!,
-          done: now.isAfter(proposal.discussionStartedAt!),
-        ),
-      if (proposal.votingEndsAt != null)
-        _TimelineEvent(
-          label: 'Abstimmung endet',
-          date: proposal.votingEndsAt!,
-          done: now.isAfter(proposal.votingEndsAt!),
-        ),
-    ];
+    final p = proposal;
+    final status = p.status;
+    final events = <_TimelineEvent>[];
+
+    // ── Erstellt (always) ─────────────────────────────────────────────────────
+    events.add(_TimelineEvent(label: 'Erstellt', date: p.createdAt, done: true));
+
+    if (status == ProposalStatus.WITHDRAWN) {
+      // WITHDRAWN: show withdrawnAt if available
+      if (p.withdrawnAt != null) {
+        events.add(_TimelineEvent(
+            label: 'Zurückgezogen', date: p.withdrawnAt!, done: true));
+      }
+    } else if (status == ProposalStatus.DRAFT) {
+      // DRAFT: nothing further
+    } else if (status == ProposalStatus.DISCUSSION) {
+      events.add(_TimelineEvent(
+          label: 'Diskussion läuft',
+          date: p.discussionStartedAt ?? p.createdAt,
+          done: false));
+    } else if (status == ProposalStatus.VOTING) {
+      if (p.votingStartedAt != null) {
+        events.add(_TimelineEvent(
+            label: 'Abstimmung gestartet',
+            date: p.votingStartedAt!,
+            done: true));
+      }
+      if (p.votingEndsAt != null) {
+        events.add(_TimelineEvent(
+            label: 'Abstimmung endet', date: p.votingEndsAt!, done: false));
+      }
+    } else if (status == ProposalStatus.VOTING_ENDED) {
+      if (p.votingEndsAt != null) {
+        events.add(_TimelineEvent(
+            label: 'Abstimmung beendet', date: p.votingEndsAt!, done: true));
+      }
+      events.add(_TimelineEvent(
+          label: 'Grace Period läuft',
+          date: p.votingEndsAt ?? p.createdAt,
+          done: false));
+    } else if (status == ProposalStatus.DECIDED) {
+      if (p.votingEndsAt != null) {
+        events.add(_TimelineEvent(
+            label: 'Abstimmung beendet', date: p.votingEndsAt!, done: true));
+      }
+      if (p.decidedAt != null) {
+        events.add(_TimelineEvent(
+            label: 'Entschieden', date: p.decidedAt!, done: true));
+      }
+    } else if (status == ProposalStatus.ARCHIVED) {
+      if (p.decidedAt != null) {
+        events.add(_TimelineEvent(
+            label: 'Entschieden', date: p.decidedAt!, done: true));
+      }
+      if (p.archivedAt != null) {
+        events.add(
+            _TimelineEvent(label: 'Archiviert', date: p.archivedAt!, done: true));
+      }
+    }
 
     return Container(
       padding: const EdgeInsets.all(14),

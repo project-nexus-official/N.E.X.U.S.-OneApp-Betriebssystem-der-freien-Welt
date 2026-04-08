@@ -42,6 +42,7 @@ import '../governance/cell.dart';
 import '../governance/cell_join_request.dart';
 import '../governance/cell_member.dart';
 import '../governance/cell_service.dart';
+import '../governance/proposal_service.dart';
 import '../../services/invite_service.dart';
 
 /// ViewModel for the chat feature.
@@ -220,6 +221,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       _nostrTransport!.onCellMembershipConfirmed
           .listen(_onCellMembershipConfirmed);
       _nostrTransport!.onCellMemberUpdate.listen(_onCellMemberUpdate);
+
+      // G2 governance – wire ProposalService callbacks to NostrTransport.
+      _wireGovernanceTransport();
 
       // Subscribe to events before starting
       _msgSub = _manager.onMessageReceived.listen((msg) => _onMessageReceived(msg));
@@ -444,6 +448,89 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     } catch (e) {
       debugPrint('[CHAT] Channel announced parse error: $e');
     }
+  }
+
+  // ── G2 Governance wiring ──────────────────────────────────────────────────
+
+  void _wireGovernanceTransport() {
+    final transport = _nostrTransport;
+    if (transport == null) return;
+
+    // Incoming governance events → ProposalService handlers.
+    transport.onProposalEvent.listen((event) {
+      ProposalService.instance.handleIncomingProposal(event);
+    });
+    transport.onVoteEvent.listen((event) {
+      ProposalService.instance.handleIncomingVote(event);
+    });
+    transport.onDecisionRecordEvent.listen((event) {
+      ProposalService.instance.handleIncomingDecisionRecord(event);
+    });
+
+    // Outgoing: ProposalService → NostrTransport publish methods.
+    ProposalService.instance.onPublishProposalToNostr = (params) async {
+      return transport.publishProposalEvent(
+        proposalId: params['proposalId'] as String,
+        cellId: params['cellId'] as String,
+        type: params['type'] as String,
+        status: params['status'] as String,
+        title: params['title'] as String,
+        description: params['description'] as String,
+        creatorDid: params['creatorDid'] as String,
+        creatorPseudonym: params['creatorPseudonym'] as String,
+        createdAt: DateTime.fromMillisecondsSinceEpoch(
+            (params['createdAt'] as int) * 1000,
+            isUtc: true),
+        version: params['version'] as int,
+        category: params['category'] as String?,
+        votingEndsAt: params['votingEndsAt'] != null
+            ? DateTime.fromMillisecondsSinceEpoch(
+                (params['votingEndsAt'] as int) * 1000,
+                isUtc: true)
+            : null,
+        editReason: params['editReason'] as String?,
+      );
+    };
+
+    ProposalService.instance.onPublishVoteToNostr = (params) async {
+      return transport.publishVoteEvent(
+        proposalId: params['proposalId'] as String,
+        cellId: params['cellId'] as String,
+        voteId: params['voteId'] as String,
+        choiceName: params['choiceName'] as String,
+        voterDid: params['voterDid'] as String,
+        voterPseudonym: params['voterPseudonym'] as String,
+        createdAt: DateTime.fromMillisecondsSinceEpoch(
+            (params['createdAt'] as int) * 1000,
+            isUtc: true),
+        reasoning: params['reasoning'] as String?,
+      );
+    };
+
+    ProposalService.instance.onPublishDecisionToNostr = (params) async {
+      return transport.publishDecisionRecord(
+        proposalId: params['proposalId'] as String,
+        cellId: params['cellId'] as String,
+        recordContent:
+            Map<String, dynamic>.from(params['recordContent'] as Map),
+        result: params['result'] as String,
+        contentHash: params['contentHash'] as String,
+        previousDecisionHash: params['previousDecisionHash'] as String?,
+      );
+    };
+
+    ProposalService.instance.getMyNostrPubkeyHex = () => transport.localNostrPubkeyHex;
+
+    // Initial governance subscriptions based on current cell memberships.
+    _refreshGovernanceCellIds();
+
+    // When cells change (join/leave), update Nostr subscriptions.
+    CellService.instance.stream.listen((_) => _refreshGovernanceCellIds());
+  }
+
+  void _refreshGovernanceCellIds() {
+    final cellIds = CellService.instance.myCells.map((c) => c.id).toList();
+    _nostrTransport?.updateGovernanceCellIds(cellIds);
   }
 
   void _onCellAnnounced(Map<String, dynamic> data) {

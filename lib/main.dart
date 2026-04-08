@@ -15,6 +15,7 @@ import 'package:nexus_oneapp/features/dashboard/node_counter_service.dart';
 import 'package:nexus_oneapp/services/role_service.dart';
 import 'package:nexus_oneapp/features/dorfplatz/feed_service.dart';
 import 'package:nexus_oneapp/features/governance/cell_service.dart';
+import 'package:nexus_oneapp/features/governance/proposal_scheduler.dart';
 import 'package:nexus_oneapp/features/governance/proposal_service.dart';
 import 'package:nexus_oneapp/core/router.dart';
 import 'package:nexus_oneapp/core/storage/pod_database.dart';
@@ -160,6 +161,9 @@ void main() async {
   }
 }
 
+// Global reference to the ProposalScheduler so it is not garbage-collected.
+ProposalScheduler? _proposalScheduler;
+
 /// Opens the encrypted POD and loads profile + contacts.
 /// Call this once after identity is created or restored.
 Future<void> initServicesAfterIdentity() async {
@@ -194,6 +198,10 @@ Future<void> initServicesAfterIdentity() async {
     // Load governance: cells and proposals.
     await CellService.instance.load();
     await ProposalService.instance.load();
+    // Start the proposal scheduler (drives automatic VOTING→DECIDED transitions).
+    _proposalScheduler?.stop();
+    _proposalScheduler = ProposalScheduler(ProposalService.instance);
+    _proposalScheduler!.start();
     // Initialize backup service (loads state, starts periodic timer).
     await BackupService.instance.init();
     // Initialize X25519 encryption keys.
