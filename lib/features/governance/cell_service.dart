@@ -81,6 +81,19 @@ class CellService {
   List<CellMember> membersOf(String cellId) =>
       List.unmodifiable(_members[cellId] ?? []);
 
+  /// Returns the count of confirmed members (FOUNDER + MODERATOR + MEMBER)
+  /// by loading directly from DB – reliable even when in-memory cache is stale.
+  Future<int> getMemberCount(String cellId) async {
+    final rows = await PodDatabase.instance.listCellMembers(cellId);
+    final members = rows.map(CellMember.fromJson).toList();
+    final f = members.where((m) => m.role == MemberRole.founder).length;
+    final mod = members.where((m) => m.role == MemberRole.moderator).length;
+    final mem = members.where((m) => m.role == MemberRole.member).length;
+    final total = f + mod + mem; // PENDING excluded
+    print('[PROPOSAL] getMemberCount($cellId): $total members (founders=$f, mods=$mod, members=$mem)');
+    return total;
+  }
+
   /// Pending join requests for a specific cell.
   List<CellJoinRequest> requestsFor(String cellId) =>
       List.unmodifiable(_requests[cellId] ?? []);

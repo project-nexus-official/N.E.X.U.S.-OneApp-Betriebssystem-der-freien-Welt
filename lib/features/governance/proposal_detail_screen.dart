@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/identity/identity_service.dart';
+import '../../core/storage/pod_database.dart';
+import '../../services/role_service.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/help_icon.dart';
 import 'audit_log_entry.dart';
@@ -38,7 +40,7 @@ class _ProposalDetailScreenState extends State<ProposalDetailScreen>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 2, vsync: this);
+    _tabCtrl = TabController(length: 3, vsync: this);
     _proposal = widget.proposal;
     _sub = ProposalService.instance.stream.listen((_) {
       if (mounted) setState(() => _refreshProposal());
@@ -85,6 +87,9 @@ class _ProposalDetailScreenState extends State<ProposalDetailScreen>
     final m = CellService.instance.myMembershipIn(_proposal.cellId);
     return m?.canManageRequests ?? false;
   }
+
+  bool get _isSuperadmin =>
+      RoleService.instance.isSuperadmin(_myDid);
 
   bool get _canEditProposal =>
       _isCreator &&
@@ -232,6 +237,26 @@ class _ProposalDetailScreenState extends State<ProposalDetailScreen>
         },
       );
 
+  Future<void> _forceFinalize() async {
+    print('[G2-UI] Detail-screen force button clicked');
+    await _runAction('Force beenden', () async {
+      final p = _proposal;
+      p.votingEndsAt = DateTime.now().toUtc().subtract(const Duration(seconds: 1));
+      p.gracePeriodHours = 0;
+      await PodDatabase.instance.upsertProposal(p.id, p.cellId, p.toMap());
+      await ProposalService.instance.processGracePeriodStart(p.id);
+      await ProposalService.instance.finalizeProposal(p.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Voting force-beendet'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    });
+  }
+
   Future<void> _castVote() async {
     if (_selectedChoice == null) return;
     setState(() => _isVoting = true);
@@ -310,6 +335,7 @@ class _ProposalDetailScreenState extends State<ProposalDetailScreen>
           unselectedLabelColor: AppColors.onDark,
           tabs: const [
             Tab(text: 'Details'),
+            Tab(text: 'Diskussion'),
             Tab(text: 'Historie'),
           ],
         ),
@@ -324,9 +350,18 @@ class _ProposalDetailScreenState extends State<ProposalDetailScreen>
             selectedChoice: _selectedChoice,
             reasoningCtrl: _reasoningCtrl,
             isVoting: _isVoting,
-            onSelectChoice: (c) => setState(() => _selectedChoice = c),
+            isSuperadmin: _isSuperadmin,
+            onSelectChoice: (c) {
+              print('[G2-UI] Vote button clicked: $c');
+              if (_myExistingVote != null) {
+                print('[G2-UI] Vote update from ${_myExistingVote!.choice} to $c');
+              }
+              setState(() => _selectedChoice = c);
+            },
             onCastVote: _castVote,
+            onForceFinalize: _forceFinalize,
           ),
+          _DiskussionTab(proposal: _proposal),
           _HistorieTab(proposalId: _proposal.id),
         ],
       ),
@@ -446,8 +481,10 @@ class _DetailsTab extends StatelessWidget {
   final VoteChoice? selectedChoice;
   final TextEditingController reasoningCtrl;
   final bool isVoting;
+  final bool isSuperadmin;
   final ValueChanged<VoteChoice> onSelectChoice;
   final VoidCallback onCastVote;
+  final VoidCallback onForceFinalize;
 
   const _DetailsTab({
     required this.proposal,
@@ -455,8 +492,10 @@ class _DetailsTab extends StatelessWidget {
     required this.selectedChoice,
     required this.reasoningCtrl,
     required this.isVoting,
+    required this.isSuperadmin,
     required this.onSelectChoice,
     required this.onCastVote,
+    required this.onForceFinalize,
   });
 
   @override
@@ -499,6 +538,45 @@ class _DetailsTab extends StatelessWidget {
         else if (p.status == ProposalStatus.DECIDED ||
             p.status == ProposalStatus.ARCHIVED)
           _ResultSection(proposal: p, votes: votes),
+
+        // ── Superadmin Force-Button (nur Voting + Superadmin) ─────────────
+        if (p.status == ProposalStatus.VOTING && isSuperadmin) ...[
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.orange.withValues(alpha: 0.07),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                  color: Colors.orange.withValues(alpha: 0.3)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ElevatedButton.icon(
+                  onPressed: onForceFinalize,
+                  icon: const Text('🧪', style: TextStyle(fontSize: 14)),
+                  label: const Text('Force beenden (Debug)',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange.shade700,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Nur für Tests — wird in Produktion entfernt.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      color: Colors.orange.withValues(alpha: 0.6),
+                      fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+        ],
 
         const SizedBox(height: 40),
       ],
@@ -967,10 +1045,12 @@ class _VotingCard extends StatelessWidget {
                   Icon(Icons.check_circle_outline,
                       color: Colors.green, size: 16),
                   const SizedBox(width: 6),
-                  Text(
-                    'Du hast bereits abgestimmt — du kannst deine Wahl noch ändern.',
-                    style: TextStyle(
-                        color: Colors.green.shade300, fontSize: 12),
+                  Flexible(
+                    child: Text(
+                      'Du hast bereits abgestimmt — du kannst deine Wahl noch ändern.',
+                      style: TextStyle(
+                          color: Colors.green.shade300, fontSize: 12),
+                    ),
                   ),
                 ],
               ),
@@ -978,36 +1058,52 @@ class _VotingCard extends StatelessWidget {
             const SizedBox(height: 12),
           ],
 
-          // Vote buttons
-          Row(
-            children: [
-              Expanded(
-                  child: _VoteButton(
-                label: 'Ja',
-                choice: VoteChoice.YES,
-                color: Colors.green,
-                selected: selectedChoice == VoteChoice.YES,
-                onTap: () => onSelectChoice(VoteChoice.YES),
-              )),
-              const SizedBox(width: 8),
-              Expanded(
-                  child: _VoteButton(
-                label: 'Enthaltung',
-                choice: VoteChoice.ABSTAIN,
-                color: AppColors.surfaceVariant,
-                selected: selectedChoice == VoteChoice.ABSTAIN,
-                onTap: () => onSelectChoice(VoteChoice.ABSTAIN),
-              )),
-              const SizedBox(width: 8),
-              Expanded(
-                  child: _VoteButton(
-                label: 'Nein',
-                choice: VoteChoice.NO,
-                color: Colors.red,
-                selected: selectedChoice == VoteChoice.NO,
-                onTap: () => onSelectChoice(VoteChoice.NO),
-              )),
-            ],
+          // Vote buttons — responsive layout (Bug 2: no overflow on phones)
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final buttons = [
+                _VoteButton(
+                    label: 'Ja',
+                    choice: VoteChoice.YES,
+                    color: Colors.green,
+                    selected: selectedChoice == VoteChoice.YES,
+                    onTap: () => onSelectChoice(VoteChoice.YES)),
+                _VoteButton(
+                    label: 'Enthaltung',
+                    choice: VoteChoice.ABSTAIN,
+                    color: Colors.blueGrey.shade300,
+                    selected: selectedChoice == VoteChoice.ABSTAIN,
+                    onTap: () => onSelectChoice(VoteChoice.ABSTAIN)),
+                _VoteButton(
+                    label: 'Nein',
+                    choice: VoteChoice.NO,
+                    color: Colors.red,
+                    selected: selectedChoice == VoteChoice.NO,
+                    onTap: () => onSelectChoice(VoteChoice.NO)),
+              ];
+              if (constraints.maxWidth >= 400) {
+                return Row(
+                  children: [
+                    Expanded(child: buttons[0]),
+                    const SizedBox(width: 8),
+                    Expanded(child: buttons[1]),
+                    const SizedBox(width: 8),
+                    Expanded(child: buttons[2]),
+                  ],
+                );
+              } else {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    buttons[0],
+                    const SizedBox(height: 8),
+                    buttons[1],
+                    const SizedBox(height: 8),
+                    buttons[2],
+                  ],
+                );
+              }
+            },
           ),
           const SizedBox(height: 14),
 
@@ -1154,6 +1250,7 @@ class _VoteButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
+      behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1442,6 +1539,267 @@ class _VoteRow extends StatelessWidget {
       '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}.${dt.year}';
 }
 
+// ── Diskussion Tab ────────────────────────────────────────────────────────────
+
+class _DiskussionTab extends StatefulWidget {
+  final Proposal proposal;
+  const _DiskussionTab({required this.proposal});
+
+  @override
+  State<_DiskussionTab> createState() => _DiskussionTabState();
+}
+
+class _DiskussionTabState extends State<_DiskussionTab>
+    with AutomaticKeepAliveClientMixin {
+  List<ProposalDiscussionMessage> _messages = [];
+  final _ctrl = TextEditingController();
+  bool _isSending = false;
+  StreamSubscription<void>? _sub;
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    print('[G2-UI] Discussion tab opened for ${widget.proposal.id}');
+    _load();
+    _sub = ProposalService.instance.stream.listen((_) {
+      if (mounted) _load();
+    });
+  }
+
+  void _load() {
+    setState(() {
+      _messages = List.from(
+          ProposalService.instance.getDiscussionMessages(widget.proposal.id));
+    });
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _send() async {
+    final text = _ctrl.text.trim();
+    if (text.isEmpty) return;
+    setState(() => _isSending = true);
+    print('[G2-UI] Posting discussion message');
+    try {
+      await ProposalService.instance
+          .postDiscussionMessage(widget.proposal.id, text);
+      _ctrl.clear();
+    } finally {
+      if (mounted) setState(() => _isSending = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final p = widget.proposal;
+
+    // DRAFT/WITHDRAWN: Diskussion noch nicht gestartet
+    if (p.status == ProposalStatus.DRAFT ||
+        p.status == ProposalStatus.WITHDRAWN) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.forum_outlined,
+                  size: 48,
+                  color: AppColors.onDark.withValues(alpha: 0.3)),
+              const SizedBox(height: 16),
+              Text(
+                p.status == ProposalStatus.DRAFT
+                    ? 'Diskussion beginnt sobald der Antrag veröffentlicht wird.'
+                    : 'Dieser Antrag wurde zurückgezogen.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    color: AppColors.onDark.withValues(alpha: 0.5),
+                    height: 1.5),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        // Message list
+        Expanded(
+          child: _messages.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Text(
+                      'Noch keine Beiträge.\nSei der Erste!',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          color: AppColors.onDark.withValues(alpha: 0.45),
+                          height: 1.5),
+                    ),
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: _messages.length,
+                  itemBuilder: (_, i) =>
+                      _DiscussionMessageTile(msg: _messages[i]),
+                ),
+        ),
+        // Input row
+        Container(
+          padding: const EdgeInsets.fromLTRB(12, 8, 8, 12),
+          color: AppColors.surface,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _ctrl,
+                  minLines: 1,
+                  maxLines: 4,
+                  style: const TextStyle(color: AppColors.onDark, fontSize: 14),
+                  decoration: InputDecoration(
+                    hintText: 'Dein Beitrag zur Diskussion…',
+                    hintStyle: TextStyle(
+                        color: AppColors.onDark.withValues(alpha: 0.35),
+                        fontSize: 13),
+                    filled: true,
+                    fillColor: AppColors.deepBlue,
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide:
+                          const BorderSide(color: AppColors.surfaceVariant),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide:
+                          const BorderSide(color: AppColors.surfaceVariant),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide: const BorderSide(color: AppColors.gold),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _isSending
+                  ? const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: AppColors.gold)),
+                    )
+                  : IconButton(
+                      icon: const Icon(Icons.send, color: AppColors.gold),
+                      onPressed: _send,
+                      tooltip: 'Senden',
+                    ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DiscussionMessageTile extends StatelessWidget {
+  final ProposalDiscussionMessage msg;
+  const _DiscussionMessageTile({required this.msg});
+
+  @override
+  Widget build(BuildContext context) {
+    final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+    final isMe = msg.authorDid == myDid;
+    final dt = msg.createdAt.toLocal();
+    final timeStr =
+        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment:
+            isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+        children: [
+          if (!isMe) ...[
+            CircleAvatar(
+              radius: 14,
+              backgroundColor: AppColors.surfaceVariant,
+              child: Text(
+                (msg.authorPseudonym.isNotEmpty
+                    ? msg.authorPseudonym[0]
+                    : '?'),
+                style: const TextStyle(fontSize: 12, color: AppColors.onDark),
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
+          Flexible(
+            child: Column(
+              crossAxisAlignment:
+                  isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+              children: [
+                if (!isMe)
+                  Text(
+                    msg.authorPseudonym.isNotEmpty
+                        ? msg.authorPseudonym
+                        : msg.authorDid.substring(0, 12),
+                    style: const TextStyle(
+                        color: AppColors.gold,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold),
+                  ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: isMe
+                        ? AppColors.gold.withValues(alpha: 0.15)
+                        : AppColors.surface,
+                    borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(isMe ? 12 : 2),
+                      topRight: Radius.circular(isMe ? 2 : 12),
+                      bottomLeft: const Radius.circular(12),
+                      bottomRight: const Radius.circular(12),
+                    ),
+                  ),
+                  child: Text(
+                    msg.content,
+                    style: const TextStyle(
+                        color: AppColors.onDark, fontSize: 13),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  timeStr,
+                  style: TextStyle(
+                      color: AppColors.onDark.withValues(alpha: 0.4),
+                      fontSize: 10),
+                ),
+              ],
+            ),
+          ),
+          if (isMe) const SizedBox(width: 8),
+        ],
+      ),
+    );
+  }
+}
+
 // ── Historie Tab ──────────────────────────────────────────────────────────────
 
 class _HistorieTab extends StatefulWidget {
@@ -1630,9 +1988,12 @@ class _AuditTile extends StatelessWidget {
           return ('✅', '$actor hat mit $choice gestimmt');
         }(),
       AuditEventType.VOTE_CHANGED => () {
-          final from = _choiceLabel(p['previousChoice']?.toString() ?? '');
+          final prev = p['previousChoice']?.toString();
           final to = _choiceLabel(p['choice']?.toString() ?? '');
-          return ('🔁', '$actor hat die Stimme von $from zu $to geändert');
+          if (prev != null && prev.isNotEmpty) {
+            return ('🔁', '$actor hat die Stimme von ${_choiceLabel(prev)} zu $to geändert');
+          }
+          return ('🔁', '$actor hat die Stimme zu $to geändert');
         }(),
       AuditEventType.VOTE_LATE_ACCEPTED => () {
           final choice = _choiceLabel(p['choice']?.toString() ?? '');

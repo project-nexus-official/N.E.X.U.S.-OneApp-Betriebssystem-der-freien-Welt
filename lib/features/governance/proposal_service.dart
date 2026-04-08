@@ -18,6 +18,46 @@ import 'proposal.dart';
 import 'proposal_edit.dart';
 import 'vote.dart';
 
+/// A single discussion message attached to a proposal.
+class ProposalDiscussionMessage {
+  final String id;
+  final String proposalId;
+  final String authorDid;
+  final String authorPseudonym;
+  final String content;
+  final DateTime createdAt;
+
+  const ProposalDiscussionMessage({
+    required this.id,
+    required this.proposalId,
+    required this.authorDid,
+    required this.authorPseudonym,
+    required this.content,
+    required this.createdAt,
+  });
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'proposal_id': proposalId,
+        'author_did': authorDid,
+        'author_pseudo': authorPseudonym,
+        'content': content,
+        'created_at': createdAt.millisecondsSinceEpoch,
+      };
+
+  static ProposalDiscussionMessage fromMap(Map<String, dynamic> m) =>
+      ProposalDiscussionMessage(
+        id: m['id'] as String,
+        proposalId: m['proposal_id'] as String,
+        authorDid: m['author_did'] as String,
+        authorPseudonym: m['author_pseudo'] as String? ?? '',
+        content: m['content'] as String,
+        createdAt: DateTime.fromMillisecondsSinceEpoch(
+            m['created_at'] as int,
+            isUtc: true),
+      );
+}
+
 /// Manages governance proposals and votes within cells.
 ///
 /// G2 additions over G1:
@@ -36,6 +76,7 @@ class ProposalService {
   // In-memory caches
   final Map<String, Proposal> _proposals = {};
   final Map<String, List<Vote>> _votes = {}; // keyed by proposal_id
+  final Map<String, List<ProposalDiscussionMessage>> _discussions = {};
 
   /// Persistent tombstone list: proposal IDs that were deleted/withdrawn locally.
   /// Once tombstoned, a proposal can never be re-imported via Nostr replay.
@@ -65,6 +106,9 @@ class ProposalService {
   /// Called to publish a Kind-31013 decision record.
   /// Returns true on success, false on failure.
   Future<bool> Function(Map<String, dynamic>)? onPublishDecisionToNostr;
+
+  /// Called to send a proposal discussion message via the transport layer.
+  Future<void> Function(Map<String, dynamic>)? onSendDiscussionMessage;
 
   /// Returns the local user's Nostr public key hex (from NostrTransport).
   /// Set by ChatProvider after transport is initialised.
@@ -198,6 +242,18 @@ class ProposalService {
         _votes[proposalId] = voteRows.map(Vote.fromMap).toList();
       } catch (e) {
         debugPrint('[PROPOSAL] Vote load error for $proposalId: $e');
+      }
+    }
+
+    // Load discussion messages for all cached proposals.
+    for (final proposalId in _proposals.keys) {
+      try {
+        final rows =
+            await PodDatabase.instance.listProposalDiscussions(proposalId);
+        _discussions[proposalId] =
+            rows.map(ProposalDiscussionMessage.fromMap).toList();
+      } catch (e) {
+        debugPrint('[PROPOSAL] Discussion load error for $proposalId: $e');
       }
     }
   }
@@ -542,16 +598,25 @@ class ProposalService {
     if (p == null) return;
     if (p.status != ProposalStatus.VOTING_ENDED) return;
 
-    final votes = _votes[proposalId] ?? [];
+    // Load votes directly from DB – the in-memory cache may be incomplete if
+    // votes arrived on other devices while this device was offline.
+    final voteRows = await PodDatabase.instance.listVotes(proposalId);
+    final votes = voteRows.map(Vote.fromMap).toList();
+    print('[PROPOSAL] finalizeProposal: ${votes.length} votes loaded from DB');
+    // Sync the cache so UI reflects the same data.
+    _votes[proposalId] = votes;
+
     final yes = votes.where((v) => v.choice == VoteChoice.YES).length;
     final no = votes.where((v) => v.choice == VoteChoice.NO).length;
     final abstain = votes.where((v) => v.choice == VoteChoice.ABSTAIN).length;
+    print('[PROPOSAL] Counted: Y=$yes N=$no A=$abstain');
 
-    final totalMembers =
-        CellService.instance.membersOf(p.cellId).length;
+    // Load member count from DB – the in-memory membersOf() may be stale.
+    final totalMembers = await CellService.instance.getMemberCount(p.cellId);
     final participation = totalMembers > 0
         ? (yes + no + abstain) / totalMembers
         : 0.0;
+    print('[PROPOSAL] Participation: ${(participation * 100).toStringAsFixed(1)}% (${yes + no + abstain} of $totalMembers members)');
 
     String result;
     if (participation < p.quorumRequired) {
@@ -801,8 +866,11 @@ class ProposalService {
   List<Proposal> myProposals() {
     final myDid = IdentityService.instance.currentIdentity?.did;
     if (myDid == null) return [];
+    print('[G2-UI] My proposals filter: $myDid found ${_proposals.values.where((p) => p.creatorDid == myDid || (_votes[p.id]?.any((v) => v.voterDid == myDid) ?? false)).length}');
     return _proposals.values
-        .where((p) => p.creatorDid == myDid)
+        .where((p) =>
+            p.creatorDid == myDid ||
+            (_votes[p.id]?.any((v) => v.voterDid == myDid) ?? false))
         .toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
@@ -871,6 +939,77 @@ class ProposalService {
     final row = await PodDatabase.instance.getDecisionRecord(proposalId);
     if (row == null) return null;
     return DecisionRecord.fromMap(row);
+  }
+
+  // ── Proposal discussions ──────────────────────────────────────────────────
+
+  List<ProposalDiscussionMessage> getDiscussionMessages(String proposalId) {
+    final msgs = _discussions[proposalId] ?? [];
+    print('[G2-UI] Audit log filter for proposal $proposalId: ${msgs.length} entries');
+    return List.unmodifiable(msgs);
+  }
+
+  Future<void> postDiscussionMessage(String proposalId, String content) async {
+    final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+    final myPseudo = IdentityService.instance.currentIdentity?.pseudonym ?? '';
+    final id = 'disc_${DateTime.now().millisecondsSinceEpoch}_${proposalId.substring(0, 8)}';
+
+    final disc = ProposalDiscussionMessage(
+      id: id,
+      proposalId: proposalId,
+      authorDid: myDid,
+      authorPseudonym: myPseudo,
+      content: content,
+      createdAt: DateTime.now().toUtc(),
+    );
+
+    print('[G2-UI] Posting discussion message');
+    await _saveDiscussion(disc);
+    _notify();
+
+    final fn = onSendDiscussionMessage;
+    if (fn != null) {
+      await fn({
+        'id': id,
+        'proposalId': proposalId,
+        'content': content,
+        'authorPseudonym': myPseudo,
+      });
+    }
+  }
+
+  Future<void> handleDiscussionMessage(Map<String, dynamic> params) async {
+    final proposalId = params['proposalId'] as String? ?? '';
+    if (proposalId.isEmpty) return;
+    // Only store if we know this proposal
+    if (!_proposals.containsKey(proposalId)) return;
+
+    final disc = ProposalDiscussionMessage(
+      id: params['id'] as String? ?? '',
+      proposalId: proposalId,
+      authorDid: params['authorDid'] as String? ?? '',
+      authorPseudonym: params['authorPseudonym'] as String? ?? '',
+      content: params['content'] as String? ?? '',
+      createdAt: DateTime.fromMillisecondsSinceEpoch(
+          params['createdAt'] as int? ?? 0,
+          isUtc: true),
+    );
+    if (disc.id.isEmpty || disc.content.isEmpty) return;
+
+    await _saveDiscussion(disc);
+    _notify();
+  }
+
+  Future<void> _saveDiscussion(ProposalDiscussionMessage disc) async {
+    _discussions.putIfAbsent(disc.proposalId, () => []);
+    final list = _discussions[disc.proposalId]!;
+    if (!list.any((d) => d.id == disc.id)) {
+      list.add(disc);
+      list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    }
+    try {
+      await PodDatabase.instance.insertProposalDiscussion(disc.toMap());
+    } catch (_) {}
   }
 
   // ── Incoming Nostr event handlers ─────────────────────────────────────────
@@ -1086,6 +1225,19 @@ class ProposalService {
   Future<void> handleIncomingVote(NostrEvent event) async {
     print('[VOTE] handleIncomingVote: ${event.id}');
     try {
+      // Skip echo of own votes – castVote() already wrote the audit entry locally.
+      final myPubkey = getMyNostrPubkeyHex?.call();
+      if (myPubkey != null && myPubkey.isNotEmpty && event.pubkey == myPubkey) {
+        print('[VOTE] Echo of own vote ignored: ${event.id}');
+        return;
+      }
+
+      // Dedup: the same event can arrive from multiple relays.
+      if (await PodDatabase.instance.hasAuditEntryForNostrEvent(event.id)) {
+        print('[VOTE] Already processed: ${event.id}');
+        return;
+      }
+
       final proposalId = event.tagValue('e');
       final cellId = event.tagValue('cell');
       final choiceStr = event.tagValue('choice');
@@ -1182,6 +1334,10 @@ class ProposalService {
       final eventType = lateType ??
           (isChange ? AuditEventType.VOTE_CHANGED : AuditEventType.VOTE_CAST);
 
+      if (isChange) {
+        print('[VOTE] Previous choice: ${existing?.choice.name}');
+      }
+
       await addAuditEntry(AuditLogEntry(
         entryId: AuditLogEntry.generateId(),
         proposalId: proposalId,
@@ -1193,6 +1349,7 @@ class ProposalService {
         payload: {
           'choice': vote.choice.name,
           if (vote.reasoning != null) 'reasoning': vote.reasoning,
+          if (isChange && existing != null) 'previousChoice': existing.choice.name,
         },
         nostrEventId: event.id,
       ));

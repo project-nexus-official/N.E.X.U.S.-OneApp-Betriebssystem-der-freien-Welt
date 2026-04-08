@@ -55,7 +55,7 @@ class PodDatabase {
 
     _db = await openDatabase(
       dbPath,
-      version: 12,
+      version: 13,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -409,6 +409,19 @@ class PodDatabase {
     ''');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_decisions_cell ON decision_records(cell_id)');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_decisions_decided_at ON decision_records(decided_at)');
+
+    // v13: proposal discussion messages
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS proposal_discussions (
+        id           TEXT PRIMARY KEY,
+        proposal_id  TEXT NOT NULL,
+        author_did   TEXT NOT NULL,
+        author_pseudo TEXT NOT NULL DEFAULT '',
+        content      TEXT NOT NULL,
+        created_at   INTEGER NOT NULL
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_pd_proposal ON proposal_discussions(proposal_id)');
   }
 
   static Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -685,6 +698,19 @@ class PodDatabase {
       ''');
       await db.execute('CREATE INDEX IF NOT EXISTS idx_decisions_cell ON decision_records(cell_id)');
       await db.execute('CREATE INDEX IF NOT EXISTS idx_decisions_decided_at ON decision_records(decided_at)');
+    }
+    if (oldVersion < 13) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS proposal_discussions (
+          id           TEXT PRIMARY KEY,
+          proposal_id  TEXT NOT NULL,
+          author_did   TEXT NOT NULL,
+          author_pseudo TEXT NOT NULL DEFAULT '',
+          content      TEXT NOT NULL,
+          created_at   INTEGER NOT NULL
+        )
+      ''');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_pd_proposal ON proposal_discussions(proposal_id)');
     }
   }
 
@@ -1807,6 +1833,20 @@ class PodDatabase {
         conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 
+  /// Returns true if an audit entry with the given Nostr event ID already
+  /// exists — used to deduplicate incoming vote events from multiple relays.
+  Future<bool> hasAuditEntryForNostrEvent(String nostrEventId) async {
+    if (nostrEventId.isEmpty) return false;
+    final rows = await _database.query(
+      'proposal_audit_log',
+      columns: ['entry_id'],
+      where: 'nostr_event_id = ?',
+      whereArgs: [nostrEventId],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
   Future<List<Map<String, dynamic>>> listAuditLog(String proposalId) async {
     return _database.query(
       'proposal_audit_log',
@@ -1819,6 +1859,31 @@ class PodDatabase {
   Future<void> deleteAuditLogForProposal(String proposalId) async {
     await _database.delete(
       'proposal_audit_log',
+      where: 'proposal_id = ?',
+      whereArgs: [proposalId],
+    );
+  }
+
+  // ── Proposal discussions ──────────────────────────────────────────────────
+
+  Future<void> insertProposalDiscussion(Map<String, dynamic> m) async {
+    await _database.insert('proposal_discussions', m,
+        conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
+
+  Future<List<Map<String, dynamic>>> listProposalDiscussions(
+      String proposalId) async {
+    return _database.query(
+      'proposal_discussions',
+      where: 'proposal_id = ?',
+      whereArgs: [proposalId],
+      orderBy: 'created_at ASC',
+    );
+  }
+
+  Future<void> deleteDiscussionsForProposal(String proposalId) async {
+    await _database.delete(
+      'proposal_discussions',
       where: 'proposal_id = ?',
       whereArgs: [proposalId],
     );
@@ -1873,6 +1938,7 @@ class PodDatabase {
       await deleteEditsForProposal(id);
       await deleteAuditLogForProposal(id);
       await deleteDecisionRecord(id);
+      await deleteDiscussionsForProposal(id);
     }
     // Audit log may have entries beyond the proposals list (shouldn't, but safe).
     await _database.delete(
