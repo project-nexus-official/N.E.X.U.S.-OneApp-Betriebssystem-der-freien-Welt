@@ -534,6 +534,15 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     if (cellId.isEmpty) return;
     print('[CELL-DEL] Received cell deletion for: $cellId ($cellName)');
 
+    // Check tombstone BEFORE doing anything — replayed Nostr events for
+    // already-dissolved cells must not trigger a second notification.
+    final alreadyTombstoned = CellService.instance.isTombstoned(cellId);
+    if (alreadyTombstoned) {
+      print('[NOTIF-FIX] Suppressed "Zelle aufgelöst" notification for '
+          'already-tombstoned cell: $cellId ($cellName)');
+      return;
+    }
+
     await CellService.instance.handleCellDeleted(cellId, cellName);
     await deleteCellChannels(cellId);
     print('[CELL-DEL] Removing cell + channels from local DB: $cellId');
