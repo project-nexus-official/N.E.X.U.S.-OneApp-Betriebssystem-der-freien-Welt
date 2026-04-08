@@ -62,6 +62,12 @@ class CellService {
   List<Cell> get myCells => List.unmodifiable(_myCells);
   List<Cell> get discoveredCells => List.unmodifiable(_discovered);
 
+  /// Returns true if [cellId] has been permanently tombstoned (dissolved or
+  /// dismissed).  Used by external callers (e.g. ChatProvider) as a fast
+  /// pre-filter before calling [addDiscoveredCell] or [handleMembershipConfirmed].
+  bool isTombstoned(String cellId) =>
+      _deletedCellIds.contains(cellId) || _dismissedCellIds.contains(cellId);
+
   /// Returns all cells known to the service (joined + discovered), de-duplicated.
   List<Cell> get allKnownCells {
     final joined = {for (final c in _myCells) c.id};

@@ -454,6 +454,17 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
         ..remove('_nostr_pubkey')
         ..remove('_created_at');
       final cell = Cell.fromJson(cellJson);
+
+      // ── ZOMBIE-FIX: belt-and-suspenders tombstone check ──────────────────
+      // Even if _handleCellAnnounceEvent already filtered self-events,
+      // a second layer here catches any future path that emits to the stream.
+      if (CellService.instance.isTombstoned(cell.id)) {
+        print('[ZOMBIE-FIX] Blocked in _onCellAnnounced (tombstone): '
+            '${cell.id} ("${cell.name}")');
+        return;
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       CellService.instance.addDiscoveredCell(cell, nostrCreatedAt: nostrCreatedAt);
     } catch (e) {
       debugPrint('[CHAT] Cell announced parse error: $e');

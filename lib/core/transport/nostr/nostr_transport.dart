@@ -1168,6 +1168,19 @@ class NostrTransport implements MessageTransport {
         return;
       }
 
+      // ── ZOMBIE-FIX: skip own-published non-deletion announcements ─────────
+      // Own cells are already loaded from the local DB on startup.
+      // Re-importing them from Nostr would bypass the tombstone filter and
+      // re-surface dissolved cells as zombie entries.
+      // Dissolution events (deleted=true) are intentionally kept above so that
+      // a seed used on multiple devices still propagates tombstones.
+      if (isOwnPubkey) {
+        print('[ZOMBIE-FIX] Blocked self-published cell announcement: '
+            '$cellId ("$cellName") — own cells loaded from DB, not Nostr');
+        return;
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       print('[CELL] Received cell announcement: $cellId ($cellName) '
           'from pubkey=${event.pubkey.substring(0, 8)}…');
       print('[ZOMBIE-DIAG]   RESULT: ANNOUNCEMENT — passing to onCellAnnounced stream');
