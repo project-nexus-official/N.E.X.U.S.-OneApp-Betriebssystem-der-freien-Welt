@@ -148,12 +148,12 @@ class _GovernanceScreenState extends State<GovernanceScreen>
   }
 
   bool _activeFilter(Proposal p) =>
-      p.status == ProposalStatus.discussion ||
-      p.status == ProposalStatus.voting;
+      p.status == ProposalStatus.DISCUSSION ||
+      p.status == ProposalStatus.VOTING;
 
   bool _closedFilter(Proposal p) =>
-      p.status == ProposalStatus.decided ||
-      p.status == ProposalStatus.archived;
+      p.status == ProposalStatus.DECIDED ||
+      p.status == ProposalStatus.ARCHIVED;
 }
 
 // ── No-cell empty state ───────────────────────────────────────────────────────
@@ -383,19 +383,25 @@ class _ProposalTile extends StatelessWidget {
   String _formatDeadline(Proposal p) {
     final now = DateTime.now().toUtc();
     switch (p.status) {
-      case ProposalStatus.discussion:
-        final diff = p.discussionDeadline.difference(now);
+      case ProposalStatus.DISCUSSION:
+        if (p.discussionStartedAt == null) return 'In Diskussion';
+        final diff = p.discussionStartedAt!.add(const Duration(days: 7)).difference(now);
         if (diff.isNegative) return 'Diskussion abgelaufen';
         return 'Diskussion endet in ${diff.inDays}d ${diff.inHours % 24}h';
-      case ProposalStatus.voting:
-        final diff = p.votingDeadline.difference(now);
+      case ProposalStatus.VOTING:
+        if (p.votingEndsAt == null) return 'In Abstimmung';
+        final diff = p.votingEndsAt!.difference(now);
         if (diff.isNegative) return 'Abstimmung abgelaufen';
         return 'Abstimmung endet in ${diff.inDays}d ${diff.inHours % 24}h';
-      case ProposalStatus.decided:
+      case ProposalStatus.VOTING_ENDED:
+        return 'Auswertung läuft';
+      case ProposalStatus.DECIDED:
         return 'Entschieden';
-      case ProposalStatus.archived:
+      case ProposalStatus.ARCHIVED:
         return 'Archiviert';
-      case ProposalStatus.draft:
+      case ProposalStatus.WITHDRAWN:
+        return 'Zurückgezogen';
+      case ProposalStatus.DRAFT:
         return 'Entwurf';
     }
   }
@@ -410,11 +416,13 @@ class _StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, color) = switch (status) {
-      ProposalStatus.draft => ('Entwurf', AppColors.onDark),
-      ProposalStatus.discussion => ('Diskussion', Colors.blue),
-      ProposalStatus.voting => ('Abstimmung', Colors.orange),
-      ProposalStatus.decided => ('Entschieden', Colors.green),
-      ProposalStatus.archived => ('Archiviert', AppColors.surfaceVariant),
+      ProposalStatus.DRAFT => ('Entwurf', AppColors.onDark),
+      ProposalStatus.DISCUSSION => ('Diskussion', Colors.blue),
+      ProposalStatus.VOTING => ('Abstimmung', Colors.orange),
+      ProposalStatus.VOTING_ENDED => ('Abgestimmt', Colors.deepOrange),
+      ProposalStatus.DECIDED => ('Entschieden', Colors.green),
+      ProposalStatus.ARCHIVED => ('Archiviert', AppColors.surfaceVariant),
+      ProposalStatus.WITHDRAWN => ('Zurückgezogen', AppColors.surfaceVariant),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),

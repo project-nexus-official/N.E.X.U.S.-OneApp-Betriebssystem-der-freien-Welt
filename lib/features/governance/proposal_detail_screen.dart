@@ -117,9 +117,9 @@ class _ProposalDetailScreenState extends State<ProposalDetailScreen> {
           const SizedBox(height: 20),
 
           // Voting placeholder (G2)
-          if (_proposal.status == ProposalStatus.voting)
+          if (_proposal.status == ProposalStatus.VOTING)
             _VotingPlaceholder()
-          else if (_proposal.status == ProposalStatus.discussion)
+          else if (_proposal.status == ProposalStatus.DISCUSSION)
             _DiscussionBanner(proposal: _proposal),
 
           const SizedBox(height: 40),
@@ -137,7 +137,7 @@ class _PublishButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (proposal.status != ProposalStatus.draft) return const SizedBox.shrink();
+    if (proposal.status != ProposalStatus.DRAFT) return const SizedBox.shrink();
     return TextButton(
       onPressed: () async {
         await ProposalService.instance.publishProposal(proposal.id);
@@ -173,16 +173,18 @@ class _Timeline extends StatelessWidget {
         date: proposal.createdAt,
         done: true,
       ),
-      _TimelineEvent(
-        label: 'Diskussion endet',
-        date: proposal.discussionDeadline,
-        done: now.isAfter(proposal.discussionDeadline),
-      ),
-      _TimelineEvent(
-        label: 'Abstimmung endet',
-        date: proposal.votingDeadline,
-        done: now.isAfter(proposal.votingDeadline),
-      ),
+      if (proposal.discussionStartedAt != null)
+        _TimelineEvent(
+          label: 'Diskussion gestartet',
+          date: proposal.discussionStartedAt!,
+          done: now.isAfter(proposal.discussionStartedAt!),
+        ),
+      if (proposal.votingEndsAt != null)
+        _TimelineEvent(
+          label: 'Abstimmung endet',
+          date: proposal.votingEndsAt!,
+          done: now.isAfter(proposal.votingEndsAt!),
+        ),
     ];
 
     return Container(
@@ -341,8 +343,9 @@ class _DiscussionBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final remaining = proposal.discussionDeadline
-        .difference(DateTime.now().toUtc());
+    final deadlineDate = proposal.discussionStartedAt?.add(const Duration(days: 7)) ??
+        DateTime.now().toUtc().add(const Duration(days: 7));
+    final remaining = deadlineDate.difference(DateTime.now().toUtc());
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -377,11 +380,13 @@ class _StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, color) = switch (status) {
-      ProposalStatus.draft => ('Entwurf', AppColors.onDark),
-      ProposalStatus.discussion => ('Diskussion', Colors.blue),
-      ProposalStatus.voting => ('Abstimmung', Colors.orange),
-      ProposalStatus.decided => ('Entschieden', Colors.green),
-      ProposalStatus.archived => ('Archiviert', AppColors.surfaceVariant),
+      ProposalStatus.DRAFT => ('Entwurf', AppColors.onDark),
+      ProposalStatus.DISCUSSION => ('Diskussion', Colors.blue),
+      ProposalStatus.VOTING => ('Abstimmung', Colors.orange),
+      ProposalStatus.VOTING_ENDED => ('Abgestimmt', Colors.deepOrange),
+      ProposalStatus.DECIDED => ('Entschieden', Colors.green),
+      ProposalStatus.ARCHIVED => ('Archiviert', AppColors.surfaceVariant),
+      ProposalStatus.WITHDRAWN => ('Zurückgezogen', AppColors.surfaceVariant),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),

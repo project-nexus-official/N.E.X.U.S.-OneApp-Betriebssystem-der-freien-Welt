@@ -55,7 +55,7 @@ class PodDatabase {
 
     _db = await openDatabase(
       dbPath,
-      version: 11,
+      version: 12,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -291,16 +291,124 @@ class PodDatabase {
       )
     ''');
 
-    // Governance: proposals.
+    // Governance: proposals (G2 flat-column schema; enc-blob format lives in proposals_legacy).
     await db.execute('''
       CREATE TABLE proposals (
-        id         TEXT PRIMARY KEY,
-        cell_id    TEXT NOT NULL,
-        enc        TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        status     TEXT NOT NULL DEFAULT 'draft'
+        id                    TEXT PRIMARY KEY,
+        cell_id               TEXT NOT NULL,
+        creator_did           TEXT NOT NULL,
+        creator_pseudonym     TEXT NOT NULL DEFAULT '',
+        title                 TEXT NOT NULL,
+        description           TEXT NOT NULL DEFAULT '',
+        proposal_type         TEXT NOT NULL DEFAULT 'SACHFRAGE',
+        category              TEXT,
+        status                TEXT NOT NULL DEFAULT 'DRAFT',
+        created_at            INTEGER NOT NULL,
+        discussion_started_at INTEGER,
+        voting_started_at     INTEGER,
+        voting_ends_at        INTEGER,
+        decided_at            INTEGER,
+        archived_at           INTEGER,
+        withdrawn_at          INTEGER,
+        quorum_required       REAL NOT NULL DEFAULT 0.5,
+        grace_period_hours    INTEGER NOT NULL DEFAULT 12,
+        version               INTEGER NOT NULL DEFAULT 1,
+        previous_decision_hash TEXT,
+        impulse_supporters    TEXT,
+        result_summary        TEXT,
+        result_yes            INTEGER,
+        result_no             INTEGER,
+        result_abstain        INTEGER,
+        result_participation  REAL,
+        scope                 TEXT NOT NULL DEFAULT 'cell',
+        domain                TEXT NOT NULL DEFAULT 'Sonstiges'
       )
     ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_proposals_cell ON proposals(cell_id)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_proposals_voting_ends ON proposals(voting_ends_at)');
+
+    // G2: votes on proposals.
+    await db.execute('''
+      CREATE TABLE proposal_votes (
+        vote_id        TEXT PRIMARY KEY,
+        proposal_id    TEXT NOT NULL,
+        voter_pubkey   TEXT NOT NULL,
+        voter_did      TEXT NOT NULL,
+        voter_pseudonym TEXT NOT NULL DEFAULT '',
+        choice         TEXT NOT NULL,
+        weight         INTEGER NOT NULL DEFAULT 1,
+        voice_credits  INTEGER NOT NULL DEFAULT 1,
+        reasoning      TEXT,
+        created_at     INTEGER NOT NULL,
+        is_delegated   INTEGER NOT NULL DEFAULT 0,
+        delegated_from TEXT,
+        nostr_event_id TEXT NOT NULL DEFAULT '',
+        UNIQUE(proposal_id, voter_pubkey)
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_votes_proposal ON proposal_votes(proposal_id)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_votes_voter ON proposal_votes(voter_pubkey)');
+
+    // G2: edit history for proposals.
+    await db.execute('''
+      CREATE TABLE proposal_edits (
+        edit_id          TEXT PRIMARY KEY,
+        proposal_id      TEXT NOT NULL,
+        editor_did       TEXT NOT NULL,
+        editor_pseudonym TEXT NOT NULL DEFAULT '',
+        old_title        TEXT NOT NULL,
+        new_title        TEXT NOT NULL,
+        old_description  TEXT NOT NULL,
+        new_description  TEXT NOT NULL,
+        edited_at        INTEGER NOT NULL,
+        edit_reason      TEXT,
+        version_before   INTEGER NOT NULL,
+        version_after    INTEGER NOT NULL
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_edits_proposal ON proposal_edits(proposal_id)');
+
+    // G2: audit trail for all governance events.
+    await db.execute('''
+      CREATE TABLE proposal_audit_log (
+        entry_id        TEXT PRIMARY KEY,
+        proposal_id     TEXT NOT NULL,
+        cell_id         TEXT NOT NULL,
+        event_type      TEXT NOT NULL,
+        actor_did       TEXT NOT NULL,
+        actor_pseudonym TEXT NOT NULL DEFAULT '',
+        timestamp       INTEGER NOT NULL,
+        payload         TEXT NOT NULL,
+        nostr_event_id  TEXT
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_audit_proposal ON proposal_audit_log(proposal_id)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_audit_cell ON proposal_audit_log(cell_id)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON proposal_audit_log(timestamp)');
+
+    // G2: immutable decision records (hash-chained).
+    await db.execute('''
+      CREATE TABLE decision_records (
+        record_id              TEXT PRIMARY KEY,
+        proposal_id            TEXT NOT NULL UNIQUE,
+        cell_id                TEXT NOT NULL,
+        final_title            TEXT NOT NULL,
+        final_description      TEXT NOT NULL,
+        result                 TEXT NOT NULL,
+        yes_votes              INTEGER NOT NULL,
+        no_votes               INTEGER NOT NULL,
+        abstain_votes          INTEGER NOT NULL,
+        participation          REAL NOT NULL,
+        decided_at             INTEGER NOT NULL,
+        all_votes              TEXT NOT NULL,
+        content_hash           TEXT NOT NULL,
+        previous_decision_hash TEXT,
+        nostr_event_id         TEXT NOT NULL DEFAULT ''
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_decisions_cell ON decision_records(cell_id)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_decisions_decided_at ON decision_records(decided_at)');
   }
 
   static Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -457,6 +565,126 @@ class PodDatabase {
       await db.execute(
         'ALTER TABLE group_channels ADD COLUMN cell_id TEXT',
       );
+    }
+    if (oldVersion < 12) {
+      // G2: migrate proposals from enc-blob pattern to flat-column schema.
+      // The old enc-blob table is preserved as proposals_legacy for recovery.
+      // Actual data migration (decryption) happens in ProposalService.load()
+      // since the encryption key is only available at runtime.
+      await db.execute('ALTER TABLE proposals RENAME TO proposals_legacy');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS proposals (
+          id                    TEXT PRIMARY KEY,
+          cell_id               TEXT NOT NULL,
+          creator_did           TEXT NOT NULL,
+          creator_pseudonym     TEXT NOT NULL DEFAULT '',
+          title                 TEXT NOT NULL,
+          description           TEXT NOT NULL DEFAULT '',
+          proposal_type         TEXT NOT NULL DEFAULT 'SACHFRAGE',
+          category              TEXT,
+          status                TEXT NOT NULL DEFAULT 'DRAFT',
+          created_at            INTEGER NOT NULL,
+          discussion_started_at INTEGER,
+          voting_started_at     INTEGER,
+          voting_ends_at        INTEGER,
+          decided_at            INTEGER,
+          archived_at           INTEGER,
+          withdrawn_at          INTEGER,
+          quorum_required       REAL NOT NULL DEFAULT 0.5,
+          grace_period_hours    INTEGER NOT NULL DEFAULT 12,
+          version               INTEGER NOT NULL DEFAULT 1,
+          previous_decision_hash TEXT,
+          impulse_supporters    TEXT,
+          result_summary        TEXT,
+          result_yes            INTEGER,
+          result_no             INTEGER,
+          result_abstain        INTEGER,
+          result_participation  REAL,
+          scope                 TEXT NOT NULL DEFAULT 'cell',
+          domain                TEXT NOT NULL DEFAULT 'Sonstiges'
+        )
+      ''');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_proposals_cell ON proposals(cell_id)');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status)');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_proposals_voting_ends ON proposals(voting_ends_at)');
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS proposal_votes (
+          vote_id        TEXT PRIMARY KEY,
+          proposal_id    TEXT NOT NULL,
+          voter_pubkey   TEXT NOT NULL,
+          voter_did      TEXT NOT NULL,
+          voter_pseudonym TEXT NOT NULL DEFAULT '',
+          choice         TEXT NOT NULL,
+          weight         INTEGER NOT NULL DEFAULT 1,
+          voice_credits  INTEGER NOT NULL DEFAULT 1,
+          reasoning      TEXT,
+          created_at     INTEGER NOT NULL,
+          is_delegated   INTEGER NOT NULL DEFAULT 0,
+          delegated_from TEXT,
+          nostr_event_id TEXT NOT NULL DEFAULT '',
+          UNIQUE(proposal_id, voter_pubkey)
+        )
+      ''');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_votes_proposal ON proposal_votes(proposal_id)');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_votes_voter ON proposal_votes(voter_pubkey)');
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS proposal_edits (
+          edit_id          TEXT PRIMARY KEY,
+          proposal_id      TEXT NOT NULL,
+          editor_did       TEXT NOT NULL,
+          editor_pseudonym TEXT NOT NULL DEFAULT '',
+          old_title        TEXT NOT NULL,
+          new_title        TEXT NOT NULL,
+          old_description  TEXT NOT NULL,
+          new_description  TEXT NOT NULL,
+          edited_at        INTEGER NOT NULL,
+          edit_reason      TEXT,
+          version_before   INTEGER NOT NULL,
+          version_after    INTEGER NOT NULL
+        )
+      ''');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_edits_proposal ON proposal_edits(proposal_id)');
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS proposal_audit_log (
+          entry_id        TEXT PRIMARY KEY,
+          proposal_id     TEXT NOT NULL,
+          cell_id         TEXT NOT NULL,
+          event_type      TEXT NOT NULL,
+          actor_did       TEXT NOT NULL,
+          actor_pseudonym TEXT NOT NULL DEFAULT '',
+          timestamp       INTEGER NOT NULL,
+          payload         TEXT NOT NULL,
+          nostr_event_id  TEXT
+        )
+      ''');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_audit_proposal ON proposal_audit_log(proposal_id)');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_audit_cell ON proposal_audit_log(cell_id)');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON proposal_audit_log(timestamp)');
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS decision_records (
+          record_id              TEXT PRIMARY KEY,
+          proposal_id            TEXT NOT NULL UNIQUE,
+          cell_id                TEXT NOT NULL,
+          final_title            TEXT NOT NULL,
+          final_description      TEXT NOT NULL,
+          result                 TEXT NOT NULL,
+          yes_votes              INTEGER NOT NULL,
+          no_votes               INTEGER NOT NULL,
+          abstain_votes          INTEGER NOT NULL,
+          participation          REAL NOT NULL,
+          decided_at             INTEGER NOT NULL,
+          all_votes              TEXT NOT NULL,
+          content_hash           TEXT NOT NULL,
+          previous_decision_hash TEXT,
+          nostr_event_id         TEXT NOT NULL DEFAULT ''
+        )
+      ''');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_decisions_cell ON decision_records(cell_id)');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_decisions_decided_at ON decision_records(decided_at)');
     }
   }
 
@@ -1446,18 +1674,44 @@ class PodDatabase {
 
   // ── Governance: Proposals ─────────────────────────────────────────────────
 
+  // ── Proposals (G2 flat-column) ────────────────────────────────────────────
+
   Future<void> upsertProposal(
       String id, String cellId, Map<String, dynamic> data) async {
-    final enc = await PodEncryption.encrypt(jsonEncode(data), _key);
+    final now = DateTime.now().millisecondsSinceEpoch;
     await _database.insert(
       'proposals',
       {
         'id': id,
         'cell_id': cellId,
-        'enc': enc,
-        'created_at': data['createdAt'] as int? ??
-            DateTime.now().millisecondsSinceEpoch,
-        'status': data['status'] as String? ?? 'draft',
+        'creator_did': data['creator_did'] ?? data['creatorDid'] ?? data['createdBy'] ?? '',
+        'creator_pseudonym': data['creator_pseudonym'] ?? data['creatorPseudonym'] ?? '',
+        'title': data['title'] ?? '',
+        'description': data['description'] ?? '',
+        'proposal_type': data['proposal_type'] ?? data['proposalType'] ?? 'SACHFRAGE',
+        'category': data['category'],
+        'status': data['status'] ?? 'DRAFT',
+        'created_at': data['created_at'] ?? data['createdAt'] ?? now,
+        'discussion_started_at': data['discussion_started_at'] ?? data['discussionStartedAt'],
+        'voting_started_at': data['voting_started_at'] ?? data['votingStartedAt'],
+        'voting_ends_at': data['voting_ends_at'] ?? data['votingEndsAt'] ?? data['votingDeadline'],
+        'decided_at': data['decided_at'] ?? data['decidedAt'],
+        'archived_at': data['archived_at'] ?? data['archivedAt'],
+        'withdrawn_at': data['withdrawn_at'] ?? data['withdrawnAt'],
+        'quorum_required': data['quorum_required'] ?? data['quorumRequired'] ?? data['quorum'] ?? 0.5,
+        'grace_period_hours': data['grace_period_hours'] ?? data['gracePeriodHours'] ?? 12,
+        'version': data['version'] ?? 1,
+        'previous_decision_hash': data['previous_decision_hash'] ?? data['previousDecisionHash'],
+        'impulse_supporters': data['impulse_supporters'] is String
+            ? data['impulse_supporters']
+            : jsonEncode(data['impulse_supporters'] ?? data['impulseSupporters'] ?? []),
+        'result_summary': data['result_summary'] ?? data['resultSummary'],
+        'result_yes': data['result_yes'] ?? data['resultYes'],
+        'result_no': data['result_no'] ?? data['resultNo'],
+        'result_abstain': data['result_abstain'] ?? data['resultAbstain'],
+        'result_participation': data['result_participation'] ?? data['resultParticipation'],
+        'scope': data['scope'] ?? 'cell',
+        'domain': data['domain'] ?? data['category'] ?? 'Sonstiges',
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
@@ -1470,17 +1724,171 @@ class PodDatabase {
       whereArgs: cellId != null ? [cellId] : null,
       orderBy: 'created_at DESC',
     );
-    final result = <Map<String, dynamic>>[];
-    for (final row in rows) {
-      try {
-        final plain = await PodEncryption.decrypt(row['enc'] as String, _key);
-        result.add(jsonDecode(plain) as Map<String, dynamic>);
-      } catch (_) {}
-    }
-    return result;
+    return rows.map((r) => Map<String, dynamic>.from(r)).toList();
   }
 
   Future<void> deleteProposal(String id) async {
     await _database.delete('proposals', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Reads all rows from proposals_legacy (enc-blob format) for one-time migration.
+  Future<List<Map<String, dynamic>>> listLegacyProposals() async {
+    try {
+      final rows = await _database.query('proposals_legacy', orderBy: 'created_at ASC');
+      final result = <Map<String, dynamic>>[];
+      for (final row in rows) {
+        try {
+          final plain = await PodEncryption.decrypt(row['enc'] as String, _key);
+          result.add(jsonDecode(plain) as Map<String, dynamic>);
+        } catch (_) {}
+      }
+      return result;
+    } catch (_) {
+      // proposals_legacy may not exist on fresh installs (created with v12).
+      return [];
+    }
+  }
+
+  // ── Proposal votes ────────────────────────────────────────────────────────
+
+  Future<void> upsertVote(Map<String, dynamic> voteMap) async {
+    await _database.insert(
+      'proposal_votes',
+      voteMap,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> listVotes(String proposalId) async {
+    return _database.query(
+      'proposal_votes',
+      where: 'proposal_id = ?',
+      whereArgs: [proposalId],
+      orderBy: 'created_at ASC',
+    );
+  }
+
+  Future<void> deleteVotesForProposal(String proposalId) async {
+    await _database.delete(
+      'proposal_votes',
+      where: 'proposal_id = ?',
+      whereArgs: [proposalId],
+    );
+  }
+
+  // ── Proposal edits ────────────────────────────────────────────────────────
+
+  Future<void> insertProposalEdit(Map<String, dynamic> editMap) async {
+    await _database.insert('proposal_edits', editMap,
+        conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
+
+  Future<List<Map<String, dynamic>>> listProposalEdits(String proposalId) async {
+    return _database.query(
+      'proposal_edits',
+      where: 'proposal_id = ?',
+      whereArgs: [proposalId],
+      orderBy: 'edited_at ASC',
+    );
+  }
+
+  Future<void> deleteEditsForProposal(String proposalId) async {
+    await _database.delete(
+      'proposal_edits',
+      where: 'proposal_id = ?',
+      whereArgs: [proposalId],
+    );
+  }
+
+  // ── Proposal audit log ────────────────────────────────────────────────────
+
+  Future<void> insertAuditEntry(Map<String, dynamic> entryMap) async {
+    await _database.insert('proposal_audit_log', entryMap,
+        conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
+
+  Future<List<Map<String, dynamic>>> listAuditLog(String proposalId) async {
+    return _database.query(
+      'proposal_audit_log',
+      where: 'proposal_id = ?',
+      whereArgs: [proposalId],
+      orderBy: 'timestamp ASC',
+    );
+  }
+
+  Future<void> deleteAuditLogForProposal(String proposalId) async {
+    await _database.delete(
+      'proposal_audit_log',
+      where: 'proposal_id = ?',
+      whereArgs: [proposalId],
+    );
+  }
+
+  // ── Decision records ──────────────────────────────────────────────────────
+
+  Future<void> insertDecisionRecord(Map<String, dynamic> recordMap) async {
+    await _database.insert('decision_records', recordMap,
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<Map<String, dynamic>?> getDecisionRecord(String proposalId) async {
+    final rows = await _database.query(
+      'decision_records',
+      where: 'proposal_id = ?',
+      whereArgs: [proposalId],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : Map<String, dynamic>.from(rows.first);
+  }
+
+  Future<List<Map<String, dynamic>>> listDecisionRecords({String? cellId}) async {
+    return _database.query(
+      'decision_records',
+      where: cellId != null ? 'cell_id = ?' : null,
+      whereArgs: cellId != null ? [cellId] : null,
+      orderBy: 'decided_at DESC',
+    );
+  }
+
+  Future<void> deleteDecisionRecord(String proposalId) async {
+    await _database.delete(
+      'decision_records',
+      where: 'proposal_id = ?',
+      whereArgs: [proposalId],
+    );
+  }
+
+  /// Deletes all G2 data for a cell (called when leaving/deleting a cell).
+  Future<void> deleteAllProposalDataForCell(String cellId) async {
+    // Find all proposal IDs for this cell first.
+    final rows = await _database.query(
+      'proposals',
+      columns: ['id'],
+      where: 'cell_id = ?',
+      whereArgs: [cellId],
+    );
+    for (final row in rows) {
+      final id = row['id'] as String;
+      await deleteVotesForProposal(id);
+      await deleteEditsForProposal(id);
+      await deleteAuditLogForProposal(id);
+      await deleteDecisionRecord(id);
+    }
+    // Audit log may have entries beyond the proposals list (shouldn't, but safe).
+    await _database.delete(
+      'proposal_audit_log',
+      where: 'cell_id = ?',
+      whereArgs: [cellId],
+    );
+    await _database.delete(
+      'decision_records',
+      where: 'cell_id = ?',
+      whereArgs: [cellId],
+    );
+    await _database.delete(
+      'proposals',
+      where: 'cell_id = ?',
+      whereArgs: [cellId],
+    );
   }
 }

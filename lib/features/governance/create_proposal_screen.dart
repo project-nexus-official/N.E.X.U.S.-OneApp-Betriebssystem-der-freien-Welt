@@ -40,17 +40,16 @@ class _CreateProposalScreenState extends State<CreateProposalScreen> {
     setState(() => _isSubmitting = true);
 
     try {
-      final myDid = IdentityService.instance.currentIdentity!.did;
+      final identity = IdentityService.instance.currentIdentity!;
       final proposal = Proposal.create(
         title: _titleCtrl.text.trim(),
         description: _descCtrl.text.trim(),
-        createdBy: myDid,
+        creatorDid: identity.did,
+        creatorPseudonym: identity.pseudonym,
         cellId: widget.cell.id,
         scope: _scope,
         domain: _domain,
-        discussionDays: _discussionDays,
-        votingDays: _votingDays,
-        quorum: _quorum,
+        quorumRequired: _quorum,
       );
 
       await ProposalService.instance.createProposal(proposal);

@@ -780,18 +780,22 @@ class _ProposalTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final statusColor = switch (proposal.status) {
-      ProposalStatus.draft => AppColors.onDark,
-      ProposalStatus.discussion => Colors.blue,
-      ProposalStatus.voting => Colors.orange,
-      ProposalStatus.decided => Colors.green,
-      ProposalStatus.archived => AppColors.surfaceVariant,
+      ProposalStatus.DRAFT => AppColors.onDark,
+      ProposalStatus.DISCUSSION => Colors.blue,
+      ProposalStatus.VOTING => Colors.orange,
+      ProposalStatus.VOTING_ENDED => Colors.deepOrange,
+      ProposalStatus.DECIDED => Colors.green,
+      ProposalStatus.ARCHIVED => AppColors.surfaceVariant,
+      ProposalStatus.WITHDRAWN => AppColors.surfaceVariant,
     };
     final statusLabel = switch (proposal.status) {
-      ProposalStatus.draft => 'Entwurf',
-      ProposalStatus.discussion => 'Diskussion',
-      ProposalStatus.voting => 'Abstimmung',
-      ProposalStatus.decided => 'Entschieden',
-      ProposalStatus.archived => 'Archiviert',
+      ProposalStatus.DRAFT => 'Entwurf',
+      ProposalStatus.DISCUSSION => 'Diskussion',
+      ProposalStatus.VOTING => 'Abstimmung',
+      ProposalStatus.VOTING_ENDED => 'Abgestimmt',
+      ProposalStatus.DECIDED => 'Entschieden',
+      ProposalStatus.ARCHIVED => 'Archiviert',
+      ProposalStatus.WITHDRAWN => 'Zurückgezogen',
     };
 
     return InkWell(
