@@ -1526,28 +1526,31 @@ class _G2DebugSection extends StatelessWidget {
     int deleted = 0;
     for (final p in all) {
       try {
-        print('[G2-DEBUG] Withdrawing test proposal: ${p.id}');
-        // Withdraw and publish Kind-31010 with status "withdrawn" so other
-        // devices also clean up, but only if not already withdrawn/archived.
-        if (p.status != ProposalStatus.WITHDRAWN &&
-            p.status != ProposalStatus.ARCHIVED) {
-          await ProposalService.instance.withdrawProposal(p.id);
-        }
-        // Hard-delete all local data for this proposal.
-        await PodDatabase.instance.deleteProposal(p.id);
-        await PodDatabase.instance.deleteVotesForProposal(p.id);
-        await PodDatabase.instance.deleteEditsForProposal(p.id);
-        await PodDatabase.instance.deleteAuditLogForProposal(p.id);
-        await PodDatabase.instance.deleteDecisionRecord(p.id);
+        print('[G2-DEBUG] Tombstoning and withdrawing test proposal: ${p.id}');
+
+        // 1. Force status to WITHDRAWN so the published Kind-31010 carries
+        //    status=WITHDRAWN — peer devices tombstone it on receipt.
+        p.status = ProposalStatus.WITHDRAWN;
+        p.withdrawnAt = DateTime.now().toUtc();
+        await PodDatabase.instance.upsertProposal(p.id, p.cellId, p.toMap());
+
+        // 2. Publish withdrawal event BEFORE local delete so the publish fn
+        //    can still read the proposal from _proposals cache.
+        await ProposalService.instance.publishProposalWithdrawal(p.id);
+
+        // 3. tombstoneAndDelete: sets tombstone synchronously, removes from
+        //    cache, notifies stream, then async DB cleanup.
+        await ProposalService.instance.tombstoneAndDelete(p.id);
+
         deleted++;
       } catch (e) {
         print('[G2-DEBUG] Cleanup error for ${p.id}: $e');
       }
     }
 
-    print('[G2-DEBUG] Cleanup complete: $deleted deleted');
+    print('[G2-DEBUG] Cleanup complete: $deleted deleted and tombstoned');
     if (context.mounted) {
-      _snack(context, '✅ $deleted Test-Anträge gelöscht und bereinigt');
+      _snack(context, '✅ $deleted Test-Anträge gelöscht und tombstoned');
     }
   }
 }

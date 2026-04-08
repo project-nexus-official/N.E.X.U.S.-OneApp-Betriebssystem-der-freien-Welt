@@ -4,10 +4,22 @@ import '../../core/identity/identity_service.dart';
 import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/help_icon.dart';
 import 'cell.dart';
-import 'proposal.dart';
+import 'proposal_detail_screen.dart';
 import 'proposal_service.dart';
 
-/// Form to create a new proposal within a cell.
+/// Category entry: (internalKey, displayLabel)
+const _kCategories = [
+  (null, 'Keine Kategorie'),
+  ('umwelt', '🌱 Umwelt'),
+  ('finanzen', '💰 Finanzen'),
+  ('it', '💻 IT'),
+  ('soziales', '🤝 Soziales'),
+  ('gesundheit', '❤️ Gesundheit'),
+  ('bildung', '📚 Bildung'),
+  ('sonstiges', '📋 Sonstiges'),
+];
+
+/// Form to create a new proposal as a draft within a cell.
 class CreateProposalScreen extends StatefulWidget {
   final Cell cell;
   const CreateProposalScreen({super.key, required this.cell});
@@ -21,12 +33,8 @@ class _CreateProposalScreenState extends State<CreateProposalScreen> {
   final _titleCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
 
-  String _domain = proposalDomains.last;
-  int _discussionDays = 7;
-  int _votingDays = 3;
-  double _quorum = 0.5;
-  ProposalScope _scope = ProposalScope.cell;
-  bool _isSubmitting = false;
+  String? _category;
+  bool _isSaving = false;
 
   @override
   void dispose() {
@@ -35,39 +43,35 @@ class _CreateProposalScreenState extends State<CreateProposalScreen> {
     super.dispose();
   }
 
-  Future<void> _submit({required bool publish}) async {
+  Future<void> _save() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
-    setState(() => _isSubmitting = true);
+    setState(() => _isSaving = true);
+    print('[G2-UI] Creating proposal: ${_titleCtrl.text.trim()}');
 
     try {
       final identity = IdentityService.instance.currentIdentity!;
-      final proposal = Proposal.create(
-        title: _titleCtrl.text.trim(),
-        description: _descCtrl.text.trim(),
+      final proposal = await ProposalService.instance.createDraft(
+        cellId: widget.cell.id,
         creatorDid: identity.did,
         creatorPseudonym: identity.pseudonym,
-        cellId: widget.cell.id,
-        scope: _scope,
-        domain: _domain,
-        quorumRequired: _quorum,
+        title: _titleCtrl.text.trim(),
+        description: _descCtrl.text.trim(),
+        category: _category,
       );
 
-      await ProposalService.instance.createProposal(proposal);
-      if (publish) {
-        await ProposalService.instance.publishProposal(proposal.id);
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(publish
-                ? 'Antrag veröffentlicht!'
-                : 'Entwurf gespeichert.'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        Navigator.of(context).pop();
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Entwurf gespeichert.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      print('[G2-UI] Opening detail screen for: ${proposal.id}');
+      Navigator.of(context, rootNavigator: true).pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) => ProposalDetailScreen(proposal: proposal),
+        ),
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -75,9 +79,36 @@ class _CreateProposalScreenState extends State<CreateProposalScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _isSubmitting = false);
+      if (mounted) setState(() => _isSaving = false);
     }
   }
+
+  InputDecoration _inputDeco(String hint, {String? counterText}) =>
+      InputDecoration(
+        hintText: hint,
+        hintStyle: TextStyle(color: AppColors.onDark.withValues(alpha: 0.4)),
+        counterText: counterText,
+        counterStyle:
+            TextStyle(color: AppColors.onDark.withValues(alpha: 0.4)),
+        filled: true,
+        fillColor: AppColors.surface,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: AppColors.surfaceVariant),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: AppColors.surfaceVariant),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: AppColors.gold),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: Colors.red),
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -99,21 +130,24 @@ class _CreateProposalScreenState extends State<CreateProposalScreen> {
             // Cell info
             Container(
               padding: const EdgeInsets.all(12),
-              margin: const EdgeInsets.only(bottom: 16),
+              margin: const EdgeInsets.only(bottom: 20),
               decoration: BoxDecoration(
                 color: AppColors.gold.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.gold.withValues(alpha: 0.3)),
+                border:
+                    Border.all(color: AppColors.gold.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
                   const Icon(Icons.group_work, color: AppColors.gold, size: 18),
                   const SizedBox(width: 8),
-                  Text(
-                    'Zelle: ${widget.cell.name}',
-                    style: const TextStyle(
-                      color: AppColors.gold,
-                      fontWeight: FontWeight.w600,
+                  Expanded(
+                    child: Text(
+                      'Zelle: ${widget.cell.name}',
+                      style: const TextStyle(
+                        color: AppColors.gold,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
@@ -121,15 +155,26 @@ class _CreateProposalScreenState extends State<CreateProposalScreen> {
             ),
 
             // Title
-            _SectionLabel('Titel *'),
+            _Label('Titel *'),
             TextFormField(
               controller: _titleCtrl,
-              decoration: _inputDeco('Kurzer, prägnanter Titel (min. 10 Zeichen)'),
+              decoration: _inputDeco('Worum geht es?'),
               style: const TextStyle(color: AppColors.onDark),
-              maxLength: 200,
+              maxLength: 100,
+              buildCounter: (context,
+                      {required currentLength,
+                      required isFocused,
+                      maxLength}) =>
+                  Text(
+                '$currentLength / ${maxLength ?? 100}',
+                style: TextStyle(
+                  color: AppColors.onDark.withValues(alpha: 0.4),
+                  fontSize: 12,
+                ),
+              ),
               validator: (v) {
-                if (v == null || v.trim().length < 10) {
-                  return 'Mindestens 10 Zeichen.';
+                if (v == null || v.trim().isEmpty) {
+                  return 'Bitte gib einen Titel ein.';
                 }
                 return null;
               },
@@ -137,126 +182,123 @@ class _CreateProposalScreenState extends State<CreateProposalScreen> {
             const SizedBox(height: 16),
 
             // Description
-            _SectionLabel('Beschreibung (Markdown unterstützt)'),
+            _Label('Beschreibung *'),
             TextFormField(
               controller: _descCtrl,
-              decoration: _inputDeco('Beschreibe deinen Antrag ausführlich …'),
+              decoration:
+                  _inputDeco('Beschreibe deinen Antrag genauer…'),
               style: const TextStyle(color: AppColors.onDark),
-              maxLines: 6,
+              maxLines: 8,
+              maxLength: 2000,
+              buildCounter: (context,
+                      {required currentLength,
+                      required isFocused,
+                      maxLength}) =>
+                  Text(
+                '$currentLength / ${maxLength ?? 2000}',
+                style: TextStyle(
+                  color: AppColors.onDark.withValues(alpha: 0.4),
+                  fontSize: 12,
+                ),
+              ),
+              validator: (v) {
+                if (v == null || v.trim().isEmpty) {
+                  return 'Bitte gib eine Beschreibung ein.';
+                }
+                return null;
+              },
             ),
             const SizedBox(height: 16),
 
-            // Scope
-            _SectionLabel('Reichweite', helpContextId: 'proposal_status'),
-            _RadioOption<ProposalScope>(
-              label: 'Nur diese Zelle (Standard)',
-              value: ProposalScope.cell,
-              groupValue: _scope,
-              onChanged: (v) => setState(() => _scope = v!),
-            ),
-            _RadioOption<ProposalScope>(
-              label: 'Föderation (in zukünftiger Version)',
-              value: ProposalScope.federation,
-              groupValue: _scope,
-              onChanged: (v) => setState(() => _scope = v!),
-              disabled: true,
-            ),
-            _RadioOption<ProposalScope>(
-              label: 'Global — Verfassungsfrage (in zukünftiger Version)',
-              value: ProposalScope.global,
-              groupValue: _scope,
-              onChanged: (v) => setState(() => _scope = v!),
-              disabled: true,
-            ),
-            const SizedBox(height: 16),
-
-            // Domain
-            _SectionLabel('Themenbereich'),
-            DropdownButtonFormField<String>(
-              value: _domain,
+            // Category
+            _Label('Kategorie (optional)'),
+            DropdownButtonFormField<String?>(
+              value: _category,
               dropdownColor: AppColors.surface,
               style: const TextStyle(color: AppColors.onDark),
               decoration: _inputDeco(''),
-              items: proposalDomains
-                  .map((d) => DropdownMenuItem(value: d, child: Text(d)))
+              items: _kCategories
+                  .map((e) => DropdownMenuItem<String?>(
+                        value: e.$1,
+                        child: Text(
+                          e.$2,
+                          style: const TextStyle(color: AppColors.onDark),
+                        ),
+                      ))
                   .toList(),
-              onChanged: (v) => setState(() => _domain = v!),
+              onChanged: (v) => setState(() => _category = v),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 24),
 
-            // Discussion duration
-            _SectionLabel('Diskussionsdauer'),
-            _DurationSelector(
-              options: const [1, 3, 7, 14],
-              selected: _discussionDays,
-              onChanged: (v) => setState(() => _discussionDays = v),
-              suffix: 'Tage',
-            ),
-            const SizedBox(height: 16),
-
-            // Voting duration
-            _SectionLabel('Abstimmungsdauer'),
-            _DurationSelector(
-              options: const [1, 3, 7],
-              selected: _votingDays,
-              onChanged: (v) => setState(() => _votingDays = v),
-              suffix: 'Tage',
-            ),
-            const SizedBox(height: 16),
-
-            // Quorum
-            _SectionLabel(
-                'Quorum: ${(_quorum * 100).round()}% der Mitglieder müssen abstimmen'),
-            _DurationSelector(
-              options: const [25, 50, 75],
-              selected: (_quorum * 100).round(),
-              onChanged: (v) => setState(() => _quorum = v / 100.0),
-              suffix: '%',
+            // Info card
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                    color: AppColors.surfaceVariant.withValues(alpha: 0.5)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'ℹ️',
+                    style: const TextStyle(fontSize: 18),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Dein Antrag wird zunächst als Entwurf gespeichert. '
+                      'Erst wenn du ihn "Zur Diskussion stellst", wird er '
+                      'für die anderen Mitglieder sichtbar.',
+                      style: TextStyle(
+                        color: AppColors.onDark.withValues(alpha: 0.75),
+                        fontSize: 13,
+                        height: 1.5,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 32),
 
             // Action buttons
             Row(
               children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed:
-                        _isSubmitting ? null : () => _submit(publish: false),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.onDark,
-                      side: const BorderSide(color: AppColors.surfaceVariant),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text('Als Entwurf speichern'),
+                TextButton(
+                  onPressed:
+                      _isSaving ? null : () => Navigator.of(context).pop(),
+                  child: Text(
+                    'Abbrechen',
+                    style: TextStyle(
+                        color: AppColors.onDark.withValues(alpha: 0.6)),
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed:
-                        _isSubmitting ? null : () => _submit(publish: true),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.gold,
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                const Spacer(),
+                FilledButton(
+                  onPressed: _isSaving ? null : _save,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.gold,
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    child: _isSubmitting
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.black),
-                          )
-                        : const Text('Veröffentlichen',
-                            style:
-                                TextStyle(fontWeight: FontWeight.bold)),
                   ),
+                  child: _isSaving
+                      ? const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.black),
+                        )
+                      : const Text(
+                          'Als Entwurf speichern',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
                 ),
               ],
             ),
@@ -266,133 +308,22 @@ class _CreateProposalScreenState extends State<CreateProposalScreen> {
       ),
     );
   }
-
-  InputDecoration _inputDeco(String hint) => InputDecoration(
-        hintText: hint,
-        hintStyle:
-            TextStyle(color: AppColors.onDark.withValues(alpha: 0.4)),
-        filled: true,
-        fillColor: AppColors.surface,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppColors.surfaceVariant),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppColors.surfaceVariant),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppColors.gold),
-        ),
-        counterStyle:
-            TextStyle(color: AppColors.onDark.withValues(alpha: 0.4)),
-      );
 }
 
-// ── Helper widgets ────────────────────────────────────────────────────────────
-
-class _SectionLabel extends StatelessWidget {
+class _Label extends StatelessWidget {
   final String text;
-  final String? helpContextId;
-  const _SectionLabel(this.text, {this.helpContextId});
+  const _Label(this.text);
 
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
-        child: Row(
-          children: [
-            Text(
-              text,
-              style: TextStyle(
-                color: AppColors.onDark.withValues(alpha: 0.7),
-                fontWeight: FontWeight.w600,
-                fontSize: 13,
-              ),
-            ),
-            if (helpContextId != null)
-              HelpIcon(contextId: helpContextId!, size: 15),
-          ],
+        child: Text(
+          text,
+          style: TextStyle(
+            color: AppColors.onDark.withValues(alpha: 0.7),
+            fontWeight: FontWeight.w600,
+            fontSize: 13,
+          ),
         ),
       );
-}
-
-class _RadioOption<T> extends StatelessWidget {
-  final String label;
-  final T value;
-  final T groupValue;
-  final ValueChanged<T?> onChanged;
-  final bool disabled;
-
-  const _RadioOption({
-    required this.label,
-    required this.value,
-    required this.groupValue,
-    required this.onChanged,
-    this.disabled = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Opacity(
-      opacity: disabled ? 0.4 : 1.0,
-      child: RadioListTile<T>(
-        title: Text(
-          label,
-          style: const TextStyle(color: AppColors.onDark, fontSize: 14),
-        ),
-        value: value,
-        groupValue: groupValue,
-        activeColor: AppColors.gold,
-        onChanged: disabled ? null : onChanged,
-        contentPadding: EdgeInsets.zero,
-        dense: true,
-      ),
-    );
-  }
-}
-
-class _DurationSelector extends StatelessWidget {
-  final List<int> options;
-  final int selected;
-  final ValueChanged<int> onChanged;
-  final String suffix;
-
-  const _DurationSelector({
-    required this.options,
-    required this.selected,
-    required this.onChanged,
-    required this.suffix,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: options
-          .map(
-            (v) => Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(
-                label: Text('$v $suffix'),
-                selected: selected == v,
-                onSelected: (_) => onChanged(v),
-                selectedColor: AppColors.gold,
-                backgroundColor: AppColors.surface,
-                labelStyle: TextStyle(
-                  color: selected == v ? Colors.black : AppColors.onDark,
-                  fontWeight: FontWeight.w600,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  side: BorderSide(
-                    color:
-                        selected == v ? AppColors.gold : AppColors.surfaceVariant,
-                  ),
-                ),
-              ),
-            ),
-          )
-          .toList(),
-    );
-  }
 }

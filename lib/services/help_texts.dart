@@ -110,6 +110,69 @@ class HelpTexts {
       '"Archiviert" — der Antrag ist abgeschlossen.',
     ),
 
+    'proposal_lifecycle': HelpEntry(
+      'Wie läuft ein Antrag ab?',
+      'Ein Antrag durchläuft vier Phasen: Erst wird er als Entwurf gespeichert. '
+      'Dann kommt er in die Diskussion — alle Mitglieder können Meinungen teilen. '
+      'Danach startet die Abstimmung mit Ja, Nein oder Enthaltung. '
+      'Am Ende steht das Ergebnis fest, das in der Geschichte der Gemeinschaft erhalten bleibt.',
+    ),
+
+    'proposal_quorum': HelpEntry(
+      'Was ist das Quorum?',
+      'Das Quorum ist der Mindestanteil an Mitgliedern, der abstimmen muss, '
+      'damit ein Ergebnis gültig ist. Wenn zu wenige abstimmen, wird der Antrag '
+      'als "Ungültig" gewertet — nicht weil die Mehrheit dagegen ist, '
+      'sondern weil die Beteiligung zu gering war.',
+    ),
+
+    'proposal_grace_period': HelpEntry(
+      'Was ist die Nachfrist?',
+      'Nach dem Ende der Abstimmungszeit gibt es eine kurze Nachfrist. '
+      'Stimmen, die kurz vor Ablauf abgeschickt wurden, können noch eintreffen. '
+      'In dieser Phase werden keine neuen Stimmen gewertet — '
+      'nur bereits abgeschickte, die sich noch in der Übertragung befinden.',
+    ),
+
+    'proposal_voting_transparency': HelpEntry(
+      'Transparente Abstimmung',
+      'In der Menschheitsfamilie ist jede Abstimmung transparent: '
+      'Wer wie abgestimmt hat, ist für alle Zellenmitglieder sichtbar. '
+      'Das schafft Vertrauen und verhindert Manipulation. '
+      'Deine Begründung hilft anderen, deine Entscheidung zu verstehen.',
+    ),
+
+    'proposal_edit': HelpEntry(
+      'Antrag bearbeiten',
+      'Während der Diskussionsphase kannst du deinen Antrag noch anpassen — '
+      'zum Beispiel um Tippfehler zu korrigieren oder Argumente zu schärfen. '
+      'Alle Änderungen werden in der Edit-Historie festgehalten, '
+      'damit jeder nachvollziehen kann, wie der Antrag sich entwickelt hat.',
+    ),
+
+    'proposal_history': HelpEntry(
+      'Das Gedächtnis der Demokratie',
+      'Die Abstimmungs-Historie ist unveränderlich. '
+      'Jede Aktion — vom ersten Entwurf bis zur Entscheidung — wird dauerhaft gespeichert. '
+      'Das ist das Gedächtnis unserer Gemeinschaft: '
+      'transparent, nachvollziehbar und manipulationssicher.',
+    ),
+
+    'proposal_reasoning': HelpEntry(
+      'Begründung angeben',
+      'Eine Begründung hilft deiner Gemeinschaft zu verstehen, warum du so abstimmst. '
+      'Sie ist freiwillig, aber wertvoll — besonders bei knappen Entscheidungen. '
+      'Deine Begründung wird in der Transparenz-Liste und in der Abstimmungs-Historie angezeigt.',
+    ),
+
+    'proposal_withdraw': HelpEntry(
+      'Antrag zurückziehen',
+      'Als Ersteller kannst du deinen Antrag jederzeit zurückziehen — '
+      'solange die Abstimmung noch nicht begonnen hat. '
+      'Zurückgezogene Anträge werden nicht gelöscht, '
+      'sondern als "Zurückgezogen" markiert und in der Geschichte festgehalten.',
+    ),
+
     'voting_general': HelpEntry(
       'Wie funktioniert die Abstimmung?',
       'Bei einer Abstimmung hast du drei Möglichkeiten: '

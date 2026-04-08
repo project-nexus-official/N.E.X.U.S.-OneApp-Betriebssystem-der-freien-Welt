@@ -4,6 +4,7 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart' as pkg_crypto;
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/identity/identity_service.dart';
 import '../../core/storage/pod_database.dart';
@@ -35,6 +36,13 @@ class ProposalService {
   // In-memory caches
   final Map<String, Proposal> _proposals = {};
   final Map<String, List<Vote>> _votes = {}; // keyed by proposal_id
+
+  /// Persistent tombstone list: proposal IDs that were deleted/withdrawn locally.
+  /// Once tombstoned, a proposal can never be re-imported via Nostr replay.
+  /// Tombstones are never cleared (except on full app data wipe).
+  final Set<String> _proposalTombstones = {};
+
+  static const _tombstonesKey = 'proposal_tombstones';
 
   final _streamCtrl = StreamController<void>.broadcast();
   final _auditCtrl = StreamController<AuditLogEntry>.broadcast();
@@ -92,13 +100,51 @@ class ProposalService {
   Future<void> load() async {
     debugPrint('[PROPOSAL] Service initializing');
     try {
+      // Load tombstones FIRST so they are active before any DB or Nostr data arrives.
+      await _loadTombstones();
       await _migrateLegacyProposals();
       await _loadFromDatabase();
+      await _cleanupZombiesOnStart();
       _advanceStatuses();
       debugPrint('[PROPOSAL] Loaded ${_proposals.length} proposals from DB');
       _notify();
     } catch (e) {
       debugPrint('[PROPOSAL] load error: $e');
+    }
+  }
+
+  /// Loads the persistent tombstone list from SharedPreferences.
+  Future<void> _loadTombstones() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList(_tombstonesKey) ?? [];
+    _proposalTombstones.addAll(list);
+    print('[PROPOSAL] Loaded ${_proposalTombstones.length} tombstones');
+  }
+
+  /// Adds [proposalId] to the tombstone set and immediately persists it.
+  ///
+  /// The in-memory add is synchronous — callers can check [_proposalTombstones]
+  /// right after this call without awaiting the SharedPreferences write.
+  Future<void> _addTombstone(String proposalId) async {
+    _proposalTombstones.add(proposalId); // synchronous, no await needed
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_tombstonesKey, _proposalTombstones.toList());
+    print('[PROPOSAL] Tombstone added: $proposalId');
+  }
+
+  /// Removes any proposals from the DB/cache that are already tombstoned.
+  ///
+  /// Handles the race-window where a Nostr event landed between the last
+  /// tombstone write and the current app start.
+  Future<void> _cleanupZombiesOnStart() async {
+    final zombies =
+        _proposals.keys.where((id) => _proposalTombstones.contains(id)).toList();
+    if (zombies.isEmpty) return;
+    print('[PROPOSAL] Cleanup zombies on start: ${zombies.length} removed');
+    for (final id in zombies) {
+      _proposals.remove(id);
+      _votes.remove(id);
+      await _deleteProposalFromDb(id);
     }
   }
 
@@ -213,10 +259,12 @@ class ProposalService {
     if (proposal == null || proposal.status != ProposalStatus.DRAFT) {
       throw StateError('Can only delete DRAFT proposals');
     }
-    await _deleteProposalFromDb(proposalId);
+    // Tombstone synchronously BEFORE the async DB delete (race-condition guard).
+    await _addTombstone(proposalId);
     _proposals.remove(proposalId);
     _votes.remove(proposalId);
-    _notify();
+    _notify(); // live UI update immediately
+    await _deleteProposalFromDb(proposalId);
     debugPrint('[PROPOSAL] Draft deleted: $proposalId');
   }
 
@@ -349,6 +397,8 @@ class ProposalService {
     }
 
     final wasInDiscussion = p.discussionStartedAt != null;
+    // Tombstone synchronously BEFORE DB write (race-condition guard).
+    await _addTombstone(proposalId);
     p.status = ProposalStatus.WITHDRAWN;
     p.withdrawnAt = DateTime.now().toUtc();
     await _saveProposalToDb(p);
@@ -370,6 +420,32 @@ class ProposalService {
     ));
 
     _notify();
+  }
+
+  /// Publishes a Kind-31010 withdrawal event for [proposalId] without any
+  /// status-transition checks. Used by the debug cleanup button to notify
+  /// peer devices regardless of the current proposal status.
+  Future<void> publishProposalWithdrawal(String proposalId) async {
+    final p = _proposals[proposalId];
+    if (p == null) return;
+    await _addTombstone(proposalId);
+    await _publishProposalToNostr(p);
+  }
+
+  /// Tombstones [proposalId] and deletes all its local data.
+  ///
+  /// Used by the debug cleanup button so that tombstones are set before the
+  /// DB delete, preventing Nostr relay replays from re-inserting the proposal.
+  Future<void> tombstoneAndDelete(String proposalId) async {
+    // Synchronous in-memory tombstone FIRST.
+    await _addTombstone(proposalId);
+    // Remove from cache immediately → live UI update.
+    _proposals.remove(proposalId);
+    _votes.remove(proposalId);
+    _notify();
+    // Async DB cleanup (safe even if already deleted).
+    await _deleteProposalFromDb(proposalId);
+    print('[PROPOSAL] tombstoneAndDelete: $proposalId');
   }
 
   /// DISCUSSION → VOTING. Checks proposalWaitDays constraint.
@@ -819,6 +895,12 @@ class ProposalService {
         return;
       }
 
+      // TOMBSTONE CHECK: never re-import a deleted/withdrawn proposal.
+      if (_proposalTombstones.contains(proposalId)) {
+        print('[PROPOSAL] Ignoring tombstoned proposal: $proposalId');
+        return;
+      }
+
       // Only process events for cells we are a member of.
       if (!CellService.instance.isMember(cellId)) {
         print('[PROPOSAL] Ignoring – not a member of cell $cellId');
@@ -831,6 +913,18 @@ class ProposalService {
         (e) => e.name == (statusStr ?? 'DRAFT').toUpperCase(),
         orElse: () => ProposalStatus.DRAFT,
       );
+
+      // WITHDRAWN from another device: tombstone + delete locally so it never
+      // comes back via relay replay on this device either.
+      if (newStatus == ProposalStatus.WITHDRAWN) {
+        print('[PROPOSAL] Withdraw received, tombstoning: $proposalId');
+        await _addTombstone(proposalId);
+        _proposals.remove(proposalId);
+        _votes.remove(proposalId);
+        await _deleteProposalFromDb(proposalId);
+        _notify();
+        return;
+      }
 
       final existing = _proposals[proposalId];
 
@@ -1001,6 +1095,12 @@ class ProposalService {
         return;
       }
 
+      // TOMBSTONE CHECK: ignore votes for deleted proposals.
+      if (_proposalTombstones.contains(proposalId)) {
+        print('[VOTE] Ignoring vote for tombstoned proposal: $proposalId');
+        return;
+      }
+
       if (!CellService.instance.isMember(cellId)) return;
 
       final p = _proposals[proposalId];
@@ -1113,6 +1213,12 @@ class ProposalService {
       final content = jsonDecode(event.content) as Map<String, dynamic>;
       final proposalId = content['proposalId'] as String?;
       if (proposalId == null) return;
+
+      // TOMBSTONE CHECK: ignore decision records for deleted proposals.
+      if (_proposalTombstones.contains(proposalId)) {
+        print('[PROPOSAL] Ignoring decision record for tombstoned proposal: $proposalId');
+        return;
+      }
 
       // Skip if we already have this record (e.g. we created it).
       final existing = await _getDecisionRecordByProposal(proposalId);
@@ -1412,6 +1518,13 @@ class ProposalService {
 
   Future<void> deleteAllProposalsForCell(String cellId) async {
     debugPrint('[PROPOSAL] Deleting all data for cell: $cellId');
+    // Tombstone all proposals for this cell BEFORE DB delete.
+    final toTombstone =
+        _proposals.values.where((p) => p.cellId == cellId).map((p) => p.id).toList();
+    for (final id in toTombstone) {
+      await _addTombstone(id);
+    }
+    debugPrint('[PROPOSAL] Tombstoned ${toTombstone.length} proposals for cell $cellId');
     await PodDatabase.instance.deleteAllProposalDataForCell(cellId);
     _proposals.removeWhere((_, p) => p.cellId == cellId);
     _votes.removeWhere((id, _) => !_proposals.containsKey(id));

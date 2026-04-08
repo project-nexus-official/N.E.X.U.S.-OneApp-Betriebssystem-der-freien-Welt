@@ -45,6 +45,11 @@ class _GovernanceScreenState extends State<GovernanceScreen>
     _syncSelectedCell();
   }
 
+  bool _isConfirmedMemberOf(Cell cell) {
+    final m = CellService.instance.myMembershipIn(cell.id);
+    return m?.isConfirmed ?? false;
+  }
+
   void _syncSelectedCell() {
     final cells = CellService.instance.myCells
         .where((c) => CellService.instance.isMember(c.id))
@@ -105,7 +110,8 @@ class _GovernanceScreenState extends State<GovernanceScreen>
             : null,
       ),
       backgroundColor: AppColors.deepBlue,
-      floatingActionButton: _selectedCell != null
+      floatingActionButton: _selectedCell != null &&
+              _isConfirmedMemberOf(_selectedCell!)
           ? FloatingActionButton.extended(
               onPressed: _openCreate,
               backgroundColor: AppColors.gold,
@@ -133,6 +139,7 @@ class _GovernanceScreenState extends State<GovernanceScreen>
                       _ProposalList(
                         cellId: _selectedCell?.id ?? '',
                         filter: _activeFilter,
+                        isActiveTab: true,
                       ),
                       _ProposalList(
                         cellId: _selectedCell?.id ?? '',
@@ -149,11 +156,13 @@ class _GovernanceScreenState extends State<GovernanceScreen>
 
   bool _activeFilter(Proposal p) =>
       p.status == ProposalStatus.DISCUSSION ||
-      p.status == ProposalStatus.VOTING;
+      p.status == ProposalStatus.VOTING ||
+      p.status == ProposalStatus.VOTING_ENDED;
 
   bool _closedFilter(Proposal p) =>
       p.status == ProposalStatus.DECIDED ||
-      p.status == ProposalStatus.ARCHIVED;
+      p.status == ProposalStatus.ARCHIVED ||
+      p.status == ProposalStatus.WITHDRAWN;
 }
 
 // ── No-cell empty state ───────────────────────────────────────────────────────
@@ -254,8 +263,13 @@ class _CellSelector extends StatelessWidget {
 class _ProposalList extends StatelessWidget {
   final String cellId;
   final bool Function(Proposal) filter;
+  final bool isActiveTab;
 
-  const _ProposalList({required this.cellId, required this.filter});
+  const _ProposalList({
+    required this.cellId,
+    required this.filter,
+    this.isActiveTab = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -271,9 +285,19 @@ class _ProposalList extends StatelessWidget {
         .toList();
 
     if (proposals.isEmpty) {
-      return const Center(
-        child: Text('Keine Anträge.',
-            style: TextStyle(color: AppColors.surfaceVariant)),
+      if (isActiveTab) return _EmptyActiveState(cellId: cellId);
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Text(
+            'Hier erscheinen abgeschlossene Abstimmungen.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.onDark.withValues(alpha: 0.45),
+              height: 1.5,
+            ),
+          ),
+        ),
       );
     }
 
@@ -291,9 +315,18 @@ class _MyProposalList extends StatelessWidget {
     final proposals = ProposalService.instance.myProposals();
 
     if (proposals.isEmpty) {
-      return const Center(
-        child: Text('Du hast noch keine Anträge erstellt.',
-            style: TextStyle(color: AppColors.surfaceVariant)),
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Text(
+            'Du hast noch keine Anträge erstellt oder an Abstimmungen teilgenommen.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.onDark.withValues(alpha: 0.45),
+              height: 1.5,
+            ),
+          ),
+        ),
       );
     }
 
@@ -436,6 +469,66 @@ class _StatusBadge extends StatelessWidget {
           color: color,
           fontSize: 10,
           fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+}
+
+// ── Empty active state ────────────────────────────────────────────────────────
+
+class _EmptyActiveState extends StatelessWidget {
+  final String cellId;
+  const _EmptyActiveState({required this.cellId});
+
+  @override
+  Widget build(BuildContext context) {
+    // Find the cell to pass to CreateProposalScreen
+    final cell = CellService.instance.myCells
+        .where((c) => c.id == cellId)
+        .firstOrNull;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.how_to_vote_outlined,
+                size: 52,
+                color: AppColors.onDark.withValues(alpha: 0.25)),
+            const SizedBox(height: 16),
+            Text(
+              'Aktuell gibt es keine offenen Anträge in dieser Zelle.\n'
+              'Sei der erste und stelle einen Antrag!',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppColors.onDark.withValues(alpha: 0.5),
+                height: 1.5,
+              ),
+            ),
+            if (cell != null) ...[
+              const SizedBox(height: 20),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.of(context, rootNavigator: true).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => CreateProposalScreen(cell: cell),
+                    ),
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.gold,
+                  foregroundColor: Colors.black,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                icon: const Icon(Icons.add),
+                label: const Text('Neuen Antrag erstellen'),
+              ),
+            ],
+          ],
         ),
       ),
     );
