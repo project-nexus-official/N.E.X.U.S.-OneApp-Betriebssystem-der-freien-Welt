@@ -1151,23 +1151,37 @@ class CellService {
   /// Use this when the local state is so inconsistent that the regular
   /// cleanup path cannot find anything to delete.
   Future<void> nuclearWipe() async {
-    // 1. Set wipe timestamp first (blocks relay re-injection of old events).
+    // 1. Collect ALL known cell IDs before touching anything.
+    //    This covers cells in DB (myCells) AND session-only discovered cells.
+    final dbRows = await PodDatabase.instance.listCells();
+    final allKnownIds = <String>{
+      ...dbRows.map((r) => r['id'] as String? ?? '').where((id) => id.isNotEmpty),
+      ..._myCells.map((c) => c.id),
+      ..._discovered.map((c) => c.id),
+    };
+    print('[CELL-WIPE] Collected ${allKnownIds.length} cell IDs to dismiss: $allKnownIds');
+
+    // 2. Set wipe timestamp (blocks unknown relay cells without IDs).
     _wipeAt = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
 
-    // 2. Clear SharedPrefs cell keys completely.
+    // 3. Add ALL known IDs to the dismiss list so they are blocked even if
+    //    the relay re-sends them after restart (belt-AND-suspenders with wipe).
+    //    Do NOT clear existing dismissed/tombstone IDs — keep accumulating.
+    _dismissedCellIds.addAll(allKnownIds);
+    // Tombstone list is also kept (dissolved cells must never return).
+
+    // 4. Persist updated block lists + wipe timestamp to SharedPrefs.
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_deletedCellsKey);
-    await prefs.remove(_dismissedKey);
+    await prefs.setString(
+        _dismissedKey, jsonEncode(_dismissedCellIds.toList()));
+    await prefs.setString(
+        _deletedCellsKey, jsonEncode(_deletedCellIds.toList()));
     await prefs.setInt(_wipeKey, _wipeAt!);
 
-    // 3. Reset in-memory sets.
-    _deletedCellIds.clear();
-    _dismissedCellIds.clear();
-
-    // 4. Wipe all DB tables.
+    // 5. Wipe all DB tables using explicit SQL (more reliable on desktop).
     await PodDatabase.instance.deleteAllCellData();
 
-    // 5. Reset in-memory lists.
+    // 6. Reset in-memory lists (keep dismissed + tombstone sets intact).
     _myCells.clear();
     _discovered.clear();
     _members.clear();
@@ -1175,7 +1189,8 @@ class CellService {
     _myRequests.clear();
 
     _notify();
-    print('[CELL-WIPE] Nuclear wipe complete. WipeAt=$_wipeAt');
+    print('[CELL-WIPE] Nuclear wipe complete.'
+        ' WipeAt=$_wipeAt dismissed=${_dismissedCellIds.length}');
   }
 
   void _notify() => _streamCtrl.add(null);

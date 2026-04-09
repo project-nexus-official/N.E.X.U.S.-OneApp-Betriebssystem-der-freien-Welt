@@ -1580,16 +1580,14 @@ class PodDatabase {
   }
 
   /// Deletes ALL cell-related data from the database unconditionally.
-  /// Used for nuclear wipe — does not depend on in-memory state.
+  /// Uses raw SQL to ensure deletion works on all platforms (including
+  /// Windows desktop where sqflite_ffi may ignore delete() without WHERE).
   Future<void> deleteAllCellData() async {
-    await _database.delete('cells');
-    await _database.delete('cell_members');
-    await _database.delete('cell_join_requests');
-    // Also remove cell-internal channels (cell_id IS NOT NULL).
-    await _database.delete(
-      'group_channels',
-      where: 'cell_id IS NOT NULL',
-    );
+    await _database.execute('DELETE FROM cells');
+    await _database.execute('DELETE FROM cell_members');
+    await _database.execute('DELETE FROM cell_join_requests');
+    await _database.execute(
+        'DELETE FROM group_channels WHERE cell_id IS NOT NULL');
   }
 
   // ── Governance: Cell Members ──────────────────────────────────────────────
