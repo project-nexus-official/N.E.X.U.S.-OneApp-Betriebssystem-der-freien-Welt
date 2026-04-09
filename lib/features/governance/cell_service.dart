@@ -202,6 +202,7 @@ class CellService {
         print('[ZOMBIE-V3] Is in tombstones? ${_deletedCellIds.contains(cell.id)}');
         print('[ZOMBIE-V3] Is in dismissed? ${_dismissedCellIds.contains(cell.id)}');
         print('[ZOMBIE-V3] Decision: ALLOWED (loaded from DB)');
+        print('[CELL-IMPORT] DB load: cellId=${cell.id}, name="${cell.name}", role=see_members_table');
         _myCells.add(cell);
       }
 
@@ -210,6 +211,12 @@ class CellService {
         final memberRows = await PodDatabase.instance.listCellMembers(cell.id);
         _members[cell.id] =
             memberRows.map(CellMember.fromJson).toList();
+        final myMembership = _members[cell.id]
+            ?.where((m) => m.did == IdentityService.instance.currentIdentity?.did)
+            .firstOrNull;
+        print('[CELL-IMPORT] DB load member: cellId=${cell.id}, name="${cell.name}",'
+            ' role=${myMembership?.role.name ?? "NOT_FOUND"}'
+            ' (${_members[cell.id]?.length ?? 0} total members)');
 
         final reqRows =
             await PodDatabase.instance.listCellJoinRequests(cell.id);
@@ -326,6 +333,9 @@ class CellService {
   /// Announcements older than the last wipe are silently ignored so zombie
   /// cells from relays do not re-appear after a debug reset or cleanup.
   void addDiscoveredCell(Cell cell, {int? nostrCreatedAt}) {
+    print('[CELL-IMPORT] Incoming Kind-30000: cellId=${cell.id}, name="${cell.name}"');
+    print('[CELL-IMPORT] Membership check: isMember=${_myCells.any((c) => c.id == cell.id)},'
+        ' wasLeave=${_dismissedCellIds.contains(cell.id)}');
     print('[ZOMBIE-V3] WRITE PATH: addDiscoveredCell, cellId=${cell.id}, name="${cell.name}", source=Kind30000');
     print('[ZOMBIE-V3] Is in tombstones? ${_deletedCellIds.contains(cell.id)}');
     print('[ZOMBIE-V3] Is in dismissed? ${_dismissedCellIds.contains(cell.id)}');
@@ -342,15 +352,18 @@ class CellService {
     if (_deletedCellIds.contains(cell.id)) {
       print('[ZOMBIE-V2] Import blocked by tombstone: ${cell.id}');
       print('[ZOMBIE-V2] Decision: REJECTED (reason: cell tombstoned/dissolved)');
+      print('[CELL-IMPORT] Decision: BLOCKED reason=tombstoned');
       return;
     }
     if (_myCells.any((c) => c.id == cell.id)) {
       print('[ZOMBIE-V2] Decision: REJECTED (reason: already in myCells)');
+      print('[CELL-IMPORT] Decision: BLOCKED reason=already_in_myCells');
       return;
     }
     if (_dismissedCellIds.contains(cell.id)) {
       print('[CELL-DEL] Import blocked for cell ${cell.id} (on block list)');
       print('[ZOMBIE-V2] Decision: REJECTED (reason: dismissed/left)');
+      print('[CELL-IMPORT] Decision: BLOCKED reason=dismissed_left');
       return;
     }
     if (nostrCreatedAt != null &&
@@ -359,6 +372,7 @@ class CellService {
       print('[CELL-DEL] Import blocked for cell ${cell.id} '
           '(event $nostrCreatedAt < wipe $_wipeAt)');
       print('[ZOMBIE-V2] Decision: REJECTED (reason: older than wipe timestamp)');
+      print('[CELL-IMPORT] Decision: BLOCKED reason=older_than_wipe');
       return;
     }
     _discovered.removeWhere((c) => c.id == cell.id);
@@ -366,6 +380,7 @@ class CellService {
     _notify();
     print('[ZOMBIE-V3] Decision: ALLOWED (added to discovered)');
     print('[ZOMBIE-V2] Decision: ADDED to discovered');
+    print('[CELL-IMPORT] Decision: ALLOWED reason=new_discovery');
   }
 
   /// Records the current timestamp as the last wipe point.
@@ -643,13 +658,26 @@ class CellService {
 
   /// Persists [cellId] to the dismissed list so it never re-appears in
   /// discovery after a Nostr re-subscription.  Used for voluntary leave/remove.
+  ///
+  /// NOTE: Always writes SharedPreferences even if [cellId] is already in the
+  /// in-memory set.  [leaveCell] adds to [_dismissedCellIds] synchronously
+  /// BEFORE calling this — the early-return guard was the original bug that
+  /// prevented the dismissed list from ever being persisted on voluntary leave.
   Future<void> _dismissCell(String cellId) async {
-    if (_dismissedCellIds.contains(cellId)) return;
-    _dismissedCellIds.add(cellId);
+    _dismissedCellIds.add(cellId); // idempotent Set.add
     _discovered.removeWhere((c) => c.id == cellId);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
         _dismissedKey, jsonEncode(_dismissedCellIds.toList()));
+    // Verify the write actually landed.
+    final verify = prefs.getString(_dismissedKey);
+    if (verify == null) {
+      print('[CELL-LEAVE] WARNING: No persistent leave marker found! SharedPrefs write may have failed.');
+    } else {
+      print('[CELL-LEAVE] Verified: dismissed list saved'
+          ' (${_dismissedCellIds.length} entries, contains=$cellId:'
+          ' ${_dismissedCellIds.contains(cellId)})');
+    }
     print('[CELL-DEL] Adding $cellId to block list');
   }
 
@@ -661,9 +689,12 @@ class CellService {
     final myDid = IdentityService.instance.currentIdentity!.did;
 
     // Publish leave event BEFORE local cleanup (founder needs to see it).
+    print('[CELL-LEAVE] Publishing Kind-31005 for cellId=$cellId');
     if (onPublishMemberUpdate != null) {
       onPublishMemberUpdate!(cellId: cellId, targetDid: myDid, action: 'left');
       print('[CELL] Published leave event for cell: $cellId');
+    } else {
+      print('[CELL-LEAVE] WARNING: onPublishMemberUpdate is null — Kind-31005 NOT sent!');
     }
 
     // Dismiss in-memory immediately (synchronous).
@@ -675,11 +706,15 @@ class CellService {
     _myRequests.removeWhere((r) => r.cellId == cellId);
     _members.remove(cellId);
     _requests.remove(cellId);
+    print('[CELL-LEAVE] In-memory removal: cellId=$cellId');
     _notify();
 
     // Async persistence + DB cleanup after UI is updated.
     await _dismissCell(cellId); // persists dismissed list (idempotent)
+    print('[CELL-LEAVE] Persistent leave marker set: cellId=$cellId'
+        ' (dismissedCount=${_dismissedCellIds.length})');
     await PodDatabase.instance.deleteCellMember(cellId, myDid);
+    print('[CELL-LEAVE] Local DB membership removed: cellId=$cellId, memberId=$myDid');
     await PodDatabase.instance.deleteCell(cellId);
     await PodDatabase.instance.deleteCellJoinRequestsByCell(cellId);
     debugPrint('[CELLS] Left cell $cellId');
@@ -869,6 +904,9 @@ class CellService {
   /// and AFTER every await so a concurrent dissolution event cannot sneak in
   /// between the guard check and the actual DB/memory write.
   Future<void> handleMembershipConfirmed(Cell cell, CellMember member) async {
+    print('[CELL-IMPORT] Incoming Kind-31004: cellId=${cell.id}, name="${cell.name}"');
+    print('[CELL-IMPORT] Membership check: isMember=${_myCells.any((c) => c.id == cell.id)},'
+        ' wasLeave=${_dismissedCellIds.contains(cell.id)}');
     print('[ZOMBIE-V3] WRITE PATH: handleMembershipConfirmed, cellId=${cell.id}, name="${cell.name}", source=Kind31004');
     print('[ZOMBIE-V3] Is in tombstones? ${_deletedCellIds.contains(cell.id)}');
     print('[ZOMBIE-V3] Is in dismissed? ${_dismissedCellIds.contains(cell.id)}');
@@ -883,11 +921,13 @@ class CellService {
     if (_deletedCellIds.contains(cell.id)) {
       print('[ZOMBIE-V2] Import blocked by tombstone: ${cell.id}');
       print('[ZOMBIE-V2] Decision: REJECTED (reason: cell tombstoned/dissolved)');
+      print('[CELL-IMPORT] Decision: BLOCKED reason=tombstoned');
       return;
     }
     if (_dismissedCellIds.contains(cell.id)) {
       print('[JOIN] Ignoring membership confirmation for dismissed cell: ${cell.id}');
       print('[ZOMBIE-V2] Decision: REJECTED (reason: dismissed/left)');
+      print('[CELL-IMPORT] Decision: BLOCKED reason=dismissed_left');
       return;
     }
 
@@ -903,11 +943,13 @@ class CellService {
         print('[ZOMBIE-V2] Post-await guard triggered for ${cell.id} —'
             ' tombstone arrived during DB write, rolling back');
         print('[ZOMBIE-V2] Decision: REJECTED (reason: tombstone arrived during await)');
+        print('[CELL-IMPORT] Decision: BLOCKED reason=post_await_tombstone');
         return;
       }
 
       print('[ZOMBIE-V3] Decision: ALLOWED (added to myCells, source: Kind31004)');
       print('[ZOMBIE-V2] Decision: ADDED to myCells (source: membership_confirmed)');
+      print('[CELL-IMPORT] Decision: ALLOWED reason=membership_confirmed_Kind31004');
       _myCells.add(cell);
       _members[cell.id] = [];
       _requests[cell.id] = [];
