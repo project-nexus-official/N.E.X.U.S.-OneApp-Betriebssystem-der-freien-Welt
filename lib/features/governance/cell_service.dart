@@ -378,17 +378,21 @@ class CellService {
     }
     final ownedIdx = _myCells.indexWhere((c) => c.id == cell.id);
     if (ownedIdx >= 0) {
-      if (ownDevice) {
-        // Multi-device rename: update the local cell in-place and persist.
+      final existing = _myCells[ownedIdx];
+      if (ownDevice && existing.name != cell.name) {
+        // Multi-device rename: update only the name in-place so we don't
+        // overwrite local-only fields with the Nostr-echoed version.
         print('[CELL-UPDATE] Decision: UPDATED reason=own_device_rename'
-            ' (${_myCells[ownedIdx].name} → ${cell.name})');
-        _myCells[ownedIdx] = cell;
-        PodDatabase.instance.upsertCell(cell.id, cell.toJson());
+            ' (${existing.name} → ${cell.name})');
+        _myCells[ownedIdx] = existing.copyWith(name: cell.name);
+        PodDatabase.instance.upsertCell(
+            cell.id, _myCells[ownedIdx].toJson());
         _notify();
       } else {
         print('[ZOMBIE-V2] Decision: REJECTED (reason: already in myCells)');
         print('[CELL-IMPORT] Decision: BLOCKED reason=already_in_myCells');
-        print('[CELL-UPDATE] Decision: SKIPPED reason=already_in_myCells');
+        print('[CELL-UPDATE] Decision: SKIPPED reason='
+            '${ownDevice ? "own_device_echo_same_name" : "already_in_myCells"}');
       }
       return;
     }
