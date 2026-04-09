@@ -342,7 +342,7 @@ class CellService {
   /// [nostrCreatedAt] is the Nostr event's `created_at` Unix-seconds value.
   /// Announcements older than the last wipe are silently ignored so zombie
   /// cells from relays do not re-appear after a debug reset or cleanup.
-  void addDiscoveredCell(Cell cell, {int? nostrCreatedAt}) {
+  void addDiscoveredCell(Cell cell, {int? nostrCreatedAt, bool ownDevice = false}) {
     print('[CELL-IMPORT] Incoming Kind-30000: cellId=${cell.id}, name="${cell.name}"');
     print('[CELL-IMPORT] Membership check: isMember=${_myCells.any((c) => c.id == cell.id)},'
         ' wasLeave=${_dismissedCellIds.contains(cell.id)}');
@@ -376,10 +376,20 @@ class CellService {
       print('[CELL-UPDATE] Decision: SKIPPED reason=tombstoned');
       return;
     }
-    if (_myCells.any((c) => c.id == cell.id)) {
-      print('[ZOMBIE-V2] Decision: REJECTED (reason: already in myCells)');
-      print('[CELL-IMPORT] Decision: BLOCKED reason=already_in_myCells');
-      print('[CELL-UPDATE] Decision: SKIPPED reason=already_in_myCells');
+    final ownedIdx = _myCells.indexWhere((c) => c.id == cell.id);
+    if (ownedIdx >= 0) {
+      if (ownDevice) {
+        // Multi-device rename: update the local cell in-place and persist.
+        print('[CELL-UPDATE] Decision: UPDATED reason=own_device_rename'
+            ' (${_myCells[ownedIdx].name} → ${cell.name})');
+        _myCells[ownedIdx] = cell;
+        PodDatabase.instance.upsertCell(cell.id, cell.toJson());
+        _notify();
+      } else {
+        print('[ZOMBIE-V2] Decision: REJECTED (reason: already in myCells)');
+        print('[CELL-IMPORT] Decision: BLOCKED reason=already_in_myCells');
+        print('[CELL-UPDATE] Decision: SKIPPED reason=already_in_myCells');
+      }
       return;
     }
     if (_dismissedCellIds.contains(cell.id)) {

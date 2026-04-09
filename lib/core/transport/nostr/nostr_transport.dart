@@ -1534,13 +1534,14 @@ class NostrTransport implements MessageTransport {
       // re-surface dissolved cells as zombie entries.
       // Dissolution events (deleted=true) are intentionally kept above so that
       // a seed used on multiple devices still propagates tombstones.
+      //
+      // EXCEPTION: the same seed may be used on multiple devices (e.g. Android
+      // + Windows).  If a cell was renamed on one device it publishes a new
+      // Kind-30000 with the same pubkey.  The other device must receive that
+      // update, so we pass own-pubkey events through marked as `_own_device`.
+      // CellService.addDiscoveredCell uses this flag to update-in-place rather
+      // than skip or re-import.
       print('[CELL-UPDATE] Incoming Kind-30000: cellId=$cellId, name="$cellName", version=n/a, self=$isOwnPubkey');
-      if (isOwnPubkey) {
-        print('[ZOMBIE-FIX] Blocked self-published cell announcement: '
-            '$cellId ("$cellName") — own cells loaded from DB, not Nostr');
-        print('[CELL-UPDATE] Decision: SKIPPED reason=own_pubkey_zombie_fix');
-        return;
-      }
       // ─────────────────────────────────────────────────────────────────────
 
       print('[CELL] Received cell announcement: $cellId ($cellName) '
@@ -1550,6 +1551,7 @@ class NostrTransport implements MessageTransport {
         ...data,
         '_nostr_pubkey': event.pubkey,
         '_created_at': event.createdAt,
+        '_own_device': isOwnPubkey,
       });
     } catch (e) {
       print('[CELL] Cell announce parse FAILED: $e');

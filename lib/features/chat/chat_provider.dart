@@ -568,8 +568,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       final cellJson = Map<String, dynamic>.from(data)
         ..remove('_nostr_pubkey')
         ..remove('_created_at');
+      final ownDevice = data['_own_device'] as bool? ?? false;
       final cell = Cell.fromJson(cellJson);
-      print('[CELL-UPDATE] _onCellAnnounced: cellId=${cell.id}, name="${cell.name}", version=n/a, self=false');
+      print('[CELL-UPDATE] _onCellAnnounced: cellId=${cell.id}, name="${cell.name}", version=n/a, self=$ownDevice');
 
       // ── ZOMBIE-FIX: belt-and-suspenders tombstone check ──────────────────
       // Even if _handleCellAnnounceEvent already filtered self-events,
@@ -582,7 +583,11 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       }
       // ─────────────────────────────────────────────────────────────────────
 
-      CellService.instance.addDiscoveredCell(cell, nostrCreatedAt: nostrCreatedAt);
+      CellService.instance.addDiscoveredCell(
+        cell,
+        nostrCreatedAt: nostrCreatedAt,
+        ownDevice: ownDevice,
+      );
     } catch (e) {
       debugPrint('[CHAT] Cell announced parse error: $e');
     }
