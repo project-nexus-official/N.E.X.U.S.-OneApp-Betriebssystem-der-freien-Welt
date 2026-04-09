@@ -100,8 +100,15 @@ class _ConversationsScreenState extends State<ConversationsScreen>
     final channels = _conversations.where((c) {
       if (!c.isGroup) return false;
       // Hide channels that belong to a cell (not for general Kanäle list).
+      // Primary check: cellId field set on the GroupChannel object.
       final ch = GroupChannelService.instance.findByName(c.id);
       if (ch?.cellId != null) return false;
+      // Fallback: name-pattern check in case the channel isn't in the service
+      // yet (e.g. received via Nostr before GroupChannelService loaded it).
+      if (c.id.startsWith('#cell-') &&
+          (c.id.endsWith('-discussion') || c.id.endsWith('-bulletin'))) {
+        return false;
+      }
       return true;
     }).toList();
     channels.sort((a, b) {

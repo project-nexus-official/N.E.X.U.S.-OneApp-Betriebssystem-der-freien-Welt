@@ -356,7 +356,17 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Widget _buildChannelsCard(BuildContext context) {
-    final channelConvs = _conversations.where((c) => c.isGroup).toList();
+    final channelConvs = _conversations.where((c) {
+      if (!c.isGroup) return false;
+      // Exclude cell-internal channels (#cell-*-discussion / #cell-*-bulletin).
+      final ch = GroupChannelService.instance.findByName(c.id);
+      if (ch?.cellId != null) return false;
+      if (c.id.startsWith('#cell-') &&
+          (c.id.endsWith('-discussion') || c.id.endsWith('-bulletin'))) {
+        return false;
+      }
+      return true;
+    }).toList();
     final unread = channelConvs.fold(0, (sum, c) => sum + c.unreadCount);
     final latest = channelConvs.isNotEmpty ? channelConvs.first : null;
     final privateCount = channelConvs.where((c) {
