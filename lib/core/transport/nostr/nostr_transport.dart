@@ -705,7 +705,8 @@ class NostrTransport implements MessageTransport {
     if (_keys == null) return false;
     final voterPubkey = _keys!.publicKeyHex;
     final dTag = '$proposalId:$voterPubkey';
-    print('[VOTE] Publishing Kind-31011 d-tag=$dTag choice=$choiceName');
+    print('[VOTE-PUB] === START === voteId=$voteId proposalId=$proposalId '
+        'choice=$choiceName');
     try {
       final tags = <List<String>>[
         ['d', dTag],
@@ -728,15 +729,25 @@ class NostrTransport implements MessageTransport {
         content: jsonEncode(content),
         tags: tags,
       );
+      print('[VOTE-PUB] Tags: ${event.tags}');
+      final relayCount = _relayManager.connectedRelayCount;
+      if (relayCount == 0) {
+        print('[VOTE-PUB] No relays connected — event NOT sent, retry queued');
+        return false;
+      }
       _relayManager.publish(event);
+      print('[VOTE-PUB] === SUCCESS === Published to $relayCount relay(s): '
+          '${event.id.substring(0, 16)}…');
       return true;
-    } catch (e) {
-      print('[VOTE] publishVoteEvent error: $e');
+    } catch (e, stack) {
+      print('[VOTE-PUB] === EXCEPTION === $e');
+      print('[VOTE-PUB] Stack: $stack');
       return false;
     }
   }
 
-  /// Publishes a Kind-31013 decision record (normal, non-replaceable event).
+  /// Publishes a Kind-31013 decision record (NIP-33 parameterized replaceable).
+  /// The d-tag is the proposalId to ensure at-most-one record per proposal.
   /// Returns true on success, false if keys are not ready.
   Future<bool> publishDecisionRecord({
     required String proposalId,
@@ -747,10 +758,11 @@ class NostrTransport implements MessageTransport {
     String? previousDecisionHash,
   }) async {
     if (_keys == null) return false;
-    print('[PROPOSAL] Publishing Kind-31013 record for proposal=$proposalId '
-        'result=$result hash=${contentHash.substring(0, 8)}…');
+    print('[DECISION-PUB] === START === proposalId=$proposalId result=$result '
+        'hash=${contentHash.substring(0, 8)}…');
     try {
       final tags = <List<String>>[
+        ['d', proposalId],
         ['t', 'nexus-decision'],
         ['t', 'nexus-cell-$cellId'],
         ['e', proposalId],
@@ -764,10 +776,19 @@ class NostrTransport implements MessageTransport {
         content: jsonEncode(recordContent),
         tags: tags,
       );
+      print('[DECISION-PUB] Tags: ${event.tags}');
+      final relayCount = _relayManager.connectedRelayCount;
+      if (relayCount == 0) {
+        print('[DECISION-PUB] No relays connected — event NOT sent, retry queued');
+        return false;
+      }
       _relayManager.publish(event);
+      print('[DECISION-PUB] === SUCCESS === Published to $relayCount relay(s): '
+          '${event.id.substring(0, 16)}…');
       return true;
-    } catch (e) {
-      print('[PROPOSAL] publishDecisionRecord error: $e');
+    } catch (e, stack) {
+      print('[DECISION-PUB] === EXCEPTION === $e');
+      print('[DECISION-PUB] Stack: $stack');
       return false;
     }
   }
@@ -827,6 +848,7 @@ class NostrTransport implements MessageTransport {
       '#t': cellTags,
       'since': since,
     });
+    print('[NOSTR] Subscription Kind-31010 #t tags: $cellTags');
     print('[PROPOSAL] Proposal sub: $_proposalSubId  (${cellIds.length} cells)');
 
     if (_voteSubId != null) _relayManager.closeSubscription(_voteSubId!);
@@ -835,6 +857,7 @@ class NostrTransport implements MessageTransport {
       '#t': cellTags,
       'since': since,
     });
+    print('[NOSTR] Subscription Kind-31011 #t tags: $cellTags');
     print('[VOTE] Vote sub: $_voteSubId  (${cellIds.length} cells)');
 
     if (_decisionSubId != null) _relayManager.closeSubscription(_decisionSubId!);
@@ -843,6 +866,7 @@ class NostrTransport implements MessageTransport {
       '#t': cellTags,
       'since': since,
     });
+    print('[NOSTR] Subscription Kind-31013 #t tags: $cellTags');
     print('[PROPOSAL] Decision sub: $_decisionSubId  (${cellIds.length} cells)');
   }
 
