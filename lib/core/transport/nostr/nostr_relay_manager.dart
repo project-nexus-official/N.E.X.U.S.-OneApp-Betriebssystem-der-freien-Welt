@@ -71,6 +71,10 @@ class NostrRelayManager {
   bool get hasConnectedRelay =>
       _statuses.values.any((s) => s.state == RelayState.connected);
 
+  /// Number of currently connected relays.
+  int get connectedRelayCount =>
+      _statuses.values.where((s) => s.state == RelayState.connected).length;
+
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
   /// Opens connections to all configured relays.

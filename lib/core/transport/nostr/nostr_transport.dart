@@ -166,6 +166,10 @@ class NostrTransport implements MessageTransport {
   String? _voteSubId;
   String? _decisionSubId;
 
+  // Last cell-ID list used when opening governance subscriptions.
+  // Used to skip redundant close+reopen when the list hasn't changed.
+  List<String> _lastSubscribedCellIds = [];
+
   final _feedReactionController =
       StreamController<Map<String, dynamic>>.broadcast();
 
@@ -626,8 +630,11 @@ class NostrTransport implements MessageTransport {
     DateTime? votingEndsAt,
     String? editReason,
   }) async {
-    if (_keys == null) return false;
-    print('[PROPOSAL] Publishing Kind-31010 d-tag=$proposalId v=$version '
+    if (_keys == null) {
+      print('[PROPOSAL-PUB] Keys not ready — cannot publish');
+      return false;
+    }
+    print('[PROPOSAL-PUB] === START === proposalId=$proposalId v=$version '
         'status=$status');
     try {
       final tags = <List<String>>[
@@ -662,10 +669,21 @@ class NostrTransport implements MessageTransport {
         content: jsonEncode(content),
         tags: tags,
       );
+      print('[PROPOSAL-PUB] Event built: id=${event.id.substring(0, 16)}… '
+          'kind=${event.kind} tags=${event.tags.length}');
+
+      final relayCount = _relayManager.connectedRelayCount;
+      if (relayCount == 0) {
+        print('[PROPOSAL-PUB] No relays connected — event NOT sent, retry queued');
+        return false;
+      }
       _relayManager.publish(event);
+      print('[PROPOSAL-PUB] === SUCCESS === Published to $relayCount relay(s): '
+          '${event.id.substring(0, 16)}…');
       return true;
-    } catch (e) {
-      print('[PROPOSAL] publishProposalEvent error: $e');
+    } catch (e, stack) {
+      print('[PROPOSAL-PUB] === EXCEPTION === $e');
+      print('[PROPOSAL-PUB] Stack: $stack');
       return false;
     }
   }
@@ -757,8 +775,30 @@ class NostrTransport implements MessageTransport {
   /// Refreshes governance (proposal/vote/decision) subscriptions for the
   /// given cell IDs.  Call this after joining or leaving a cell.
   void refreshGovernanceSubscriptions(List<String> cellIds) {
-    if (_keys == null) return;
+    // Idempotency guard: skip if the cell list hasn't changed and
+    // subscriptions are already open.  This prevents the startup double-call
+    // (initKeys → _setupSubscriptions, then _startNostrIfConnected → start()
+    // → _setupSubscriptions again) from closing+reopening subscriptions
+    // unnecessarily, which can cause events to be missed during the gap.
+    final sortedNew = [...cellIds]..sort();
+    final sortedOld = [..._lastSubscribedCellIds]..sort();
+    if (sortedNew.join(',') == sortedOld.join(',') && _proposalSubId != null) {
+      print('[NOSTR] refreshGovernanceSubscriptions: no change '
+          '(${cellIds.length} cells, sub=$_proposalSubId) — skipping');
+      return;
+    }
+
+    print('[NOSTR] refreshGovernanceSubscriptions: ${cellIds.length} cells');
+    for (final id in cellIds) {
+      print('[NOSTR]   - ${id.substring(0, id.length.clamp(0, 12))}…');
+    }
+    if (_keys == null) {
+      print('[NOSTR] refreshGovernanceSubscriptions: keys not ready, skipping');
+      return;
+    }
+    _lastSubscribedCellIds = List.from(cellIds);
     if (cellIds.isEmpty) {
+      print('[NOSTR] No cells — closing existing governance subs');
       // No cells — close existing subs if any.
       if (_proposalSubId != null) {
         _relayManager.closeSubscription(_proposalSubId!);
@@ -1295,7 +1335,13 @@ class NostrTransport implements MessageTransport {
   /// refreshes the subscriptions immediately.
   void updateGovernanceCellIds(List<String> cellIds) {
     _governanceCellIds = List.from(cellIds);
-    if (_keys != null && _state == TransportState.connected) {
+    print('[NOSTR] updateGovernanceCellIds: ${cellIds.length} cells, '
+        'state=$_state, keysReady=${_keys != null}');
+    // Refresh whenever the transport is live (connected or scanning means
+    // relays are up and subscriptions can be opened/replaced).
+    if (_keys != null &&
+        (_state == TransportState.connected ||
+            _state == TransportState.scanning)) {
       refreshGovernanceSubscriptions(_governanceCellIds);
     }
   }

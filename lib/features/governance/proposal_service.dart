@@ -1406,6 +1406,49 @@ class ProposalService {
 
       await _saveDecisionRecordToDb(record);
       print('[PROPOSAL] Decision record saved from Nostr for $proposalId');
+
+      // Bug B fix: update the local proposal with the authoritative result
+      // values from the received decision record so that all devices show the
+      // same outcome regardless of which device ran finalizeProposal().
+      final localProposal = _proposals[proposalId];
+      if (localProposal != null) {
+        print('[PROPOSAL] Updating local proposal with decision record values');
+        print('[PROPOSAL]   Y=${record.yesVotes} N=${record.noVotes} '
+            'A=${record.abstainVotes} Participation=${record.participation} '
+            'Result=${record.result}');
+
+        localProposal.status = ProposalStatus.DECIDED;
+        localProposal.decidedAt = record.decidedAt;
+        localProposal.resultSummary = record.result;
+        localProposal.resultYes = record.yesVotes;
+        localProposal.resultNo = record.noVotes;
+        localProposal.resultAbstain = record.abstainVotes;
+        localProposal.resultParticipation = record.participation;
+
+        await _saveProposalToDb(localProposal);
+
+        final myIdentity = IdentityService.instance.currentIdentity;
+        await addAuditEntry(AuditLogEntry(
+          entryId: AuditLogEntry.generateId(),
+          proposalId: proposalId,
+          cellId: record.cellId,
+          eventType: AuditEventType.RESULT_CALCULATED,
+          actorDid: myIdentity?.did ?? '',
+          actorPseudonym: myIdentity?.pseudonym ?? '',
+          timestamp: DateTime.now().toUtc(),
+          payload: {
+            'result': record.result,
+            'yes': record.yesVotes,
+            'no': record.noVotes,
+            'abstain': record.abstainVotes,
+            'participation': record.participation,
+            'source': 'decision_record_received',
+          },
+          nostrEventId: event.id,
+        ));
+
+        _notify();
+      }
     } catch (e) {
       print('[PROPOSAL] handleIncomingDecisionRecord error: $e');
     }

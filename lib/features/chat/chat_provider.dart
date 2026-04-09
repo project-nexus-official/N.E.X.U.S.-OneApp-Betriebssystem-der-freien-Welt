@@ -521,15 +521,40 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     ProposalService.instance.getMyNostrPubkeyHex = () => transport.localNostrPubkeyHex;
 
+    // Discussion messages → broadcast via TransportManager.
+    ProposalService.instance.onSendDiscussionMessage = (params) async {
+      final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+      final msg = NexusMessage.create(
+        fromDid: myDid,
+        toDid: NexusMessage.broadcastDid,
+        body: params['content'] as String,
+        metadata: {
+          'type': 'proposal_discussion',
+          'proposal_id': params['proposalId'] as String,
+          'author_pseudo': params['authorPseudonym'] as String,
+          'message_id': params['id'] as String,
+        },
+      );
+      await _manager.sendMessage(msg);
+    };
+
+    // Direct callback: CellService calls this immediately after any membership
+    // change (join / leave / dissolution) so subscriptions stay in sync even
+    // when the stream dispatch is asynchronously delayed.
+    CellService.instance.onGovernanceMembershipChanged = _refreshGovernanceCellIds;
+
     // Initial governance subscriptions based on current cell memberships.
     _refreshGovernanceCellIds();
 
-    // When cells change (join/leave), update Nostr subscriptions.
+    // Belt-and-suspenders: also listen on the CellService stream in case the
+    // direct callback is not triggered (e.g. during a data-restore path).
     CellService.instance.stream.listen((_) => _refreshGovernanceCellIds());
   }
 
   void _refreshGovernanceCellIds() {
     final cellIds = CellService.instance.myCells.map((c) => c.id).toList();
+    print('[NOSTR] _refreshGovernanceCellIds: ${cellIds.length} cells '
+        '(${cellIds.map((id) => id.substring(0, id.length.clamp(0, 8))).join(', ')})');
     _nostrTransport?.updateGovernanceCellIds(cellIds);
   }
 
@@ -1036,6 +1061,20 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
     if (msgType == 'contact_request_cancelled') {
       await ContactRequestService.instance.handleCancellation(processedMsg.fromDid);
+      return;
+    }
+
+    // ── Proposal discussion messages ─────────────────────────────────────────
+    if (msgType == 'proposal_discussion') {
+      final meta = processedMsg.metadata ?? {};
+      await ProposalService.instance.handleDiscussionMessage({
+        'id': meta['message_id'] as String? ?? processedMsg.id,
+        'proposalId': meta['proposal_id'] as String? ?? '',
+        'authorDid': processedMsg.fromDid,
+        'authorPseudonym': meta['author_pseudo'] as String? ?? '',
+        'content': processedMsg.body,
+        'createdAt': processedMsg.timestamp.millisecondsSinceEpoch,
+      });
       return;
     }
 

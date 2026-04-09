@@ -59,6 +59,11 @@ class CellService {
   /// Fires whenever any cell data changes.
   Stream<void> get stream => _streamCtrl.stream;
 
+  /// Called by ChatProvider whenever the set of joined cells changes so that
+  /// NostrTransport can refresh its governance subscriptions immediately.
+  /// Set once during ChatProvider initialization.
+  VoidCallback? onGovernanceMembershipChanged;
+
   List<Cell> get myCells => List.unmodifiable(_myCells);
   List<Cell> get discoveredCells => List.unmodifiable(_discovered);
 
@@ -86,11 +91,15 @@ class CellService {
   Future<int> getMemberCount(String cellId) async {
     final rows = await PodDatabase.instance.listCellMembers(cellId);
     final members = rows.map(CellMember.fromJson).toList();
+    print('[CELL] getMemberCount($cellId): found ${members.length} raw members');
+    for (final m in members) {
+      print('[CELL]   - did=${m.did.substring(0, m.did.length.clamp(0, 20))} role=${m.role.name}');
+    }
     final f = members.where((m) => m.role == MemberRole.founder).length;
     final mod = members.where((m) => m.role == MemberRole.moderator).length;
     final mem = members.where((m) => m.role == MemberRole.member).length;
     final total = f + mod + mem; // PENDING excluded
-    print('[PROPOSAL] getMemberCount($cellId): $total members (founders=$f, mods=$mod, members=$mem)');
+    print('[CELL] After filter (no PENDING): $total (founders=$f, mods=$mod, members=$mem)');
     return total;
   }
 
@@ -415,6 +424,9 @@ class CellService {
     // ── Step 4: Notify UI IMMEDIATELY — no awaits have occurred above. ───────
     _notify();
     print('[LIVE-DEL] Stream notified — UI should update now');
+    // Refresh governance subscriptions so the dissolved cell is removed
+    // from the Nostr filter immediately.
+    onGovernanceMembershipChanged?.call();
 
     // ── Step 5: Async persistence — UI is already updated. ──────────────────
     await _saveTombstone(cellId); // idempotent; also saves dismissed list
@@ -748,6 +760,7 @@ class CellService {
       _members.remove(cellId);
       _requests.remove(cellId);
       _notify();
+      onGovernanceMembershipChanged?.call();
 
       // Async persistence + DB cleanup after UI is updated.
       await _dismissCell(cellId); // idempotent persist
@@ -904,7 +917,39 @@ class CellService {
     (_members[cell.id] ??= []).add(member);
     await PodDatabase.instance.upsertCellMember(
         cell.id, member.did, member.toJson());
+
+    // Bug A fix: on the joining device the founder is not yet in the DB.
+    // Add a synthetic FOUNDER entry derived from cell.createdBy so that
+    // getMemberCount() returns the correct total on all devices.
+    final founderDid = cell.createdBy;
+    if (founderDid != member.did) {
+      final alreadyHasFounder =
+          (_members[cell.id] ?? []).any((m) => m.did == founderDid);
+      if (!alreadyHasFounder) {
+        final founderMember = CellMember(
+          cellId: cell.id,
+          did: founderDid,
+          joinedAt: cell.createdAt,
+          role: MemberRole.founder,
+          confirmedBy: founderDid,
+        );
+        (_members[cell.id] ??= []).add(founderMember);
+        await PodDatabase.instance.upsertCellMember(
+            cell.id, founderDid, founderMember.toJson());
+        print('[JOIN] Auto-added founder $founderDid to member list on joining device');
+      }
+    }
+
     _notify();
+
+    // Explicitly refresh governance subscriptions so the joining device
+    // immediately starts listening for proposals/votes in this cell.
+    // Belt-and-suspenders: the stream listener in ChatProvider also handles
+    // this via _notify(), but the direct callback guarantees it even if
+    // the stream dispatch is delayed.
+    final allMyCellIds = _myCells.map((c) => c.id).toList();
+    print('[CELL] Refreshing governance subscriptions for ${allMyCellIds.length} cells');
+    onGovernanceMembershipChanged?.call();
 
     await NotificationService.instance.showGenericNotification(
       title: 'Beitritt bestätigt!',

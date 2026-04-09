@@ -1309,13 +1309,40 @@ class _G2DebugSection extends StatelessWidget {
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
-  Proposal? _findTestProposal(ProposalStatus status) {
-    final proposals = ProposalService.instance.allProposals
-        .where((p) =>
-            p.title.startsWith('G2 Test-Antrag') && p.status == status)
+  /// Finds the newest proposal (ANY title) in [status], across all known proposals.
+  Proposal? _findAnyProposal(ProposalStatus status) {
+    final all = ProposalService.instance.allProposals;
+    print('[G2-DEBUG] All proposals: ${all.length}');
+    for (final p in all) {
+      print('[G2-DEBUG]   - "${p.title}" status=${p.status.name} cell=${p.cellId}');
+    }
+    print('[G2-DEBUG] Searching for status: ${status.name}');
+
+    final matching = all
+        .where((p) => p.status == status)
         .toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    return proposals.firstOrNull;
+    final found = matching.firstOrNull;
+    if (found != null) {
+      print('[G2-DEBUG] Found: ${found.title} (${found.id})');
+    } else {
+      print('[G2-DEBUG] None found in status ${status.name}');
+    }
+    return found;
+  }
+
+  /// Finds the newest proposal overall (any status, any title).
+  Proposal? _findNewestProposal() {
+    print('[G2-DEBUG] Searching for newest proposal (any status)');
+    final proposals = List<Proposal>.from(ProposalService.instance.allProposals)
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final found = proposals.firstOrNull;
+    if (found != null) {
+      print('[G2-DEBUG] Found: ${found.title}');
+    } else {
+      print('[G2-DEBUG] None found');
+    }
+    return found;
   }
 
   void _snack(BuildContext context, String msg,
@@ -1379,16 +1406,17 @@ class _G2DebugSection extends StatelessWidget {
 
   Future<void> _startTestVoting(BuildContext context) async {
     print('[G2-DEBUG] _startTestVoting called');
-    final p = _findTestProposal(ProposalStatus.DISCUSSION);
+    final p = _findAnyProposal(ProposalStatus.DISCUSSION);
     if (p == null) {
-      _snack(context, 'Kein Test-Antrag in DISCUSSION gefunden', error: true);
+      _snack(context,
+          'Kein passender Antrag gefunden (Status: DISCUSSION)',
+          error: true);
       return;
     }
     try {
-      // proposalWaitDays überspringen: Zelle hat normalerweise 0 Tage für Tests.
       await ProposalService.instance.startVoting(p.id);
       print('[G2-DEBUG] Voting started: ${p.id}');
-      _snack(context, '✅ Voting gestartet für: ${p.title.substring(0, 30)}…');
+      _snack(context, '✅ Voting starten: ${p.title}');
     } catch (e) {
       print('[G2-DEBUG] _startTestVoting error: $e');
       _snack(context, '❌ Fehler: $e', error: true);
@@ -1398,16 +1426,17 @@ class _G2DebugSection extends StatelessWidget {
   Future<void> _castTestVote(
       BuildContext context, VoteChoice choice, String reasoning) async {
     print('[G2-DEBUG] _castTestVote: $choice');
-    final p = _findTestProposal(ProposalStatus.VOTING);
+    final p = _findAnyProposal(ProposalStatus.VOTING);
     if (p == null) {
-      _snack(context, 'Kein Test-Antrag in VOTING gefunden', error: true);
+      _snack(context,
+          'Kein passender Antrag gefunden (Status: VOTING)',
+          error: true);
       return;
     }
     try {
       await ProposalService.instance.castVote(p.id, choice, reasoning: reasoning);
       print('[G2-DEBUG] Vote cast: $choice on ${p.id}');
-      _snack(context,
-          '✅ Stimme abgegeben: ${choice.name} für "${p.title.substring(0, 30)}…"');
+      _snack(context, '✅ ${choice.name}: ${p.title}');
     } catch (e) {
       print('[G2-DEBUG] _castTestVote error: $e');
       _snack(context, '❌ Fehler: $e', error: true);
@@ -1416,9 +1445,11 @@ class _G2DebugSection extends StatelessWidget {
 
   Future<void> _forceFinalize(BuildContext context) async {
     print('[G2-DEBUG] _forceFinalize called');
-    final p = _findTestProposal(ProposalStatus.VOTING);
+    final p = _findAnyProposal(ProposalStatus.VOTING);
     if (p == null) {
-      _snack(context, 'Kein Test-Antrag in VOTING gefunden', error: true);
+      _snack(context,
+          'Kein passender Antrag gefunden (Status: VOTING)',
+          error: true);
       return;
     }
     try {
@@ -1435,7 +1466,7 @@ class _G2DebugSection extends StatelessWidget {
       print('[G2-DEBUG] Proposal finalized');
 
       final result = p.resultSummary ?? '?';
-      _snack(context, '✅ Antrag finalisiert: $result '
+      _snack(context, '✅ Finalisiert: ${p.title} → $result '
           '(J:${p.resultYes ?? 0} N:${p.resultNo ?? 0} '
           'E:${p.resultAbstain ?? 0})');
     } catch (e) {
@@ -1447,18 +1478,13 @@ class _G2DebugSection extends StatelessWidget {
   Future<void> _showAuditLog(BuildContext context) async {
     print('[G2-DEBUG] _showAuditLog called');
 
-    // Finde neuesten Test-Antrag (beliebiger Status außer DRAFT).
-    final proposals = ProposalService.instance.allProposals
-        .where((p) => p.title.startsWith('G2 Test-Antrag'))
-        .toList()
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    // Finde neuesten Antrag (beliebiger Titel, beliebiger Status).
+    final p = _findNewestProposal();
 
-    if (proposals.isEmpty) {
-      _snack(context, 'Kein Test-Antrag gefunden', error: true);
+    if (p == null) {
+      _snack(context, 'Kein Antrag gefunden', error: true);
       return;
     }
-
-    final p = proposals.first;
     final entries = await ProposalService.instance.getAuditLog(p.id);
     final recent = entries.reversed.take(20).toList();
 
