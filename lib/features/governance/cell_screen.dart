@@ -505,8 +505,23 @@ class _MessageBubble extends StatelessWidget {
   final NexusMessage msg;
   const _MessageBubble({required this.msg});
 
+  /// True for cell-internal system events (join, leave, etc.).
+  /// Checks the metadata flag set by [postCellSystemMessage] for new messages,
+  /// and falls back to content patterns for messages stored before this flag
+  /// was introduced.
+  bool get _isCellSystem {
+    if (msg.metadata?['is_cell_system'] == true) return true;
+    final b = msg.body;
+    return b.contains('ist der Zelle beigetreten') ||
+        b.contains('hat die Zelle verlassen') ||
+        b.contains('wurde entfernt') ||
+        b.contains('Willkommen in der Zelle');
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_isCellSystem) return _SystemMessageRow(msg: msg);
+
     final myDid = IdentityService.instance.currentIdentity?.did ?? '';
     final isMe = msg.fromDid == myDid;
     final shortSender = isMe
@@ -568,6 +583,35 @@ class _MessageBubble extends StatelessWidget {
     final h = ts.hour.toString().padLeft(2, '0');
     final m = ts.minute.toString().padLeft(2, '0');
     return '$h:$m';
+  }
+}
+
+/// Centered, no-bubble row for cell-internal system events.
+/// Example: ——— Josh hat die Zelle verlassen · 09:14 ———
+class _SystemMessageRow extends StatelessWidget {
+  final NexusMessage msg;
+  const _SystemMessageRow({required this.msg});
+
+  @override
+  Widget build(BuildContext context) {
+    final h = msg.timestamp.hour.toString().padLeft(2, '0');
+    final m = msg.timestamp.minute.toString().padLeft(2, '0');
+    final time = '$h:$m';
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Center(
+        child: Text(
+          '· ${msg.body} · $time',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Colors.grey.shade500,
+            fontSize: 12,
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+      ),
+    );
   }
 }
 

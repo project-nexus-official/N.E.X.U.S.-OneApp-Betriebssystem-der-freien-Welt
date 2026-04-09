@@ -381,7 +381,8 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       (c) => c.name.endsWith('-discussion'),
     ).firstOrNull;
     if (discussion == null) return;
-    await sendToChannel(discussion.name, text);
+    await sendToChannel(discussion.name, text,
+        extraMeta: {'is_cell_system': true});
   }
 
   /// Checks all joined cells and creates internal channels for those missing them.
