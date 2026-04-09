@@ -765,21 +765,20 @@ class _AdminSection extends StatelessWidget {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _confirmTransfer(context, myDid),
           ),
-          // ── TEMP DEBUG ──────────────────────────────────────────────────
-          if (hasCellData)
-            ListTile(
-              leading: const Icon(Icons.cleaning_services, color: Colors.grey),
-              title: const Text(
-                '🧹 Alle Zellen-Daten zurücksetzen',
-                style: TextStyle(color: Colors.grey),
-              ),
-              subtitle: const Text(
-                'DEBUG – Testdaten bereinigen',
-                style: TextStyle(fontSize: 11),
-              ),
-              onTap: () => _resetCellData(context),
+          // ── CELL WIPE ───────────────────────────────────────────────────
+          ListTile(
+            leading: const Icon(Icons.delete_forever, color: Colors.redAccent),
+            title: const Text(
+              '☢️ Alle Zellen löschen (Nuclear Wipe)',
+              style: TextStyle(color: Colors.redAccent),
             ),
-          // ── END TEMP DEBUG ───────────────────────────────────────────────
+            subtitle: const Text(
+              'DB + SharedPrefs + Memory — unabhängig vom Zustand',
+              style: TextStyle(fontSize: 11),
+            ),
+            onTap: () => _nuclearWipeCells(context),
+          ),
+          // ── END CELL WIPE ────────────────────────────────────────────────
         ],
       ],
     );
@@ -888,6 +887,44 @@ class _AdminSection extends StatelessWidget {
           SnackBar(content: Text('Fehler: $e')),
         );
       }
+    }
+  }
+
+  Future<void> _nuclearWipeCells(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('☢️ Alle Zellen löschen?',
+            style: TextStyle(color: Colors.redAccent)),
+        content: const Text(
+          'Löscht ALLE Zell-Daten:\n'
+          '• Datenbank (cells, members, requests)\n'
+          '• SharedPreferences (Block-Listen, Wipe-Timestamp)\n'
+          '• In-Memory-Zustand\n\n'
+          'Nostr-Relay-Events älter als JETZT werden dauerhaft ignoriert.\n\n'
+          'Nicht rückgängig zu machen!',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abbrechen')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Löschen',
+                style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    await CellService.instance.nuclearWipe();
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('☢️ Alle Zellen-Daten gelöscht.')),
+      );
     }
   }
 
@@ -1280,6 +1317,12 @@ class _G2DebugSection extends StatelessWidget {
           label: '🗑️ G2 Test-Anträge löschen',
           onTap: () => _cleanupTestProposals(context),
         ),
+        _debugTile(
+          context,
+          icon: Icons.delete_forever,
+          label: '☢️ ALLE Anträge löschen (Debug)',
+          onTap: () => _confirmDeleteAllProposals(context),
+        ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
           child: Text(
@@ -1577,6 +1620,81 @@ class _G2DebugSection extends StatelessWidget {
     print('[G2-DEBUG] Cleanup complete: $deleted deleted and tombstoned');
     if (context.mounted) {
       _snack(context, '✅ $deleted Test-Anträge gelöscht und tombstoned');
+    }
+  }
+
+  Future<void> _confirmDeleteAllProposals(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text(
+          'Alle Anträge löschen?',
+          style: TextStyle(color: Colors.red),
+        ),
+        content: const Text(
+          'Dies löscht ALLE Anträge, Stimmen, Decision Records '
+          'und Audit-Einträge — lokal UND via Withdrawal-Events '
+          'auf den Relays. Diese Aktion kann nicht rückgängig '
+          'gemacht werden.\n\n'
+          'Nur für Test-Zwecke verwenden!',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Abbrechen',
+                style: TextStyle(color: Colors.amber)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade800,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Ja, alle löschen'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && context.mounted) {
+      await _deleteAllProposals(context);
+    }
+  }
+
+  Future<void> _deleteAllProposals(BuildContext context) async {
+    print('[CLEANUP] === Starting full proposal cleanup ===');
+
+    final all = List<Proposal>.from(ProposalService.instance.allProposals);
+    print('[CLEANUP] Found ${all.length} proposals to delete');
+
+    if (all.isEmpty) {
+      _snack(context, 'Keine Anträge gefunden');
+      return;
+    }
+
+    int deleted = 0;
+    for (final p in all) {
+      try {
+        print('[CLEANUP] Tombstoning and withdrawing: ${p.id}');
+
+        p.status = ProposalStatus.WITHDRAWN;
+        p.withdrawnAt = DateTime.now().toUtc();
+        await PodDatabase.instance.upsertProposal(p.id, p.cellId, p.toMap());
+
+        await ProposalService.instance.publishProposalWithdrawal(p.id);
+        await ProposalService.instance.tombstoneAndDelete(p.id);
+
+        deleted++;
+      } catch (e) {
+        print('[CLEANUP] Error for ${p.id}: $e');
+      }
+    }
+
+    print('[CLEANUP] Done: $deleted proposals deleted and tombstoned');
+    if (context.mounted) {
+      _snack(context, '✅ $deleted Anträge gelöscht und tombstoned');
     }
   }
 }

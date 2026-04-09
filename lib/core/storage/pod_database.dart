@@ -1579,6 +1579,19 @@ class PodDatabase {
     await _database.delete('cells', where: 'id = ?', whereArgs: [id]);
   }
 
+  /// Deletes ALL cell-related data from the database unconditionally.
+  /// Used for nuclear wipe — does not depend on in-memory state.
+  Future<void> deleteAllCellData() async {
+    await _database.delete('cells');
+    await _database.delete('cell_members');
+    await _database.delete('cell_join_requests');
+    // Also remove cell-internal channels (cell_id IS NOT NULL).
+    await _database.delete(
+      'group_channels',
+      where: 'cell_id IS NOT NULL',
+    );
+  }
+
   // ── Governance: Cell Members ──────────────────────────────────────────────
 
   Future<void> upsertCellMember(

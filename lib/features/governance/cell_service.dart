@@ -1144,5 +1144,39 @@ class CellService {
     _notify();
   }
 
+  /// Completely wipes all cell data — DB, SharedPrefs, and in-memory state.
+  ///
+  /// Sets a fresh wipe timestamp so any relay-cached Kind-30000 events
+  /// older than NOW are silently ignored after the reset.
+  /// Use this when the local state is so inconsistent that the regular
+  /// cleanup path cannot find anything to delete.
+  Future<void> nuclearWipe() async {
+    // 1. Set wipe timestamp first (blocks relay re-injection of old events).
+    _wipeAt = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
+
+    // 2. Clear SharedPrefs cell keys completely.
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_deletedCellsKey);
+    await prefs.remove(_dismissedKey);
+    await prefs.setInt(_wipeKey, _wipeAt!);
+
+    // 3. Reset in-memory sets.
+    _deletedCellIds.clear();
+    _dismissedCellIds.clear();
+
+    // 4. Wipe all DB tables.
+    await PodDatabase.instance.deleteAllCellData();
+
+    // 5. Reset in-memory lists.
+    _myCells.clear();
+    _discovered.clear();
+    _members.clear();
+    _requests.clear();
+    _myRequests.clear();
+
+    _notify();
+    print('[CELL-WIPE] Nuclear wipe complete. WipeAt=$_wipeAt');
+  }
+
   void _notify() => _streamCtrl.add(null);
 }
