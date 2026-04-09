@@ -640,7 +640,7 @@ class NostrTransport implements MessageTransport {
       final tags = <List<String>>[
         ['d', proposalId],
         ['t', 'nexus-proposal'],
-        ['cell', cellId],
+        ['t', 'nexus-cell-$cellId'],
         ['type', type.toLowerCase()],
         ['status', status.toLowerCase()],
         ['version', version.toString()],
@@ -710,7 +710,7 @@ class NostrTransport implements MessageTransport {
       final tags = <List<String>>[
         ['d', dTag],
         ['t', 'nexus-vote'],
-        ['cell', cellId],
+        ['t', 'nexus-cell-$cellId'],
         ['e', proposalId],
         ['choice', choiceName.toLowerCase()],
         ['weight', '1'],
@@ -752,7 +752,7 @@ class NostrTransport implements MessageTransport {
     try {
       final tags = <List<String>>[
         ['t', 'nexus-decision'],
-        ['cell', cellId],
+        ['t', 'nexus-cell-$cellId'],
         ['e', proposalId],
         ['result', result],
         ['prev_hash', previousDecisionHash ?? ''],
@@ -818,11 +818,13 @@ class NostrTransport implements MessageTransport {
     final nowSeconds = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
     final since = nowSeconds - 30 * 86400; // 30 days back
 
+    final cellTags = cellIds.map((id) => 'nexus-cell-$id').toList();
+    print('[NOSTR] Governance #t tags: $cellTags');
+
     if (_proposalSubId != null) _relayManager.closeSubscription(_proposalSubId!);
     _proposalSubId = _relayManager.subscribe({
       'kinds': [NostrKind.proposalEvent],
-      '#t': ['nexus-proposal'],
-      '#cell': cellIds,
+      '#t': cellTags,
       'since': since,
     });
     print('[PROPOSAL] Proposal sub: $_proposalSubId  (${cellIds.length} cells)');
@@ -830,8 +832,7 @@ class NostrTransport implements MessageTransport {
     if (_voteSubId != null) _relayManager.closeSubscription(_voteSubId!);
     _voteSubId = _relayManager.subscribe({
       'kinds': [NostrKind.voteEvent],
-      '#t': ['nexus-vote'],
-      '#cell': cellIds,
+      '#t': cellTags,
       'since': since,
     });
     print('[VOTE] Vote sub: $_voteSubId  (${cellIds.length} cells)');
@@ -839,8 +840,7 @@ class NostrTransport implements MessageTransport {
     if (_decisionSubId != null) _relayManager.closeSubscription(_decisionSubId!);
     _decisionSubId = _relayManager.subscribe({
       'kinds': [NostrKind.decisionRecord],
-      '#t': ['nexus-decision'],
-      '#cell': cellIds,
+      '#t': cellTags,
       'since': since,
     });
     print('[PROPOSAL] Decision sub: $_decisionSubId  (${cellIds.length} cells)');

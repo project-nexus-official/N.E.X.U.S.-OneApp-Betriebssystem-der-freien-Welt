@@ -1022,7 +1022,10 @@ class ProposalService {
     print('[PROPOSAL] handleIncomingProposal: ${event.id}');
     try {
       final proposalId = event.tagValue('d');
-      final cellId = event.tagValue('cell');
+      final cellId = event.tagValues('t')
+          .where((v) => v.startsWith('nexus-cell-'))
+          .map((v) => v.substring('nexus-cell-'.length))
+          .firstOrNull;
       final type = event.tagValue('type');
       final statusStr = event.tagValue('status');
       final versionStr = event.tagValue('version');
@@ -1030,7 +1033,7 @@ class ProposalService {
       final votingEndsAtStr = event.tagValue('voting_ends_at');
 
       if (proposalId == null || cellId == null) {
-        print('[PROPOSAL] handleIncomingProposal: missing d/cell tag, skipping');
+        print('[PROPOSAL] handleIncomingProposal: missing d/nexus-cell tag, skipping');
         return;
       }
 
@@ -1239,7 +1242,10 @@ class ProposalService {
       }
 
       final proposalId = event.tagValue('e');
-      final cellId = event.tagValue('cell');
+      final cellId = event.tagValues('t')
+          .where((v) => v.startsWith('nexus-cell-'))
+          .map((v) => v.substring('nexus-cell-'.length))
+          .firstOrNull;
       final choiceStr = event.tagValue('choice');
 
       if (proposalId == null || cellId == null || choiceStr == null) {
@@ -1364,7 +1370,10 @@ class ProposalService {
   Future<void> handleIncomingDecisionRecord(NostrEvent event) async {
     print('[PROPOSAL] handleIncomingDecisionRecord: ${event.id}');
     try {
-      final cellId = event.tagValue('cell');
+      final cellId = event.tagValues('t')
+          .where((v) => v.startsWith('nexus-cell-'))
+          .map((v) => v.substring('nexus-cell-'.length))
+          .firstOrNull;
       if (cellId == null || !CellService.instance.isMember(cellId)) return;
 
       final content = jsonDecode(event.content) as Map<String, dynamic>;
