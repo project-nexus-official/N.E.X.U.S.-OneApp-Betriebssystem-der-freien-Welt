@@ -450,8 +450,11 @@ class NostrTransport implements MessageTransport {
       ],
     );
     _relayManager.publish(event);
+    final connectedRelays =
+        _relayManager.statuses.where((s) => s.state == RelayState.connected).length;
     print('[CELL] Publishing cell announcement: $cellId ($cellName) '
-        'to ${_relayManager.statuses.where((s) => s.state == RelayState.connected).length} relays');
+        'to $connectedRelays relays');
+    print('[CELL-RENAME] Kind-30000 published: accepted=${connectedRelays > 0}');
   }
 
   /// Publishes a Kind-5 deletion event for a cell (NIP-09).
@@ -1531,9 +1534,11 @@ class NostrTransport implements MessageTransport {
       // re-surface dissolved cells as zombie entries.
       // Dissolution events (deleted=true) are intentionally kept above so that
       // a seed used on multiple devices still propagates tombstones.
+      print('[CELL-UPDATE] Incoming Kind-30000: cellId=$cellId, name="$cellName", version=n/a, self=$isOwnPubkey');
       if (isOwnPubkey) {
         print('[ZOMBIE-FIX] Blocked self-published cell announcement: '
             '$cellId ("$cellName") — own cells loaded from DB, not Nostr');
+        print('[CELL-UPDATE] Decision: SKIPPED reason=own_pubkey_zombie_fix');
         return;
       }
       // ─────────────────────────────────────────────────────────────────────

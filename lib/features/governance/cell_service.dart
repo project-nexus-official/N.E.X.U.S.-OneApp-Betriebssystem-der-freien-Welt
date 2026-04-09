@@ -141,6 +141,13 @@ class CellService {
       // works immediately before any Nostr events arrive.
       final prefs = await SharedPreferences.getInstance();
 
+      // ── RENAME-DIAG: raw SharedPrefs state at startup ────────────────────
+      final tombstones = prefs.getStringList('nexus_cell_tombstones') ?? [];
+      final dismissed = prefs.getStringList('nexus_dismissed_cell_ids') ?? [];
+      print('[RENAME-DIAG] Tombstones: $tombstones');
+      print('[RENAME-DIAG] Dismissed: $dismissed');
+      // ─────────────────────────────────────────────────────────────────────
+
       // ── Load tombstone + dismissed lists BEFORE any Nostr events arrive ────
       final rawDeleted = prefs.getString(_deletedCellsKey);
       final rawDismissed = prefs.getString(_dismissedKey);
@@ -203,6 +210,7 @@ class CellService {
         print('[ZOMBIE-V3] Is in dismissed? ${_dismissedCellIds.contains(cell.id)}');
         print('[ZOMBIE-V3] Decision: ALLOWED (loaded from DB)');
         print('[CELL-IMPORT] DB load: cellId=${cell.id}, name="${cell.name}", role=see_members_table');
+        print('[CELL-UPDATE] DB load: cellId=${cell.id}, name="${cell.name}", version=n/a');
         _myCells.add(cell);
       }
 
@@ -291,9 +299,11 @@ class CellService {
   Future<void> updateCell(Cell updated) async {
     final idx = _myCells.indexWhere((c) => c.id == updated.id);
     if (idx < 0) return;
+    print('[CELL-RENAME] Publishing name change: cellId=${updated.id}, newName=${updated.name}');
     _myCells[idx] = updated;
     await PodDatabase.instance.upsertCell(updated.id, updated.toJson());
     _notify();
+    print('[CELL-RENAME] Kind-30000 published: accepted=pending_via_chat_provider');
   }
 
   /// Restores a cell membership from a backup JSON map (merge – only adds if
@@ -349,21 +359,34 @@ class CellService {
         ' inDismissed=${_dismissedCellIds.contains(cell.id)}');
 
     // Check tombstone first — dissolved cells NEVER come back.
+    final existingOwned = _myCells.where((c) => c.id == cell.id).firstOrNull;
+    final existingDiscovered =
+        _discovered.where((c) => c.id == cell.id).firstOrNull;
+    print('[CELL-UPDATE] Incoming Kind-30000: cellId=${cell.id}, name="${cell.name}", version=n/a, self=false');
+    if (existingOwned != null) {
+      print('[CELL-UPDATE] Existing cell found: currentName="${existingOwned.name}", currentVersion=n/a');
+    } else if (existingDiscovered != null) {
+      print('[CELL-UPDATE] Existing cell found: currentName="${existingDiscovered.name}", currentVersion=n/a');
+    }
+    print('[CELL-UPDATE] WARNING: No version check found');
     if (_deletedCellIds.contains(cell.id)) {
       print('[ZOMBIE-V2] Import blocked by tombstone: ${cell.id}');
       print('[ZOMBIE-V2] Decision: REJECTED (reason: cell tombstoned/dissolved)');
       print('[CELL-IMPORT] Decision: BLOCKED reason=tombstoned');
+      print('[CELL-UPDATE] Decision: SKIPPED reason=tombstoned');
       return;
     }
     if (_myCells.any((c) => c.id == cell.id)) {
       print('[ZOMBIE-V2] Decision: REJECTED (reason: already in myCells)');
       print('[CELL-IMPORT] Decision: BLOCKED reason=already_in_myCells');
+      print('[CELL-UPDATE] Decision: SKIPPED reason=already_in_myCells');
       return;
     }
     if (_dismissedCellIds.contains(cell.id)) {
       print('[CELL-DEL] Import blocked for cell ${cell.id} (on block list)');
       print('[ZOMBIE-V2] Decision: REJECTED (reason: dismissed/left)');
       print('[CELL-IMPORT] Decision: BLOCKED reason=dismissed_left');
+      print('[CELL-UPDATE] Decision: SKIPPED reason=dismissed_left');
       return;
     }
     if (nostrCreatedAt != null &&
@@ -373,6 +396,7 @@ class CellService {
           '(event $nostrCreatedAt < wipe $_wipeAt)');
       print('[ZOMBIE-V2] Decision: REJECTED (reason: older than wipe timestamp)');
       print('[CELL-IMPORT] Decision: BLOCKED reason=older_than_wipe');
+      print('[CELL-UPDATE] Decision: SKIPPED reason=older_than_wipe');
       return;
     }
     _discovered.removeWhere((c) => c.id == cell.id);
@@ -381,6 +405,7 @@ class CellService {
     print('[ZOMBIE-V3] Decision: ALLOWED (added to discovered)');
     print('[ZOMBIE-V2] Decision: ADDED to discovered');
     print('[CELL-IMPORT] Decision: ALLOWED reason=new_discovery');
+    print('[CELL-UPDATE] Decision: UPDATED reason=added_to_discovered');
   }
 
   /// Records the current timestamp as the last wipe point.

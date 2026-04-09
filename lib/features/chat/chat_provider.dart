@@ -375,6 +375,8 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// Posts a system message in the cell's discussion channel.
+  /// System messages are sent unencrypted so all members can read them
+  /// regardless of whether they hold the channel secret.
   Future<void> postCellSystemMessage(String cellId, String text) async {
     final channels = GroupChannelService.instance.cellChannelsFor(cellId);
     final discussion = channels.where(
@@ -382,7 +384,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     ).firstOrNull;
     if (discussion == null) return;
     await sendToChannel(discussion.name, text,
-        extraMeta: {'is_cell_system': true});
+        extraMeta: {'is_cell_system': true}, skipEncryption: true);
   }
 
   /// Checks all joined cells and creates internal channels for those missing them.
@@ -567,6 +569,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
         ..remove('_nostr_pubkey')
         ..remove('_created_at');
       final cell = Cell.fromJson(cellJson);
+      print('[CELL-UPDATE] _onCellAnnounced: cellId=${cell.id}, name="${cell.name}", version=n/a, self=false');
 
       // ── ZOMBIE-FIX: belt-and-suspenders tombstone check ──────────────────
       // Even if _handleCellAnnounceEvent already filtered self-events,
@@ -574,6 +577,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       if (CellService.instance.isTombstoned(cell.id)) {
         print('[ZOMBIE-FIX] Blocked in _onCellAnnounced (tombstone): '
             '${cell.id} ("${cell.name}")');
+        print('[CELL-UPDATE] Decision: SKIPPED reason=tombstoned_in_chat_provider');
         return;
       }
       // ─────────────────────────────────────────────────────────────────────
@@ -1571,8 +1575,10 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   ///
   /// For private channels the body is encrypted with the shared channelSecret.
   /// The sender always stores a plaintext copy locally.
+  /// Pass [skipEncryption] = true for system messages that must be readable
+  /// by all members without a shared secret (e.g. join/leave events).
   Future<void> sendToChannel(String channelName, String text,
-      {Map<String, dynamic>? extraMeta}) async {
+      {Map<String, dynamic>? extraMeta, bool skipEncryption = false}) async {
     final myDid = IdentityService.instance.currentIdentity?.did ?? 'unknown';
     final name =
         channelName.startsWith('#') ? channelName : '#$channelName';
@@ -1582,7 +1588,10 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     // Build wire message (possibly encrypted).
     String wireBody = text;
     bool isChEnc = false;
-    if (channel != null && !channel.isPublic && channel.channelSecret != null) {
+    if (!skipEncryption &&
+        channel != null &&
+        !channel.isPublic &&
+        channel.channelSecret != null) {
       final enc = await ChannelEncryption.encrypt(
           text, channel.channelSecret!, channel.id);
       if (enc != null) {
