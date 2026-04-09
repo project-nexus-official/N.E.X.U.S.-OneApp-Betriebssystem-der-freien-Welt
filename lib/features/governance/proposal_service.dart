@@ -1241,7 +1241,7 @@ class ProposalService {
         return;
       }
 
-      final proposalId = event.tagValue('e');
+      final proposalId = event.tagValue('proposal_id');
       final cellId = event.tagValues('t')
           .where((v) => v.startsWith('nexus-cell-'))
           .map((v) => v.substring('nexus-cell-'.length))

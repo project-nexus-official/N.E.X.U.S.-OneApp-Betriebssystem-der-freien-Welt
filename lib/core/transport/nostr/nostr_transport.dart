@@ -689,8 +689,8 @@ class NostrTransport implements MessageTransport {
   }
 
   /// Publishes a Kind-31011 vote event (NIP-33 parameterized replaceable).
-  /// The d-tag is "${proposalId}:${voterPubkeyHex}" to ensure at-most-one
-  /// vote per voter per proposal on compliant relays.
+  /// The d-tag is "vote-${proposalId}-${voterPubkeyHex}" to ensure at-most-one
+  /// vote per voter per proposal on compliant relays (dash avoids colon issues).
   /// Returns true on success, false if keys are not ready.
   Future<bool> publishVoteEvent({
     required String proposalId,
@@ -704,7 +704,8 @@ class NostrTransport implements MessageTransport {
   }) async {
     if (_keys == null) return false;
     final voterPubkey = _keys!.publicKeyHex;
-    final dTag = '$proposalId:$voterPubkey';
+    // Use dash separator instead of colon: some relays mishandle ':' in d-tags.
+    final dTag = 'vote-$proposalId-$voterPubkey';
     print('[VOTE-PUB] === START === voteId=$voteId proposalId=$proposalId '
         'choice=$choiceName');
     try {
@@ -712,7 +713,7 @@ class NostrTransport implements MessageTransport {
         ['d', dTag],
         ['t', 'nexus-vote'],
         ['t', 'nexus-cell-$cellId'],
-        ['e', proposalId],
+        ['proposal_id', proposalId],
         ['choice', choiceName.toLowerCase()],
         ['weight', '1'],
       ];
@@ -765,7 +766,7 @@ class NostrTransport implements MessageTransport {
         ['d', proposalId],
         ['t', 'nexus-decision'],
         ['t', 'nexus-cell-$cellId'],
-        ['e', proposalId],
+        ['proposal_id', proposalId],
         ['result', result],
         ['prev_hash', previousDecisionHash ?? ''],
         ['content_hash', contentHash],

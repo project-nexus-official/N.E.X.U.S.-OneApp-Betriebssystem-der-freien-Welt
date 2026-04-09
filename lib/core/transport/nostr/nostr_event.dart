@@ -101,10 +101,11 @@ class NostrKind {
 
   /// G2 governance – vote event (Parameterized Replaceable, NIP-33).
   ///
-  /// d-tag: "${proposalId}:${voterPubkeyHex}" — ensures exactly one vote per
-  /// voter per proposal.  A later event with the same d-tag replaces the old
-  /// one automatically on compliant relays, implementing change-vote.
-  /// Tags: ['d',"${pid}:${pubkey}"], ['t','nexus-vote'], ['cell',cellId],
+  /// d-tag: "vote-${proposalId}-${voterPubkeyHex}" — ensures exactly one vote
+  /// per voter per proposal.  A later event with the same d-tag replaces the
+  /// old one automatically on compliant relays, implementing change-vote.
+  /// Dash separator used instead of colon to avoid relay indexing issues.
+  /// Tags: ['d',"vote-${pid}-${pubkey}"], ['t','nexus-vote'], ['cell',cellId],
   ///        ['e',proposalId], ['choice',yes|no|abstain], ['weight','1']
   /// Content: JSON { voteId, voterDid, voterPseudonym, reasoning?, createdAt }
   static const int voteEvent = 31011;

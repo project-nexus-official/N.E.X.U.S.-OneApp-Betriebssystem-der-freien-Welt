@@ -11,7 +11,7 @@ const defaultRelays = [
   'wss://relay.snort.social',
   'wss://nos.lol',
   'wss://relay.nostr.band',
-  'wss://nostr.wine',
+  // nostr.wine is a paid relay — writes rejected for unpaid pubkeys.
 ];
 
 /// Connection state of a single relay.
@@ -127,12 +127,18 @@ class NostrRelayManager {
   /// Publishes [event] to all connected relays.
   void publish(NostrEvent event) {
     final msg = jsonEncode(['EVENT', event.toJson()]);
-    for (final entry in _channels.entries) {
+    final connected = _channels.entries
+        .where((e) => _statuses[e.key]?.state == RelayState.connected)
+        .toList();
+    print('[PUBLISH] kind=${event.kind} id=${event.id.substring(0, 8)} '
+        '→ ${connected.length} relay(s)');
+    for (final entry in connected) {
       final url = entry.key;
-      if (_statuses[url]?.state == RelayState.connected) {
-        try {
-          entry.value.sink.add(msg);
-        } catch (_) {}
+      print('[PUBLISH]   → ${_shortUrl(url)}');
+      try {
+        entry.value.sink.add(msg);
+      } catch (e) {
+        print('[PUBLISH]   ✗ ${_shortUrl(url)}: $e');
       }
     }
   }
@@ -146,6 +152,9 @@ class NostrRelayManager {
     final subId = generateSubId();
     _subscriptions[subId] = filter;
     final msg = jsonEncode(['REQ', subId, filter]);
+    final tFilter = filter['#t'];
+    print('[NOSTR] subscribe ${subId.substring(0, 8)} '
+        'kinds=${filter['kinds']} #t=$tFilter since=${filter['since']}');
     for (final entry in _channels.entries) {
       if (_statuses[entry.key]?.state == RelayState.connected) {
         try {
@@ -254,12 +263,16 @@ class NostrRelayManager {
     print('[NOSTR] $url – resubscribing ${_subscriptions.length} filters');
     for (final entry in _subscriptions.entries) {
       try {
-        final since = entry.value['since'];
+        final filter = entry.value;
+        final since = filter['since'];
+        final tFilter = filter['#t'];
+        final filterJson = jsonEncode(['REQ', entry.key, filter]);
         print('[NOSTR]   REQ ${entry.key.substring(0, 8)} '
-            'kinds=${entry.value['kinds']} since=$since');
+            'kinds=${filter['kinds']} #t=$tFilter since=$since');
+        print('[NOSTR] Filter object: $filterJson');
         print('[SYNC] Relay connected: ${_shortUrl(url)}  '
             'sending REQ ${entry.key.substring(0, 8)} since=$since');
-        channel.sink.add(jsonEncode(['REQ', entry.key, entry.value]));
+        channel.sink.add(filterJson);
       } catch (_) {}
     }
   }
@@ -271,6 +284,17 @@ class NostrRelayManager {
       url.replaceAll('wss://', '').replaceAll('ws://', '');
 
   void _handleMessage(String url, String data) {
+    // Raw-Logging für Diagnose: alle relay-Antworten die vote/31011/OK betreffen
+    if (data.contains('31011') ||
+        data.contains('31010') ||
+        data.contains('"OK"') ||
+        data.startsWith('["OK"') ||
+        data.contains('NOTICE') ||
+        data.contains('vote') ||
+        data.contains('proposal')) {
+      print('[RELAY-RAW] ${_shortUrl(url)}: $data');
+    }
+
     try {
       final msg = jsonDecode(data) as List<dynamic>;
       if (msg.isEmpty) return;
@@ -295,6 +319,14 @@ class NostrRelayManager {
           _seenEventIds.add(event.id);
 
           _eventController.add(event);
+
+        case 'OK':
+          // ["OK", eventId, accepted, message]
+          final eventId = msg.length > 1 ? (msg[1] as String) : '?';
+          final accepted = msg.length > 2 ? msg[2] as bool : false;
+          final message = msg.length > 3 ? msg[3].toString() : '';
+          final short = eventId.length >= 8 ? eventId.substring(0, 8) : eventId;
+          print('[RELAY-OK] ${_shortUrl(url)}: id=$short accepted=$accepted msg="$message"');
 
         case 'NOTICE':
           print('[NOSTR] NOTICE from ${_shortUrl(url)}: ${msg.length > 1 ? msg[1] : ""}');
