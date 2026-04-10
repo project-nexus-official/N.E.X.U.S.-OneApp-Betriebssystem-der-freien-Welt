@@ -779,9 +779,135 @@ class _AdminSection extends StatelessWidget {
             onTap: () => _nuclearWipeCells(context),
           ),
           // ── END CELL WIPE ────────────────────────────────────────────────
+          // ── MEMBERSHIP REPAIR ────────────────────────────────────────────
+          ListTile(
+            leading: const Icon(Icons.build, color: Colors.green),
+            title: const Text('🔧 Membership reparieren'),
+            subtitle: const Text(
+              'Stellt FOUNDER-Status für eigene Cells wieder her '
+              '(nach Nuclear Wipe Vorfall)',
+              style: TextStyle(fontSize: 11),
+            ),
+            onTap: () => _runMembershipRepair(context),
+          ),
+          // ── END MEMBERSHIP REPAIR ────────────────────────────────────────
+          // ── ZOMBIE TOMBSTONE ─────────────────────────────────────────────
+          ListTile(
+            leading: const Icon(Icons.delete_sweep, color: Colors.orange),
+            title: const Text('🪦 Discovered Zombies tombstonen'),
+            subtitle: const Text(
+              'Markiert alle aktuell entdeckten Cells als gelöscht '
+              'damit sie nicht zurückkommen',
+              style: TextStyle(fontSize: 11),
+            ),
+            onTap: () => _tombstoneZombies(context),
+          ),
+          // ── END ZOMBIE TOMBSTONE ─────────────────────────────────────────
         ],
       ],
     );
+  }
+
+  Future<void> _tombstoneZombies(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Discovered Zombies tombstonen?'),
+        content: const Text(
+          'Alle aktuell im Cell-Hub angezeigten "entdeckten" '
+          'Cells werden dauerhaft als gelöscht markiert. '
+          'Sie kommen auch nach einem Neustart nicht zurück.\n\n'
+          'Eigene Cells in der DB werden NICHT angetastet.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Abbrechen'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Tombstonen'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    final count = await CellService.instance.tombstoneAllDiscovered();
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('🪦 $count Zombie-Cells tombstoned'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+  }
+
+  Future<void> _runMembershipRepair(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Membership reparieren?'),
+        content: const Text(
+          'Diese Aktion prüft alle Cells in deiner DB und fügt einen '
+          'FOUNDER-Eintrag hinzu, wenn deine DID die createdBy-DID ist '
+          'und noch kein Membership-Eintrag existiert.\n\n'
+          'Es werden nur Einträge HINZUGEFÜGT, niemals gelöscht oder '
+          'überschrieben.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Abbrechen'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Reparatur starten'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    try {
+      final result =
+          await CellService.instance.repairFounderMemberships();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '✅ Reparatur abgeschlossen: '
+              '${result['checked']} geprüft, '
+              '${result['repaired']} repariert, '
+              '${result['skipped']} übersprungen',
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
+    } catch (e, stack) {
+      print('[REPAIR] EXCEPTION: $e');
+      print('[REPAIR] Stack: $stack');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Fehler: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _confirmTransfer(BuildContext context, String myDid) async {

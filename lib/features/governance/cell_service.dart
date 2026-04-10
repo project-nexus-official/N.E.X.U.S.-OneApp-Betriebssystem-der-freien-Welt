@@ -1193,5 +1193,123 @@ class CellService {
         ' WipeAt=$_wipeAt dismissed=${_dismissedCellIds.length}');
   }
 
+  /// Tombstones every cell currently in [_discovered] so they never re-appear
+  /// after an app restart.  Both the permanent tombstone list AND the dismissed
+  /// list are updated so relay-replayed Kind-30000 events are always rejected.
+  ///
+  /// Own cells in [_myCells] and the DB are NOT touched.
+  ///
+  /// Returns the number of cells that were tombstoned.
+  Future<int> tombstoneAllDiscovered() async {
+    print('[ZOMBIE-CLEANUP] === Starting discovered cells tombstoning ===');
+
+    final discoveredIds = _discovered.map((c) => c.id).toList();
+    print('[ZOMBIE-CLEANUP] Found ${discoveredIds.length} discovered cells');
+    for (final cell in _discovered) {
+      print('[ZOMBIE-CLEANUP]   - ${cell.id} ("${cell.name}")');
+    }
+
+    _deletedCellIds.addAll(discoveredIds);
+    _dismissedCellIds.addAll(discoveredIds);
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _deletedCellsKey,
+      jsonEncode(_deletedCellIds.toList()),
+    );
+    await prefs.setString(
+      _dismissedKey,
+      jsonEncode(_dismissedCellIds.toList()),
+    );
+
+    _discovered.clear();
+    _notify();
+
+    print('[ZOMBIE-CLEANUP] === Done: ${discoveredIds.length} cells tombstoned ===');
+    return discoveredIds.length;
+  }
+
+  /// Repairs missing FOUNDER memberships after a Nuclear Wipe incident.
+  ///
+  /// Iterates all cells in the DB and inserts a FOUNDER entry in cell_members
+  /// when the cell's [Cell.createdBy] matches the local user's DID but no
+  /// confirmed membership exists.  Existing entries are never overwritten.
+  ///
+  /// Returns a map with keys: 'checked', 'repaired', 'skipped'.
+  Future<Map<String, int>> repairFounderMemberships() async {
+    print('[REPAIR] === Starting founder membership repair ===');
+
+    final myDid = IdentityService.instance.currentIdentity?.did;
+    if (myDid == null) {
+      print('[REPAIR] ERROR: No identity loaded');
+      return {'checked': 0, 'repaired': 0, 'skipped': 0};
+    }
+
+    print('[REPAIR] My DID: $myDid');
+
+    int checked = 0;
+    int repaired = 0;
+    int skipped = 0;
+
+    final rows = await PodDatabase.instance.listCells();
+    print('[REPAIR] Found ${rows.length} cells in DB');
+
+    for (final row in rows) {
+      final cell = Cell.fromJson(row);
+      checked++;
+      final shortId = cell.id.length > 16 ? cell.id.substring(0, 16) : cell.id;
+      print('[REPAIR] Checking cell $shortId ("${cell.name}")');
+      print('[REPAIR]   Founder DID: ${cell.createdBy}');
+
+      if (cell.createdBy != myDid) {
+        print('[REPAIR]   ACTION: Skipped (not my cell)');
+        skipped++;
+        continue;
+      }
+
+      // Check if a FOUNDER membership already exists.
+      final memberRows = await PodDatabase.instance.listCellMembers(cell.id);
+      final members = memberRows.map(CellMember.fromJson).toList();
+      final hasFounder =
+          members.any((m) => m.did == myDid && m.role == MemberRole.founder);
+
+      if (hasFounder) {
+        print('[REPAIR]   ACTION: Skipped (already FOUNDER)');
+        skipped++;
+        continue;
+      }
+
+      // Insert FOUNDER entry.
+      final founder = CellMember(
+        cellId: cell.id,
+        did: myDid,
+        joinedAt: cell.createdAt,
+        role: MemberRole.founder,
+        confirmedBy: myDid,
+      );
+      await PodDatabase.instance.upsertCellMember(
+          cell.id, myDid, founder.toJson());
+
+      // Keep in-memory cache in sync.
+      (_members[cell.id] ??= [])
+          .removeWhere((m) => m.did == myDid); // remove stale entry if any
+      (_members[cell.id]!).add(founder);
+      if (!_myCells.any((c) => c.id == cell.id)) {
+        _myCells.add(cell);
+      }
+
+      print('[REPAIR]   ACTION: Added FOUNDER entry (joinedAt=${cell.createdAt})');
+      repaired++;
+    }
+
+    if (repaired > 0) {
+      _notify();
+      onGovernanceMembershipChanged?.call();
+    }
+
+    print('[REPAIR] === Done: checked=$checked, repaired=$repaired, skipped=$skipped ===');
+    return {'checked': checked, 'repaired': repaired, 'skipped': skipped};
+  }
+
   void _notify() => _streamCtrl.add(null);
 }
