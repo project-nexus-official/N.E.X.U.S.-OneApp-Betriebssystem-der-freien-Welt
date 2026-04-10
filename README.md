@@ -15,7 +15,7 @@
 
 ## Was ist die OneApp?
 
-Die N.E.X.U.S. OneApp ist eine dezentrale Kommunikations- und Selbstverwaltungs-App — ohne zentralen Server, ohne Konzernkontrolle, ohne Zensur. Sie ist Schritt für Schritt darauf ausgelegt, WhatsApp durch souveränen Chat, Banken durch das AETHER-Protokoll und Parlamente durch Liquid Democracy zu ersetzen.
+Die N.E.X.U.S. OneApp ist eine dezentrale Kommunikations- und Selbstverwaltungs-App — ohne zentralen Server, ohne Konzernkontrolle, ohne Zensur. Sie ist die Basis des Bauplan der N.E.X.U.S. Infrastruktur und bringt den Bauplan Schritt für Schritt in die Realität.
 
 Der gesamte Quellcode ist Open Source (AGPL v3). Alle Nachrichten sind Ende-zu-Ende-verschlüsselt. Du besitzt deine Identität, deine Daten und deine Schlüssel — niemand sonst.
 
