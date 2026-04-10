@@ -2,7 +2,7 @@ name: nexus_oneapp
 description: "NEXUS OneApp – Dezentrale App für die Menschheitsfamilie"
 publish_to: 'none'
 
-version: 0.1.7+1
+version: 0.1.8+8
 
 environment:
   sdk: ^3.11.3
