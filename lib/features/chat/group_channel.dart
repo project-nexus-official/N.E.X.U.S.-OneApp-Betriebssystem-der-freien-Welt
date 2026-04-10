@@ -1,6 +1,21 @@
+import 'dart:convert';
 import 'dart:math';
 
 import '../../core/roles/role_enums.dart';
+
+/// Defensive helper: parses a DB/JSON value that should be a List<String>.
+/// Handles the case where SQLite stores an array as a JSON-encoded String.
+List<String> _parseStringList(dynamic value) {
+  if (value == null) return [];
+  if (value is List) return value.map((e) => e as String).toList();
+  if (value is String && value.isNotEmpty) {
+    try {
+      final decoded = jsonDecode(value);
+      if (decoded is List) return decoded.map((e) => e as String).toList();
+    } catch (_) {}
+  }
+  return [];
+}
 
 /// A named group channel (e.g. #teneriffa) that multiple users can join.
 ///
@@ -190,10 +205,7 @@ class GroupChannel {
               )
             : null,
         channelMode: ChannelModeJson.fromString(json['channelMode'] as String?),
-        members: (json['members'] as List<dynamic>?)
-                ?.map((e) => e as String)
-                .toList() ??
-            [],
+        members: _parseStringList(json['members']),
         cellId: json['cellId'] as String?,
       );
 

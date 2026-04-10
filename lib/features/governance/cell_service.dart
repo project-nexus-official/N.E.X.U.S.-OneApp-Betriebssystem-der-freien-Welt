@@ -12,6 +12,17 @@ import 'cell.dart';
 import 'cell_join_request.dart';
 import 'cell_member.dart';
 
+/// Defensive helper: parses a SharedPreferences JSON string into List<String>.
+/// Returns an empty list if the value is null, empty, or cannot be decoded.
+List<String> _parseJsonStringList(String? raw) {
+  if (raw == null || raw.isEmpty) return [];
+  try {
+    final decoded = jsonDecode(raw);
+    if (decoded is List) return decoded.map((e) => e.toString()).toList();
+  } catch (_) {}
+  return [];
+}
+
 /// Manages the local user's cell memberships and join requests.
 ///
 /// Follows the same singleton/stream pattern as [GroupChannelService].
@@ -148,28 +159,22 @@ class CellService {
     print('[TOMBSTONE-MIGRATION] === Starting one-time migration ===');
     int migrated = 0;
 
-    final rawDeleted = prefs.getString(_deletedCellsKey);
-    if (rawDeleted != null) {
-      final ids = (jsonDecode(rawDeleted) as List<dynamic>).cast<String>();
-      print('[TOMBSTONE-MIGRATION] Found ${ids.length} cell tombstones in SharedPrefs');
-      for (final id in ids) {
-        await PodDatabase.instance.addTombstone(
-          id: id, type: 'cell', reason: 'migrated from SharedPreferences');
-        await PodDatabase.instance.addTombstone(
-          id: id, type: 'cell_dismissed', reason: 'migrated from SharedPreferences');
-        migrated++;
-      }
+    final deletedIds = _parseJsonStringList(prefs.getString(_deletedCellsKey));
+    print('[TOMBSTONE-MIGRATION] Found ${deletedIds.length} cell tombstones in SharedPrefs');
+    for (final id in deletedIds) {
+      await PodDatabase.instance.addTombstone(
+        id: id, type: 'cell', reason: 'migrated from SharedPreferences');
+      await PodDatabase.instance.addTombstone(
+        id: id, type: 'cell_dismissed', reason: 'migrated from SharedPreferences');
+      migrated++;
     }
 
-    final rawDismissed = prefs.getString(_dismissedKey);
-    if (rawDismissed != null) {
-      final ids = (jsonDecode(rawDismissed) as List<dynamic>).cast<String>();
-      print('[TOMBSTONE-MIGRATION] Found ${ids.length} cell dismissed in SharedPrefs');
-      for (final id in ids) {
-        await PodDatabase.instance.addTombstone(
-          id: id, type: 'cell_dismissed', reason: 'migrated from SharedPreferences');
-        migrated++;
-      }
+    final dismissedIds = _parseJsonStringList(prefs.getString(_dismissedKey));
+    print('[TOMBSTONE-MIGRATION] Found ${dismissedIds.length} cell dismissed in SharedPrefs');
+    for (final id in dismissedIds) {
+      await PodDatabase.instance.addTombstone(
+        id: id, type: 'cell_dismissed', reason: 'migrated from SharedPreferences');
+      migrated++;
     }
 
     await prefs.setBool(_tombstoneMigrationKey, true);
@@ -189,9 +194,10 @@ class CellService {
   }
 
   Future<void> load() async {
+    print('[CELLS-INIT] Starte Initialisierung');
     try {
-      // Load dismissed cell IDs and wipe timestamp first so discovery filter
-      // works immediately before any Nostr events arrive.
+      // ── Schritt 1: SharedPreferences laden ────────────────────────────────
+      print('[CELLS-INIT] Schritt 1: SharedPreferences laden');
       final prefs = await SharedPreferences.getInstance();
 
       // ── RENAME-DIAG: raw SharedPrefs state at startup ────────────────────
@@ -202,24 +208,36 @@ class CellService {
       // ─────────────────────────────────────────────────────────────────────
 
       // ── Load tombstone + dismissed lists BEFORE any Nostr events arrive ────
-      final rawDeleted = prefs.getString(_deletedCellsKey);
-      final rawDismissed = prefs.getString(_dismissedKey);
       final rawWipeAt = prefs.getInt(_wipeKey);
 
-      if (rawDeleted != null) {
-        final list = (jsonDecode(rawDeleted) as List<dynamic>).cast<String>();
-        _deletedCellIds.addAll(list);
-      }
-      if (rawDismissed != null) {
-        final list = (jsonDecode(rawDismissed) as List<dynamic>).cast<String>();
-        _dismissedCellIds.addAll(list);
-      }
+      // Defensive parse — handles malformed or missing values gracefully.
+      final deletedFromPrefs = _parseJsonStringList(prefs.getString(_deletedCellsKey));
+      final dismissedFromPrefs = _parseJsonStringList(prefs.getString(_dismissedKey));
+      _deletedCellIds.addAll(deletedFromPrefs);
+      _dismissedCellIds.addAll(dismissedFromPrefs);
       _wipeAt = rawWipeAt;
 
-      // ── One-time migration from SharedPrefs → SQLite ─────────────────────
-      await _migrateSharedPrefsTombstonesToSqlite(prefs);
-      // ── Load tombstones from SQLite (primary source after migration) ──────
-      await _loadTombstonesFromSqlite();
+      print('[CELLS-INIT] SharedPrefs: ${deletedFromPrefs.length} tombstones,'
+          ' ${dismissedFromPrefs.length} dismissed, wipeAt=${rawWipeAt ?? "NOT SET"}');
+
+      // ── Schritt 2: One-time Migration SharedPrefs → SQLite ────────────────
+      print('[CELLS-INIT] Schritt 2: SharedPrefs-Migration starten');
+      try {
+        await _migrateSharedPrefsTombstonesToSqlite(prefs);
+        print('[CELLS-INIT] SharedPrefs-Migration abgeschlossen');
+      } catch (e) {
+        print('[CELLS-INIT] FEHLER in Schritt 2 (Migration): $e');
+      }
+
+      // ── Schritt 3: Tombstones aus SQLite laden ────────────────────────────
+      print('[CELLS-INIT] Schritt 3: Tombstones aus SQLite laden');
+      try {
+        await _loadTombstonesFromSqlite();
+        print('[CELLS-INIT] Tombstones geladen:'
+            ' ${_deletedCellIds.length} tombstones, ${_dismissedCellIds.length} dismissed');
+      } catch (e) {
+        print('[CELLS-INIT] FEHLER in Schritt 3 (SQLite-Tombstones): $e');
+      }
 
       // ── ZOMBIE-V2: startup diagnosis ──────────────────────────────────────
       print('[ZOMBIE-V2] === APP START CELL DIAGNOSIS ===');
@@ -234,6 +252,8 @@ class CellService {
       print('[ZOMBIE-V3] WipeAt at load: ${rawWipeAt ?? "NOT SET"}');
       // ─────────────────────────────────────────────────────────────────────
 
+      // ── Schritt 4: Eigene Zellen aus DB laden ─────────────────────────────
+      print('[CELLS-INIT] Schritt 4: Eigene Zellen aus SQLite laden');
       final rows = await PodDatabase.instance.listCells();
       _myCells.clear();
 
@@ -309,9 +329,13 @@ class CellService {
       }
 
       debugPrint('[CELLS] Loaded ${_myCells.length} cells');
+      print('[CELLS-INIT] Eigene Zellen geladen: ${_myCells.length} Zellen');
+      print('[CELLS-INIT] Initialisierung abgeschlossen');
       _notify();
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('[CELLS] load error: $e');
+      print('[CELLS-INIT] FEHLER: $e');
+      print('[CELLS-INIT] Stack: $st');
     }
   }
 
