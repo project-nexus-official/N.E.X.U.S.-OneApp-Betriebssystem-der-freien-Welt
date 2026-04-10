@@ -177,7 +177,20 @@ class NostrTransport implements MessageTransport {
   Stream<Map<String, dynamic>> get onFeedReaction =>
       _feedReactionController.stream;
 
+  /// Emits a list of Nostr event IDs when a Kind-5 deletion request arrives.
+  final _feedDeleteController =
+      StreamController<List<String>>.broadcast();
+
+  /// Stream of Nostr event IDs to delete, from incoming Kind-5 events.
+  Stream<List<String>> get onFeedDelete => _feedDeleteController.stream;
+
   String? _feedSubId;
+
+  /// Dedicated author-based subscription for Kind-6 reposts.
+  /// Public relays do NOT index Kind-6 by #t tags, so a tag-filtered sub
+  /// never delivers reposts.  This sub uses only 'authors' + 'since' so the
+  /// relay returns all reposts from known contacts without tag filtering.
+  String? _feedRepostSubId;
 
   StreamSubscription<NostrEvent>? _eventSub;
   Timer? _presenceTimer;
@@ -315,6 +328,7 @@ class NostrTransport implements MessageTransport {
       _relayManager.closeSubscription(_channelDiscoverySubId!);
     }
     if (_feedSubId != null) _relayManager.closeSubscription(_feedSubId!);
+    if (_feedRepostSubId != null) _relayManager.closeSubscription(_feedRepostSubId!);
     if (_proposalSubId != null) _relayManager.closeSubscription(_proposalSubId!);
     if (_voteSubId != null) _relayManager.closeSubscription(_voteSubId!);
     if (_decisionSubId != null) _relayManager.closeSubscription(_decisionSubId!);
@@ -1299,10 +1313,15 @@ class NostrTransport implements MessageTransport {
     print('[CELL] Subscribed to member-update events, subId=$_cellMemberUpdateSubId');
 
     // Dorfplatz feed posts + comments (Kind-1/6 with nexus-dorfplatz* tags),
-    // Kind-7 reactions — tag-based subscription for last 7 days.
+    // Kind-7 reactions, Kind-5 deletions — tag-based subscription for last 7 days.
     if (_feedSubId != null) _relayManager.closeSubscription(_feedSubId!);
     _feedSubId = _relayManager.subscribe({
-      'kinds': [NostrKind.textNote, NostrKind.repost, NostrKind.reaction],
+      'kinds': [
+        NostrKind.textNote,
+        NostrKind.deletion,
+        NostrKind.repost,
+        NostrKind.reaction,
+      ],
       '#t': ['nexus-dorfplatz', 'nexus-dorfplatz-comment'],
       'since': nowSeconds - 7 * 86400,
     });
@@ -1319,13 +1338,35 @@ class NostrTransport implements MessageTransport {
     };
     if (feedAuthors.isNotEmpty) {
       _relayManager.subscribe({
-        'kinds': [NostrKind.textNote, NostrKind.repost],
+        'kinds': [NostrKind.textNote],
         'authors': feedAuthors.toList(),
         '#t': ['nexus-dorfplatz'],
         'since': nowSeconds - 30 * 86400,
       });
       print('[NOSTR] Feed author-sync sub: ${feedAuthors.length} authors '
           '(own + contacts), last 30 days');
+    }
+
+    // Dedicated Kind-6 repost subscription — author-based WITHOUT #t filter.
+    // Public Nostr relays do not index Kind-6 events by arbitrary tags, so a
+    // #t filter silently returns nothing for reposts.  Using only 'authors'
+    // ensures we get all reposts from contacts regardless of relay implementation.
+    if (_feedRepostSubId != null) {
+      _relayManager.closeSubscription(_feedRepostSubId!);
+    }
+    final repostAuthors = feedAuthors; // same set: own pubkey + contact pubkeys
+    if (repostAuthors.isNotEmpty) {
+      _feedRepostSubId = _relayManager.subscribe({
+        'kinds': [NostrKind.repost],
+        'authors': repostAuthors.toList(),
+        'since': nowSeconds - 30 * 86400,
+      });
+      print('[FEED-SUB] kind=6 Autoren-Subscription: ${repostAuthors.length} '
+          'autoren since=${nowSeconds - 30 * 86400}');
+    } else {
+      _feedRepostSubId = null;
+      print('[FEED-SUB] kind=6 Autoren-Subscription: keine Autoren bekannt, '
+          'übersprungen');
     }
 
     // G2 governance — proposals, votes, decision records for all joined cells.
@@ -1402,6 +1443,8 @@ class NostrTransport implements MessageTransport {
         } else {
           _handleBroadcast(event);
         }
+      case NostrKind.deletion:
+        _handleFeedDeletion(event);
       case NostrKind.repost:
         _handleFeedPost(event);
       case NostrKind.reaction:
@@ -1484,6 +1527,21 @@ class NostrTransport implements MessageTransport {
       'referencedEventId': referencedEventId,
       'senderPubkey': event.pubkey,
     });
+  }
+
+  /// Handles incoming NIP-09 Kind-5 deletion requests.
+  ///
+  /// Reads all ['e', <nostrEventId>] tags and emits the list of IDs to delete.
+  /// Only processes events from other peers — own deletions are already applied
+  /// locally in FeedService.deletePost() before the event is published.
+  void _handleFeedDeletion(NostrEvent event) {
+    if (_keys == null) return;
+    if (event.pubkey == _keys!.publicKeyHex) return; // own deletion, already applied locally
+    final ids = event.tagValues('e');
+    if (ids.isEmpty) return;
+    print('[FEED-DELETE] Empfangen kind=5 von ${event.pubkey.substring(0, 8)}…: '
+        '${ids.length} event-id(s)');
+    _feedDeleteController.add(ids);
   }
 
   void _handleCellAnnounceEvent(NostrEvent event) {

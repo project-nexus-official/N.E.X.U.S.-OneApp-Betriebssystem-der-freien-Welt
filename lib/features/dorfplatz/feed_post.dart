@@ -166,6 +166,15 @@ class FeedPost {
   /// Optional comment added when reposting.
   final String? repostComment;
 
+  /// Pseudonym of the original post's author (stored for offline display).
+  final String? repostOriginalAuthorPseudonym;
+
+  /// Short text preview of the original post's content (stored for offline display).
+  final String? repostOriginalPreview;
+
+  /// Base64-encoded JPEG of the first image from the original post (if any).
+  final String? repostOriginalImage;
+
   const FeedPost({
     required this.id,
     required this.authorDid,
@@ -182,6 +191,9 @@ class FeedPost {
     this.nostrEventId,
     this.repostOf,
     this.repostComment,
+    this.repostOriginalAuthorPseudonym,
+    this.repostOriginalPreview,
+    this.repostOriginalImage,
   });
 
   bool get isRepost => repostOf != null;
@@ -213,6 +225,9 @@ class FeedPost {
         nostrEventId: nostrEventId ?? this.nostrEventId,
         repostOf: repostOf,
         repostComment: repostComment,
+        repostOriginalAuthorPseudonym: repostOriginalAuthorPseudonym,
+        repostOriginalPreview: repostOriginalPreview,
+        repostOriginalImage: repostOriginalImage,
       );
 
   Map<String, dynamic> toJson() => {
@@ -231,6 +246,12 @@ class FeedPost {
         if (nostrEventId != null) 'nostrEventId': nostrEventId,
         if (repostOf != null) 'repostOf': repostOf,
         if (repostComment != null) 'repostComment': repostComment,
+        if (repostOriginalAuthorPseudonym != null)
+          'repostOriginalAuthorPseudonym': repostOriginalAuthorPseudonym,
+        if (repostOriginalPreview != null)
+          'repostOriginalPreview': repostOriginalPreview,
+        if (repostOriginalImage != null)
+          'repostOriginalImage': repostOriginalImage,
       };
 
   factory FeedPost.fromJson(Map<String, dynamic> json) => FeedPost(
@@ -259,6 +280,10 @@ class FeedPost {
         nostrEventId: json['nostrEventId'] as String?,
         repostOf: json['repostOf'] as String?,
         repostComment: json['repostComment'] as String?,
+        repostOriginalAuthorPseudonym:
+            json['repostOriginalAuthorPseudonym'] as String?,
+        repostOriginalPreview: json['repostOriginalPreview'] as String?,
+        repostOriginalImage: json['repostOriginalImage'] as String?,
       );
 }
 

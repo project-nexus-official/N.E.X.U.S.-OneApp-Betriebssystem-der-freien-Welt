@@ -1,0 +1,153 @@
+Resolving dependencies...
+Downloading packages...
+  async 2.13.0 (2.13.1 available)
+  connectivity_plus 6.1.5 (7.1.0 available)
+  connectivity_plus_platform_interface 2.0.1 (2.1.0 available)
+  cupertino_icons 1.0.8 (1.0.9 available)
+  emoji_picker_flutter 2.2.0 (4.4.0 available)
+  flutter_blue_plus 1.36.8 (2.2.1 available)
+  flutter_blue_plus_android 7.0.4 (8.2.1 available)
+  flutter_blue_plus_darwin 7.0.3 (8.2.1 available)
+  flutter_blue_plus_linux 7.0.3 (8.2.1 available)
+  flutter_blue_plus_platform_interface 7.0.0 (8.2.1 available)
+  flutter_blue_plus_web 7.0.2 (8.2.1 available)
+  flutter_local_notifications 18.0.1 (21.0.0 available)
+  flutter_local_notifications_linux 5.0.0 (8.0.0 available)
+  flutter_local_notifications_platform_interface 8.0.0 (11.0.0 available)
+  flutter_plugin_android_lifecycle 2.0.33 (2.0.34 available)
+  flutter_secure_storage 9.2.4 (10.0.0 available)
+  flutter_secure_storage_linux 1.2.3 (3.0.0 available)
+  flutter_secure_storage_macos 3.1.3 (4.0.0 available)
+  flutter_secure_storage_platform_interface 1.1.2 (2.0.1 available)
+  flutter_secure_storage_web 1.2.1 (2.1.0 available)
+  flutter_secure_storage_windows 3.1.2 (4.1.0 available)
+  geolocator 10.1.1 (14.0.2 available)
+  geolocator_android 4.6.2 (5.0.2 available)
+  geolocator_web 2.2.1 (4.1.3 available)
+  go_router 15.1.3 (17.2.0 available)
+  image_picker_android 0.8.13+14 (0.8.13+16 available)
+  js 0.6.7 (0.7.2 available)
+  meta 1.17.0 (1.18.2 available)
+  mime 1.0.6 (2.0.0 available)
+  mobile_scanner 6.0.11 (7.2.0 available)
+  package_info_plus 8.3.1 (9.0.1 available)
+  path_provider_android 2.2.22 (2.3.1 available)
+  permission_handler 11.4.0 (12.0.1 available)
+  permission_handler_android 12.1.0 (13.0.1 available)
+  pointycastle 3.9.1 (4.0.0 available)
+  record 5.2.1 (6.2.0 available)
+! record_linux 1.3.0 (overridden)
+  record_web 1.1.9 (1.3.0 available)
+  share_plus 10.0.0 (12.0.2 available)
+  share_plus_platform_interface 5.0.2 (6.1.0 available)
+  shared_preferences 2.5.4 (2.5.5 available)
+  shared_preferences_android 2.4.21 (2.4.23 available)
+  shared_preferences_platform_interface 2.4.1 (2.4.2 available)
+  sqflite_common_ffi 2.3.5 (2.4.0+2 available)
+  sqlite3 2.4.5 (3.3.0 available)
+  sqlite3_flutter_libs 0.5.42 (0.6.0+eol available)
+  test_api 0.7.10 (0.7.11 available)
+  timezone 0.10.1 (0.11.0 available)
+  vector_math 2.2.0 (2.3.0 available)
+  web 0.5.1 (1.1.1 available)
+  web_socket_channel 2.4.5 (3.0.3 available)
+  win32 5.15.0 (6.0.0 available)
+Got dependencies!
+51 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Launching lib\main.dart on SM G975F in debug mode...
+Running Gradle task 'assembleDebug'...                             34,9s
+√ Built build\app\outputs\flutter-apk\app-debug.apk
+Installing build\app\outputs\flutter-apk\app-debug.apk...           9,8s
+D/FlutterJNI(22958): Beginning load of flutter...
+D/FlutterJNI(22958): flutter (null) was loaded normally!
+I/flutter (22958): [IMPORTANT:flutter/shell/platform/android/android_context_gl_impeller.cc(104)] Using the Impeller rendering backend (OpenGLES).
+D/FlutterGeolocator(22958): Attaching Geolocator to activity
+D/FlutterRenderer(22958): Width is zero. 0,0
+I/flutter (22958): [ZOMBIE-V3] === APP START ===
+I/flutter (22958): [ZOMBIE-V3] Platform: android
+D/FlutterRenderer(22958): Width is zero. 0,0
+D/FlutterGeolocator(22958): Creating service.
+D/FlutterGeolocator(22958): Binding to location service.
+D/FlutterGeolocator(22958): Geolocator foreground service connected
+D/FlutterGeolocator(22958): Initializing Geolocator services
+D/FlutterGeolocator(22958): Flutter engine connected. Connected engine count 1
+D/FlutterRenderer(22958): Width is zero. 0,0
+I/flutter (22958): [IDENTITY] Loaded: did:key:z6MkmRLeGBZTxoPMu48eXs9GHNPVJa1iNCzH9QCneWmy8TwK
+I/flutter (22958): [NEXUS] initServicesAfterIdentity starting…
+I/flutter (22958): [DB] Path: /data/user/0/com.nexus.nexus_oneapp/app_flutter/nexus_pod.db  exists: true  size: 4055040B
+I/flutter (22958): [DB] Opened – messages: 42  contacts: 4
+I/flutter (22958): [NEXUS] Identity loaded: did:key:z6MkmRLeGBZTxoPMu48eXs9GHNPVJa1iNCzH9QCneWmy8TwK
+Syncing files to device SM G975F...                             
+I/flutter (22958): [DB] listContacts: rows=4
+I/flutter (22958): [CONTACTS] Loaded 4 contacts from DB
+I/flutter (22958): [CONTACTS]   sGLY9wP9BU31pUwZ  "Josh Richman Dev Win Test"  trust=contact
+I/flutter (22958): [CONTACTS]   C3171SwDE7Yqq3eK  "Deastina"  trust=contact
+I/flutter (22958): [CONTACTS]   qo8c3WdARHnP6ehE  "Jackson"  trust=contact
+I/flutter (22958): [CONTACTS]   LWNzRGgUPy8UNjdw  "elSID_desk"  trust=contact
+I/flutter (22958): [NEXUS] Contacts loaded: 4
+Syncing files to device SM G975F...                                168ms
+
+Flutter run key commands.
+r Hot reload. 
+R Hot restart.
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+A Dart VM Service on SM G975F is available at: http://127.0.0.1:64774/7SCrG8AHR3M=/
+The Flutter DevTools debugger and profiler on SM G975F is available at: http://127.0.0.1:64774/7SCrG8AHR3M=/devtools/?uri=ws://127.0.0.1:64774/7SCrG8AHR3M=/ws
+I/flutter (22958): [CR] Loaded 4 contact requests from DB
+D/CompatibilityChangeReporter(22958): Compat change id reported: 160794467; UID 11054; state: ENABLED
+V/BackgroundService(22958): Starting flutter engine for background service
+I/flutter (22958): [IMPORTANT:flutter/shell/platform/android/android_context_gl_impeller.cc(104)] Using the Impeller rendering backend (OpenGLES).
+D/[FBP-Android](22958): [FBP] onAttachedToEngine
+V/BackgroundService(22958): Service already running, using existing service
+D/FlutterGeolocator(22958): Geolocator foreground service connected
+D/FlutterGeolocator(22958): Initializing Geolocator services
+D/FlutterGeolocator(22958): Flutter engine connected. Connected engine count 2
+I/flutter (22958): [NODES] Active nodes: 1, DIDs: […9wP9BU31pUwZ]
+I/flutter (22958): [NODES] Active nodes: 1, DIDs: […9wP9BU31pUwZ]
+I/flutter (22958): [RoleService] Loaded. superadmin=did:key:z6MkmRLeGBZTxoPMu48eXs9GHNPVJa1iNCzH9QCneWmy8TwK sysAdmins=0
+V/BackgroundService(22958): Service already running, using existing service
+I/flutter (22958): [FEED] Loaded 14 posts, 0 mutes
+I/flutter (22958): [CELLS-INIT] Starte Initialisierung
+I/flutter (22958): [CELLS-INIT] Schritt 1: SharedPreferences laden
+I/flutter (22958): [RENAME-DIAG] Tombstones: []
+I/flutter (22958): [RENAME-DIAG] Dismissed: [mqje90tempub64dk7trpcs8ixbg0ix97, 476y516j0vtvmf5yoq7s1c4rscc3ek93, xj2q9ihcdwgbjquhg42kunc639ao7d03, 0si4ufhta5m3zl93eaaccsgxxsm9xsr9]
+I/flutter (22958): [CELLS-INIT] SharedPrefs OK: 4 tombstones, 4 dismissed, wipeAt=1775776564
+I/flutter (22958): [CELLS-INIT] Schritt 2: SharedPrefs-Migration starten
+I/flutter (22958): [TOMBSTONE-MIGRATION] Already done, skipping
+I/flutter (22958): [CELLS-INIT] SharedPrefs-Migration abgeschlossen
+I/flutter (22958): [CELLS-INIT] Schritt 3: Tombstones aus SQLite laden
+I/flutter (22958): [TOMBSTONE] Loaded from SQLite: 11 tombstones, 11 dismissed
+I/flutter (22958): [CELLS-INIT] Tombstones geladen: 11 tombstones, 11 dismissed
+I/flutter (22958): [ZOMBIE-V2] === APP START CELL DIAGNOSIS ===
+I/flutter (22958): [ZOMBIE-V2] Loaded 11 tombstones: {mqje90tempub64dk7trpcs8ixbg0ix97, 476y516j0vtvmf5yoq7s1c4rscc3ek93, xj2q9ihcdwgbjquhg42kunc639ao7d03, 0si4ufhta5m3zl93eaaccsgxxsm9xsr9, yozexao91btzha9pvvhg7squqdbk732f, cdbun3kzy192v4c532djo2wyehrxflby, qpygifh7yuw0safj23sesbdzy2o0kswu, duyuysst1salhqzjgo9ay17ylaeh1h2l, pxc27f8f6o7vjvkyp9aii904mms3v00h, eidia5epjv37s1ryapse0cipg6xpizb8, ojldsxcpfrlanvtxrhg2qhr6czheho10}
+I/flutter (22958): [ZOMBIE-V2] Loaded 11 dismissed: {mqje90tempub64dk7trpcs8ixbg0ix97, 476y516j0vtvmf5yoq7s1c4rscc3ek93, xj2q9ihcdwgbjquhg42kunc639ao7d03, 0si4ufhta5m3zl93eaaccsgxxsm9xsr9, yozexao91btzha9pvvhg7squqdbk732f, cdbun3kzy192v4c532djo2wyehrxflby, qpygifh7yuw0safj23sesbdzy2o0kswu, duyuysst1salhqzjgo9ay17ylaeh1h2l, pxc27f8f6o7vjvkyp9aii904mms3v00h, eidia5epjv37s1ryapse0cipg6xpizb8, ojldsxcpfrlanvtxrhg2qhr6czheho10}
+I/flutter (22958): [ZOMBIE-V2] Wipe timestamp: 1775776564
+I/flutter (22958): [ZOMBIE-V3] Tombstones at load: 11 -> [mqje90tempub64dk7trpcs8ixbg0ix97, 476y516j0vtvmf5yoq7s1c4rscc3ek93, xj2q9ihcdwgbjquhg42kunc639ao7d03, 0si4ufhta5m3zl93eaaccsgxxsm9xsr9, yozexao91btzha9pvvhg7squqdbk732f, cdbun3kzy192v4c532djo2wyehrxflby, qpygifh7yuw0safj23sesbdzy2o0kswu, duyuysst1salhqzjgo9ay17ylaeh1h2l, pxc27f8f6o7vjvkyp9aii904mms3v00h, eidia5epjv37s1ryapse0cipg6xpizb8, ojldsxcpfrlanvtxrhg2qhr6czheho10]
+I/flutter (22958): [ZOMBIE-V3] Dismissed at load: 11 -> [mqje90tempub64dk7trpcs8ixbg0ix97, 476y516j0vtvmf5yoq7s1c4rscc3ek93, xj2q9ihcdwgbjquhg42kunc639ao7d03, 0si4ufhta5m3zl93eaaccsgxxsm9xsr9, yozexao91btzha9pvvhg7squqdbk732f, cdbun3kzy192v4c532djo2wyehrxflby, qpygifh7yuw0safj23sesbdzy2o0kswu, duyuysst1salhqzjgo9ay17ylaeh1h2l, pxc27f8f6o7vjvkyp9aii904mms3v00h, eidia5epjv37s1ryapse0cipg6xpizb8, ojldsxcpfrlanvtxrhg2qhr6czheho10]
+I/flutter (22958): [ZOMBIE-V3] WipeAt at load: 1775776564
+I/flutter (22958): [CELLS-INIT] Schritt 4: Eigene Zellen aus SQLite laden
+I/flutter (22958): [ZOMBIE-V2] DB cells count: 1
+I/flutter (22958): [ZOMBIE-V2] DB cell: "Teneriffa" | id: em5ttiwgj8zlp10vgxc1ftwic1aab1l9  tombstoned=false  dismissed=false
+I/flutter (22958): [ZOMBIE-V3] WRITE PATH: db_import, cellId=em5ttiwgj8zlp10vgxc1ftwic1aab1l9, name="Teneriffa"
+I/flutter (22958): [ZOMBIE-V3] Is in tombstones? false
+I/flutter (22958): [ZOMBIE-V3] Is in dismissed? false
+I/flutter (22958): [ZOMBIE-V3] Decision: ALLOWED (loaded from DB)
+I/flutter (22958): [CELL-IMPORT] DB load: cellId=em5ttiwgj8zlp10vgxc1ftwic1aab1l9, name="Teneriffa", role=see_members_table
+I/flutter (22958): [CELL-UPDATE] DB load: cellId=em5ttiwgj8zlp10vgxc1ftwic1aab1l9, name="Teneriffa", version=n/a
+I/flutter (22958): [CELL-IMPORT] DB load member: cellId=em5ttiwgj8zlp10vgxc1ftwic1aab1l9, name="Teneriffa", role=founder (1 total members)
+I/flutter (22958): [CELLS] Loaded 1 cells
+I/flutter (22958): [CELLS-INIT] Eigene Zellen geladen: 1 Zellen
+I/flutter (22958): [CELLS-INIT] Initialisierung abgeschlossen
+I/flutter (22958): [PROPOSAL] Service initializing
+I/flutter (22958): [PROPOSAL] Loaded 22 tombstones
+I/flutter (22958): [PROPOSAL] Loaded 1 proposals from DB
+I/flutter (22958): [PROPOSAL] Scheduler starting
+I/flutter (22958): [PROPOSAL] Scheduler checking 0 proposals
+D/ProfileInstaller(22958): Installing profile for com.nexus.nexus_oneapp
+I/flutter (22958): [NEXUS] Startup complete in 5033ms
+Lost connection to device.

@@ -195,12 +195,16 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           MaterialPageRoute(
             builder: (_) => CreatePostScreen(
               repostOf: widget.post.id,
+              repostOfNostrEventId: widget.post.nostrEventId,
               repostAuthorPseudonym: widget.post.authorPseudonym,
               repostPreview: widget.post.content.isNotEmpty
                   ? widget.post.content
                   : widget.post.images.isNotEmpty
                       ? '[Bild]'
                       : null,
+              repostOriginalImage: widget.post.images.isNotEmpty
+                  ? widget.post.images.first
+                  : null,
             ),
           ),
         );
@@ -381,6 +385,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         onTap: () {},
                         onCommentTap: () => _focusNode.requestFocus(),
                         onMenuTap: () => _showPostMenu(context),
+                        isExpanded: true,
                       ),
                       const Divider(height: 1),
                       // Comments header

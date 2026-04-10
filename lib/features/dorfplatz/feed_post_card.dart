@@ -34,6 +34,10 @@ class FeedPostCard extends StatelessWidget {
   /// Called when the three-dot menu is tapped.
   final VoidCallback? onMenuTap;
 
+  /// When true (detail screen): the embedded original post card shows full text.
+  /// When false (feed, default): truncates at 4 lines.
+  final bool isExpanded;
+
   const FeedPostCard({
     super.key,
     required this.post,
@@ -41,6 +45,7 @@ class FeedPostCard extends StatelessWidget {
     required this.onCommentTap,
     this.onShareTap,
     this.onMenuTap,
+    this.isExpanded = false,
   });
 
   @override
@@ -63,26 +68,38 @@ class FeedPostCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _Header(post: post, onMenuTap: onMenuTap),
               if (post.isRepost) ...[
+                _RepostByLine(authorPseudonym: post.authorPseudonym),
                 const SizedBox(height: 6),
-                _RepostIndicator(post: post),
               ],
-              if (post.content.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                _ContentText(content: post.content),
-              ],
-              if (post.hasImages) ...[
-                const SizedBox(height: 8),
-                _ImageGrid(images: post.images),
-              ],
-              if (post.hasPoll) ...[
-                const SizedBox(height: 8),
-                _PollWidget(post: post),
-              ],
-              if (post.hasLinkPreview) ...[
-                const SizedBox(height: 8),
-                _LinkPreviewCard(preview: post.linkPreview!),
+              _Header(post: post, onMenuTap: onMenuTap),
+              // For reposts: show the reposter's comment (content) once,
+              // then the embedded original post card.
+              // For regular posts: show content, images, poll, link preview.
+              if (post.isRepost) ...[
+                if (post.repostComment?.isNotEmpty == true) ...[
+                  const SizedBox(height: 8),
+                  _ContentText(content: post.repostComment!),
+                ],
+                const SizedBox(height: 10),
+                _OriginalPostCard(post: post, isExpanded: isExpanded),
+              ] else ...[
+                if (post.content.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  _ContentText(content: post.content),
+                ],
+                if (post.hasImages) ...[
+                  const SizedBox(height: 8),
+                  _ImageGrid(images: post.images),
+                ],
+                if (post.hasPoll) ...[
+                  const SizedBox(height: 8),
+                  _PollWidget(post: post),
+                ],
+                if (post.hasLinkPreview) ...[
+                  const SizedBox(height: 8),
+                  _LinkPreviewCard(preview: post.linkPreview!),
+                ],
               ],
               const SizedBox(height: 10),
               _Footer(
@@ -305,40 +322,154 @@ class _VisibilityIcon extends StatelessWidget {
   }
 }
 
-// ── Repost indicator ──────────────────────────────────────────────────────────
+// ── Repost widgets ────────────────────────────────────────────────────────────
 
-class _RepostIndicator extends StatelessWidget {
-  final FeedPost post;
-  const _RepostIndicator({required this.post});
+/// Thin top line: "↻ [Name] hat geteilt" shown above the reposter's header.
+class _RepostByLine extends StatelessWidget {
+  final String authorPseudonym;
+  const _RepostByLine({required this.authorPseudonym});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceVariant,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-            color: AppColors.gold.withValues(alpha: 0.3), width: 1),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.repeat,
-              size: 14, color: AppColors.gold.withValues(alpha: 0.7)),
-          const SizedBox(width: 6),
-          Text(
-            post.repostComment?.isNotEmpty == true
-                ? post.repostComment!
-                : 'Geteilt',
+    return Row(
+      children: [
+        Icon(Icons.repeat,
+            size: 13, color: AppColors.onDark.withValues(alpha: 0.45)),
+        const SizedBox(width: 4),
+        Expanded(
+          child: Text(
+            '$authorPseudonym hat geteilt',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: AppColors.onDark.withValues(alpha: 0.65),
-              fontSize: 12,
+              color: AppColors.onDark.withValues(alpha: 0.45),
+              fontSize: 11,
               fontStyle: FontStyle.italic,
             ),
           ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Embedded card showing the original post's author and content preview.
+class _OriginalPostCard extends StatelessWidget {
+  final FeedPost post;
+
+  /// When true (detail view): show full text without line limit.
+  /// When false (feed): truncate at 4 lines.
+  final bool isExpanded;
+
+  const _OriginalPostCard({required this.post, this.isExpanded = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final originalAuthor =
+        post.repostOriginalAuthorPseudonym ?? 'Ursprünglicher Beitrag';
+    final originalPreview = post.repostOriginalPreview;
+    final originalImage = post.repostOriginalImage;
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceVariant,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+            color: AppColors.gold.withValues(alpha: 0.3), width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Original author line
+          Row(
+            children: [
+              Icon(Icons.person_outline,
+                  size: 13,
+                  color: AppColors.onDark.withValues(alpha: 0.55)),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  originalAuthor,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.gold,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (originalPreview != null && originalPreview.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              originalPreview,
+              maxLines: isExpanded ? null : 4,
+              overflow: isExpanded ? null : TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppColors.onDark.withValues(alpha: 0.75),
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+          ] else if (originalImage == null) ...[
+            const SizedBox(height: 4),
+            Text(
+              '[Beitrag nicht mehr verfügbar]',
+              style: TextStyle(
+                color: AppColors.onDark.withValues(alpha: 0.4),
+                fontSize: 12,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+          if (originalImage != null) ...[
+            const SizedBox(height: 8),
+            _OriginalPostImage(base64: originalImage, isExpanded: isExpanded),
+          ],
         ],
       ),
     );
+  }
+}
+
+/// Image inside _OriginalPostCard.
+/// Feed: capped at 150px height. Detail view: full natural height.
+class _OriginalPostImage extends StatelessWidget {
+  final String base64;
+  final bool isExpanded;
+
+  const _OriginalPostImage({required this.base64, required this.isExpanded});
+
+  @override
+  Widget build(BuildContext context) {
+    try {
+      final bytes = base64Decode(base64);
+      final image = Image.memory(
+        bytes,
+        fit: isExpanded ? BoxFit.contain : BoxFit.cover,
+        width: double.infinity,
+        cacheWidth: isExpanded ? 800 : 400,
+        gaplessPlayback: true,
+      );
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: isExpanded
+            ? image
+            : SizedBox(height: 150, child: image),
+      );
+    } catch (_) {
+      return Container(
+        height: 150,
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Icon(Icons.broken_image_outlined, color: AppColors.onDark),
+      );
+    }
   }
 }
 
@@ -826,12 +957,16 @@ class _FooterState extends State<_Footer> {
                   MaterialPageRoute(
                     builder: (_) => CreatePostScreen(
                       repostOf: widget.post.id,
+                      repostOfNostrEventId: widget.post.nostrEventId,
                       repostAuthorPseudonym: widget.post.authorPseudonym,
                       repostPreview: widget.post.content.isNotEmpty
                           ? widget.post.content
                           : widget.post.images.isNotEmpty
                               ? '[Bild]'
                               : null,
+                      repostOriginalImage: widget.post.images.isNotEmpty
+                          ? widget.post.images.first
+                          : null,
                     ),
                   ),
                 );

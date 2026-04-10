@@ -93,6 +93,10 @@ class FeedService {
     Poll? poll,
     String? repostOf,
     String? repostComment,
+    String? repostOriginalAuthorPseudonym,
+    String? repostOriginalPreview,
+    String? repostOriginalImage,
+    String? repostOfNostrEventId,
   }) async {
     var post = FeedPost(
       id: generateFeedId(),
@@ -106,6 +110,9 @@ class FeedService {
       poll: poll,
       repostOf: repostOf,
       repostComment: repostComment,
+      repostOriginalAuthorPseudonym: repostOriginalAuthorPseudonym,
+      repostOriginalPreview: repostOriginalPreview,
+      repostOriginalImage: repostOriginalImage,
       createdAt: DateTime.now(),
     );
 
@@ -114,20 +121,46 @@ class FeedService {
 
     // Publish to Nostr (best-effort).
     if (_publisher != null) {
+      final isRepost = repostOf != null;
       final tags = <List<String>>[
         ['t', 'nexus-dorfplatz'],
         ['visibility', post.visibility.name],
       ];
-      if (repostOf != null) tags.add(['e', repostOf]);
 
-      final kind =
-          repostOf != null ? NostrKind.repost : NostrKind.textNote;
-      final eventId =
-          _publisher!(kind, jsonEncode(post.toJson()), tags);
+      if (isRepost) {
+        // NIP-18: the ['e', ...] tag must contain the real 64-char hex Nostr
+        // event ID of the original post — NOT the internal UUID.
+        final nostrETag = repostOfNostrEventId?.trim() ?? '';
+        if (nostrETag.length != 64) {
+          // The original post has no Nostr event ID yet (e.g. was never published
+          // to a relay). Publishing a kind=6 with a UUID in the e-tag would be
+          // invalid and rejected by relays, so we skip it.
+          print('[FEED-REPOST] WARNUNG: kein nostrEventId für post ${repostOf} '
+              '(gefunden: "${nostrETag.isEmpty ? 'leer' : nostrETag}") — '
+              'kind=6 wird nicht publiziert');
+        } else {
+          tags.add(['e', nostrETag]);
+          tags.add(['t', 'nexus-dorfplatz-repost']);
 
-      if (eventId != null) {
-        post = post.copyWith(nostrEventId: eventId);
-        await PodDatabase.instance.updateFeedPost(post.id, post.toJson());
+          final kind = NostrKind.repost;
+          final eventId = _publisher!(kind, jsonEncode(post.toJson()), tags);
+
+          final tagStr = tags.map((t) => '[${t.join(',')}]').join(' ');
+          print('[FEED-REPOST] Publiziert kind=$kind tags=$tagStr '
+              'id=${eventId ?? 'null'}');
+
+          if (eventId != null) {
+            post = post.copyWith(nostrEventId: eventId);
+            await PodDatabase.instance.updateFeedPost(post.id, post.toJson());
+          }
+        }
+      } else {
+        final kind = NostrKind.textNote;
+        final eventId = _publisher!(kind, jsonEncode(post.toJson()), tags);
+        if (eventId != null) {
+          post = post.copyWith(nostrEventId: eventId);
+          await PodDatabase.instance.updateFeedPost(post.id, post.toJson());
+        }
       }
     }
 
@@ -355,15 +388,39 @@ class FeedService {
     await PodDatabase.instance.softDeleteFeedPost(postId);
     _posts.removeAt(idx);
 
-    // Publish Kind-5 deletion for the Nostr event (best-effort).
+    // Publish Kind-5 deletion for the Nostr event (best-effort, NIP-09).
     if (_publisher != null && post.nostrEventId != null) {
       _publisher!(
         NostrKind.deletion,
-        'Beitrag gelöscht',
-        [['e', post.nostrEventId!]],
+        '', // NIP-09: content should be empty or a human-readable reason
+        [
+          ['e', post.nostrEventId!],
+          ['t', 'nexus-dorfplatz'],
+        ],
       );
+      print('[FEED-DELETE] kind=5 publiziert für id=${post.nostrEventId}');
+    } else if (post.nostrEventId == null) {
+      print('[FEED-DELETE] Nur lokale Löschung (kein nostrEventId) für post ${post.id}');
     }
 
+    _streamController.add(null);
+  }
+
+  /// Handles incoming Kind-5 deletion events from other peers.
+  ///
+  /// [nostrEventIds] is the list of Nostr event IDs extracted from ['e'] tags.
+  /// Posts whose [FeedPost.nostrEventId] matches are soft-deleted locally.
+  Future<void> handleIncomingDelete(List<String> nostrEventIds) async {
+    if (nostrEventIds.isEmpty) return;
+    final idSet = nostrEventIds.toSet();
+    final toDelete = _posts.where((p) => p.nostrEventId != null && idSet.contains(p.nostrEventId)).toList();
+    if (toDelete.isEmpty) return;
+
+    for (final post in toDelete) {
+      await PodDatabase.instance.softDeleteFeedPost(post.id);
+      _posts.remove(post);
+    }
+    print('[FEED-DELETE] Empfangen kind=5: ${toDelete.length} posts gelöscht');
     _streamController.add(null);
   }
 

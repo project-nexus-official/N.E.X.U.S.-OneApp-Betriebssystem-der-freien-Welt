@@ -155,12 +155,16 @@ class _DorfplatzScreenState extends State<DorfplatzScreen>
           MaterialPageRoute(
             builder: (_) => CreatePostScreen(
               repostOf: post.id,
+              repostOfNostrEventId: post.nostrEventId,
               repostAuthorPseudonym: post.authorPseudonym,
               repostPreview: post.content.isNotEmpty
                   ? post.content
                   : post.images.isNotEmpty
                       ? '[Bild]'
                       : null,
+              repostOriginalImage: post.images.isNotEmpty
+                  ? post.images.first
+                  : null,
             ),
           ),
         );

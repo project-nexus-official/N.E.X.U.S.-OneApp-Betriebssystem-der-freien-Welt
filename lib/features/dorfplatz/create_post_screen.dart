@@ -19,11 +19,20 @@ class CreatePostScreen extends StatefulWidget {
   final String? repostAuthorPseudonym;
   final String? repostPreview;
 
+  /// Base64-encoded first image of the original post (for embedded card display).
+  final String? repostOriginalImage;
+
+  /// The real 64-char hex Nostr event ID of the original post.
+  /// Used in the NIP-18 ['e', ...] tag. Must NOT be the internal UUID.
+  final String? repostOfNostrEventId;
+
   const CreatePostScreen({
     super.key,
     this.repostOf,
     this.repostAuthorPseudonym,
     this.repostPreview,
+    this.repostOriginalImage,
+    this.repostOfNostrEventId,
   });
 
   @override
@@ -203,6 +212,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             widget.repostOf != null && _textCtrl.text.trim().isNotEmpty
                 ? _textCtrl.text.trim()
                 : null,
+        repostOriginalAuthorPseudonym: widget.repostAuthorPseudonym,
+        repostOriginalPreview: widget.repostPreview,
+        repostOriginalImage: widget.repostOriginalImage,
+        repostOfNostrEventId: widget.repostOfNostrEventId,
       );
 
       if (mounted) Navigator.of(context).pop(true);
