@@ -457,7 +457,7 @@ class CellService {
   /// [nostrCreatedAt] is the Nostr event's `created_at` Unix-seconds value.
   /// Announcements older than the last wipe are silently ignored so zombie
   /// cells from relays do not re-appear after a debug reset or cleanup.
-  void addDiscoveredCell(Cell cell, {int? nostrCreatedAt, bool ownDevice = false}) {
+  Future<void> addDiscoveredCell(Cell cell, {int? nostrCreatedAt, bool ownDevice = false}) async {
     print('[CELL-IMPORT] Incoming Kind-30000: cellId=${cell.id}, name="${cell.name}"');
     print('[CELL-IMPORT] Membership check: isMember=${_myCells.any((c) => c.id == cell.id)},'
         ' wasLeave=${_dismissedCellIds.contains(cell.id)}');
@@ -494,20 +494,18 @@ class CellService {
     final ownedIdx = _myCells.indexWhere((c) => c.id == cell.id);
     if (ownedIdx >= 0) {
       final existing = _myCells[ownedIdx];
-      if (ownDevice && existing.name != cell.name) {
-        // Multi-device rename: update only the name in-place so we don't
-        // overwrite local-only fields with the Nostr-echoed version.
-        print('[CELL-UPDATE] Decision: UPDATED reason=own_device_rename'
-            ' (${existing.name} → ${cell.name})');
+      if (existing.name != cell.name) {
+        // Name changed (own-device publish echo or cross-device rename):
+        // update only the name in-place so we don't overwrite local-only
+        // fields with the Nostr-echoed version.
+        final reason = ownDevice ? 'own_device_rename' : 'cross_device_rename';
+        print('[CELL-UPDATE] Name aktualisiert: "${existing.name}" → "${cell.name}", in DB gespeichert ($reason)');
         _myCells[ownedIdx] = existing.copyWith(name: cell.name);
-        PodDatabase.instance.upsertCell(
+        await PodDatabase.instance.upsertCell(
             cell.id, _myCells[ownedIdx].toJson());
         _notify();
       } else {
-        print('[ZOMBIE-V2] Decision: REJECTED (reason: already in myCells)');
-        print('[CELL-IMPORT] Decision: BLOCKED reason=already_in_myCells');
-        print('[CELL-UPDATE] Decision: SKIPPED reason='
-            '${ownDevice ? "own_device_echo_same_name" : "already_in_myCells"}');
+        print('[CELL-UPDATE] Decision: SKIPPED reason=name_unchanged (${existing.name})');
       }
       return;
     }
