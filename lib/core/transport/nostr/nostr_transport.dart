@@ -1556,25 +1556,29 @@ class NostrTransport implements MessageTransport {
       final isOwnPubkey = _keys != null && event.pubkey == _keys!.publicKeyHex;
 
       // ── ZOMBIE-V3 ────────────────────────────────────────────────────────
-      print('[ZOMBIE-V3] Nostr event: kind=30000, id=${event.id.substring(0, 8)}…,'
-          ' cellId=$cellId, name="$cellName",'
-          ' from=${event.pubkey.substring(0, 8)}…,'
-          ' self=$isOwnPubkey,'
-          ' deleted=$isDeletedByTag,'
-          ' createdAt=${event.createdAt}');
+      if (kDebugMode) {
+        print('[ZOMBIE-V3] Nostr event: kind=30000, id=${event.id.substring(0, 8)}…,'
+            ' cellId=$cellId, name="$cellName",'
+            ' from=${event.pubkey.substring(0, 8)}…,'
+            ' self=$isOwnPubkey,'
+            ' deleted=$isDeletedByTag,'
+            ' createdAt=${event.createdAt}');
+      }
       // ────────────────────────────────────────────────────────────────────
 
       // ── ZOMBIE-DIAG ─────────────────────────────────────────────────────
-      print('[ZOMBIE-DIAG] Incoming Kind-30000: "$cellName" id=$cellId'
-          '  deleted=$isDeletedByTag|${data['deleted']}'
-          '  createdAt=${event.createdAt}'
-          '  pubkey=${event.pubkey.substring(0, 8)}…');
+      if (kDebugMode) {
+        print('[ZOMBIE-DIAG] Incoming Kind-30000: "$cellName" id=$cellId'
+            '  deleted=$isDeletedByTag|${data['deleted']}'
+            '  createdAt=${event.createdAt}'
+            '  pubkey=${event.pubkey.substring(0, 8)}…');
+      }
       // ────────────────────────────────────────────────────────────────────
 
       // Dissolution marker: either via content JSON or via explicit tag.
       if (isDeletedByTag || data['deleted'] == true) {
         print('[CELL-DEL] Import blocked for cell $cellId (deleted flag)');
-        print('[ZOMBIE-DIAG]   RESULT: DISSOLUTION — emitting to cellDeleted stream');
+        if (kDebugMode) print('[ZOMBIE-DIAG]   RESULT: DISSOLUTION — emitting to cellDeleted stream');
         // Always emit — even for own-pubkey events.  The same seed may be
         // used on multiple devices; a dissolution published on Android must
         // also update the block list on Windows.
@@ -1604,7 +1608,7 @@ class NostrTransport implements MessageTransport {
 
       print('[CELL] Received cell announcement: $cellId ($cellName) '
           'from pubkey=${event.pubkey.substring(0, 8)}…');
-      print('[ZOMBIE-DIAG]   RESULT: ANNOUNCEMENT — passing to onCellAnnounced stream');
+      if (kDebugMode) print('[ZOMBIE-DIAG]   RESULT: ANNOUNCEMENT — passing to onCellAnnounced stream');
       _cellAnnouncedController.add({
         ...data,
         '_nostr_pubkey': event.pubkey,

@@ -109,8 +109,10 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // ── ZOMBIE-V3 startup diagnosis ───────────────────────────────────────────
-  print('[ZOMBIE-V3] === APP START ===');
-  print('[ZOMBIE-V3] Platform: ${Platform.operatingSystem}');
+  if (kDebugMode) {
+    print('[ZOMBIE-V3] === APP START ===');
+    print('[ZOMBIE-V3] Platform: ${Platform.operatingSystem}');
+  }
   // ──────────────────────────────────────────────────────────────────────────
 
   // Install Flutter/Dart error handlers before any other work.

@@ -273,16 +273,20 @@ class CellService {
       }
 
       // ── ZOMBIE-V2: startup diagnosis ──────────────────────────────────────
-      print('[ZOMBIE-V2] === APP START CELL DIAGNOSIS ===');
-      print('[ZOMBIE-V2] Loaded ${_deletedCellIds.length} tombstones: $_deletedCellIds');
-      print('[ZOMBIE-V2] Loaded ${_dismissedCellIds.length} dismissed: $_dismissedCellIds');
-      print('[ZOMBIE-V2] Wipe timestamp: ${rawWipeAt ?? "NOT SET"}');
+      if (kDebugMode) {
+        print('[ZOMBIE-V2] === APP START CELL DIAGNOSIS ===');
+        print('[ZOMBIE-V2] Loaded ${_deletedCellIds.length} tombstones: $_deletedCellIds');
+        print('[ZOMBIE-V2] Loaded ${_dismissedCellIds.length} dismissed: $_dismissedCellIds');
+        print('[ZOMBIE-V2] Wipe timestamp: ${rawWipeAt ?? "NOT SET"}');
+      }
       // ─────────────────────────────────────────────────────────────────────
 
       // ── ZOMBIE-V3: tombstone state at load time ───────────────────────────
-      print('[ZOMBIE-V3] Tombstones at load: ${_deletedCellIds.length} -> ${_deletedCellIds.toList()}');
-      print('[ZOMBIE-V3] Dismissed at load: ${_dismissedCellIds.length} -> ${_dismissedCellIds.toList()}');
-      print('[ZOMBIE-V3] WipeAt at load: ${rawWipeAt ?? "NOT SET"}');
+      if (kDebugMode) {
+        print('[ZOMBIE-V3] Tombstones at load: ${_deletedCellIds.length} -> ${_deletedCellIds.toList()}');
+        print('[ZOMBIE-V3] Dismissed at load: ${_dismissedCellIds.length} -> ${_dismissedCellIds.toList()}');
+        print('[ZOMBIE-V3] WipeAt at load: ${rawWipeAt ?? "NOT SET"}');
+      }
       // ─────────────────────────────────────────────────────────────────────
 
       // ── Schritt 4: Eigene Zellen aus DB laden ─────────────────────────────
@@ -291,13 +295,15 @@ class CellService {
       _myCells.clear();
 
       // ── ZOMBIE-V2: DB contents at startup ────────────────────────────────
-      print('[ZOMBIE-V2] DB cells count: ${rows.length}');
-      for (final row in rows) {
-        final cId = row['id'] as String? ?? '?';
-        final cName = row['name'] as String? ?? '?';
-        print('[ZOMBIE-V2] DB cell: "$cName" | id: $cId'
-            '  tombstoned=${_deletedCellIds.contains(cId)}'
-            '  dismissed=${_dismissedCellIds.contains(cId)}');
+      if (kDebugMode) {
+        print('[ZOMBIE-V2] DB cells count: ${rows.length}');
+        for (final row in rows) {
+          final cId = row['id'] as String? ?? '?';
+          final cName = row['name'] as String? ?? '?';
+          print('[ZOMBIE-V2] DB cell: "$cName" | id: $cId'
+              '  tombstoned=${_deletedCellIds.contains(cId)}'
+              '  dismissed=${_dismissedCellIds.contains(cId)}');
+        }
       }
       // ─────────────────────────────────────────────────────────────────────
 
@@ -307,19 +313,21 @@ class CellService {
       for (final row in rows) {
         final cell = Cell.fromJson(row);
         if (_deletedCellIds.contains(cell.id)) {
-          print('[ZOMBIE-V2] Removing tombstoned DB cell: "${cell.name}" ${cell.id}');
+          if (kDebugMode) print('[ZOMBIE-V2] Removing tombstoned DB cell: "${cell.name}" ${cell.id}');
           await PodDatabase.instance.deleteCell(cell.id);
           continue;
         }
         if (_dismissedCellIds.contains(cell.id)) {
-          print('[ZOMBIE-V2] Removing dismissed DB cell: "${cell.name}" ${cell.id}');
+          if (kDebugMode) print('[ZOMBIE-V2] Removing dismissed DB cell: "${cell.name}" ${cell.id}');
           await PodDatabase.instance.deleteCell(cell.id);
           continue;
         }
-        print('[ZOMBIE-V3] WRITE PATH: db_import, cellId=${cell.id}, name="${cell.name}"');
-        print('[ZOMBIE-V3] Is in tombstones? ${_deletedCellIds.contains(cell.id)}');
-        print('[ZOMBIE-V3] Is in dismissed? ${_dismissedCellIds.contains(cell.id)}');
-        print('[ZOMBIE-V3] Decision: ALLOWED (loaded from DB)');
+        if (kDebugMode) {
+          print('[ZOMBIE-V3] WRITE PATH: db_import, cellId=${cell.id}, name="${cell.name}"');
+          print('[ZOMBIE-V3] Is in tombstones? ${_deletedCellIds.contains(cell.id)}');
+          print('[ZOMBIE-V3] Is in dismissed? ${_dismissedCellIds.contains(cell.id)}');
+          print('[ZOMBIE-V3] Decision: ALLOWED (loaded from DB)');
+        }
         print('[CELL-IMPORT] DB load: cellId=${cell.id}, name="${cell.name}", role=see_members_table');
         print('[CELL-UPDATE] DB load: cellId=${cell.id}, name="${cell.name}", version=n/a');
         _myCells.add(cell);
@@ -426,22 +434,24 @@ class CellService {
   Future<void> restoreFromBackup(Map<String, dynamic> json) async {
     try {
       final cell = Cell.fromJson(json);
-      print('[ZOMBIE-V3] WRITE PATH: restoreFromBackup, cellId=${cell.id}, name="${cell.name}", source=backup');
-      print('[ZOMBIE-V3] Is in tombstones? ${_deletedCellIds.contains(cell.id)}');
-      print('[ZOMBIE-V3] Is in dismissed? ${_dismissedCellIds.contains(cell.id)}');
+      if (kDebugMode) {
+        print('[ZOMBIE-V3] WRITE PATH: restoreFromBackup, cellId=${cell.id}, name="${cell.name}", source=backup');
+        print('[ZOMBIE-V3] Is in tombstones? ${_deletedCellIds.contains(cell.id)}');
+        print('[ZOMBIE-V3] Is in dismissed? ${_dismissedCellIds.contains(cell.id)}');
+      }
       if (_deletedCellIds.contains(cell.id)) {
-        print('[ZOMBIE-V3] Decision: BLOCKED (tombstoned)');
+        if (kDebugMode) print('[ZOMBIE-V3] Decision: BLOCKED (tombstoned)');
         return; // dissolved — never restore
       }
       if (_dismissedCellIds.contains(cell.id)) {
-        print('[ZOMBIE-V3] Decision: BLOCKED (dismissed)');
+        if (kDebugMode) print('[ZOMBIE-V3] Decision: BLOCKED (dismissed)');
         return; // left — never restore
       }
       if (_myCells.any((c) => c.id == cell.id)) {
-        print('[ZOMBIE-V3] Decision: BLOCKED (already in myCells)');
+        if (kDebugMode) print('[ZOMBIE-V3] Decision: BLOCKED (already in myCells)');
         return;
       }
-      print('[ZOMBIE-V3] Decision: ALLOWED (restored from backup)');
+      if (kDebugMode) print('[ZOMBIE-V3] Decision: ALLOWED (restored from backup)');
       _myCells.add(cell);
       await PodDatabase.instance.upsertCell(cell.id, json);
       _notify();
@@ -461,17 +471,19 @@ class CellService {
     print('[CELL-IMPORT] Incoming Kind-30000: cellId=${cell.id}, name="${cell.name}"');
     print('[CELL-IMPORT] Membership check: isMember=${_myCells.any((c) => c.id == cell.id)},'
         ' wasLeave=${_dismissedCellIds.contains(cell.id)}');
-    print('[ZOMBIE-V3] WRITE PATH: addDiscoveredCell, cellId=${cell.id}, name="${cell.name}", source=Kind30000');
-    print('[ZOMBIE-V3] Is in tombstones? ${_deletedCellIds.contains(cell.id)}');
-    print('[ZOMBIE-V3] Is in dismissed? ${_dismissedCellIds.contains(cell.id)}');
-    print('[ZOMBIE-V3] WipeAt=$_wipeAt, nostrCreatedAt=$nostrCreatedAt, blocked_by_wipe=${_wipeAt != null && nostrCreatedAt != null && nostrCreatedAt < _wipeAt!}');
-    print('[ZOMBIE-V2] Event received: kind=30000, cellId=${cell.id},'
-        ' action=announcement, timestamp=$nostrCreatedAt');
-    print('[ZOMBIE-V2] Current state:'
-        ' inMyCells=${_myCells.any((c) => c.id == cell.id)}'
-        ' inDiscovered=${_discovered.any((c) => c.id == cell.id)}'
-        ' inTombstones=${_deletedCellIds.contains(cell.id)}'
-        ' inDismissed=${_dismissedCellIds.contains(cell.id)}');
+    if (kDebugMode) {
+      print('[ZOMBIE-V3] WRITE PATH: addDiscoveredCell, cellId=${cell.id}, name="${cell.name}", source=Kind30000');
+      print('[ZOMBIE-V3] Is in tombstones? ${_deletedCellIds.contains(cell.id)}');
+      print('[ZOMBIE-V3] Is in dismissed? ${_dismissedCellIds.contains(cell.id)}');
+      print('[ZOMBIE-V3] WipeAt=$_wipeAt, nostrCreatedAt=$nostrCreatedAt, blocked_by_wipe=${_wipeAt != null && nostrCreatedAt != null && nostrCreatedAt < _wipeAt!}');
+      print('[ZOMBIE-V2] Event received: kind=30000, cellId=${cell.id},'
+          ' action=announcement, timestamp=$nostrCreatedAt');
+      print('[ZOMBIE-V2] Current state:'
+          ' inMyCells=${_myCells.any((c) => c.id == cell.id)}'
+          ' inDiscovered=${_discovered.any((c) => c.id == cell.id)}'
+          ' inTombstones=${_deletedCellIds.contains(cell.id)}'
+          ' inDismissed=${_dismissedCellIds.contains(cell.id)}');
+    }
 
     // Check tombstone first — dissolved cells NEVER come back.
     final existingOwned = _myCells.where((c) => c.id == cell.id).firstOrNull;
@@ -485,8 +497,10 @@ class CellService {
     }
     print('[CELL-UPDATE] WARNING: No version check found');
     if (_deletedCellIds.contains(cell.id)) {
-      print('[ZOMBIE-V2] Import blocked by tombstone: ${cell.id}');
-      print('[ZOMBIE-V2] Decision: REJECTED (reason: cell tombstoned/dissolved)');
+      if (kDebugMode) {
+        print('[ZOMBIE-V2] Import blocked by tombstone: ${cell.id}');
+        print('[ZOMBIE-V2] Decision: REJECTED (reason: cell tombstoned/dissolved)');
+      }
       print('[CELL-IMPORT] Decision: BLOCKED reason=tombstoned');
       print('[CELL-UPDATE] Decision: SKIPPED reason=tombstoned');
       return;
@@ -511,7 +525,7 @@ class CellService {
     }
     if (_dismissedCellIds.contains(cell.id)) {
       print('[CELL-DEL] Import blocked for cell ${cell.id} (on block list)');
-      print('[ZOMBIE-V2] Decision: REJECTED (reason: dismissed/left)');
+      if (kDebugMode) print('[ZOMBIE-V2] Decision: REJECTED (reason: dismissed/left)');
       print('[CELL-IMPORT] Decision: BLOCKED reason=dismissed_left');
       print('[CELL-UPDATE] Decision: SKIPPED reason=dismissed_left');
       return;
@@ -521,7 +535,7 @@ class CellService {
         nostrCreatedAt < _wipeAt!) {
       print('[CELL-DEL] Import blocked for cell ${cell.id} '
           '(event $nostrCreatedAt < wipe $_wipeAt)');
-      print('[ZOMBIE-V2] Decision: REJECTED (reason: older than wipe timestamp)');
+      if (kDebugMode) print('[ZOMBIE-V2] Decision: REJECTED (reason: older than wipe timestamp)');
       print('[CELL-IMPORT] Decision: BLOCKED reason=older_than_wipe');
       print('[CELL-UPDATE] Decision: SKIPPED reason=older_than_wipe');
       return;
@@ -529,8 +543,10 @@ class CellService {
     _discovered.removeWhere((c) => c.id == cell.id);
     _discovered.add(cell);
     _notify();
-    print('[ZOMBIE-V3] Decision: ALLOWED (added to discovered)');
-    print('[ZOMBIE-V2] Decision: ADDED to discovered');
+    if (kDebugMode) {
+      print('[ZOMBIE-V3] Decision: ALLOWED (added to discovered)');
+      print('[ZOMBIE-V2] Decision: ADDED to discovered');
+    }
     print('[CELL-IMPORT] Decision: ALLOWED reason=new_discovery');
     print('[CELL-UPDATE] Decision: UPDATED reason=added_to_discovered');
   }
@@ -668,7 +684,7 @@ class CellService {
       onPublishJoinRequest!(req.toJson());
       print('[JOIN] Request sent to cell: ${cell.name} (founder receives via Kind-31003)');
     } else {
-      debugPrint('[JOIN-DIAG] onPublishJoinRequest is NULL — request NOT sent over network!');
+      if (kDebugMode) debugPrint('[JOIN-DIAG] onPublishJoinRequest is NULL — request NOT sent over network!');
     }
   }
 
@@ -753,7 +769,7 @@ class CellService {
       onPublishMembershipConfirmed!(cell.toJson(), newMember.toJson(), requesterPubkey);
       print('[JOIN] Confirmation sent to applicant: ${requesterPubkey.substring(0, 8)}…');
     } else if (requesterPubkey.isEmpty) {
-      debugPrint('[JOIN-DIAG] requesterNostrPubkey unknown — cannot send Kind-31004 confirmation');
+      if (kDebugMode) debugPrint('[JOIN-DIAG] requesterNostrPubkey unknown — cannot send Kind-31004 confirmation');
     }
 
     // Post welcome message in discussion channel (fire-and-forget).
@@ -809,8 +825,10 @@ class CellService {
     await prefs.setString(
         _dismissedKey, jsonEncode(_dismissedCellIds.toList()));
     if (isNew) {
-      print('[ZOMBIE-V2] Storing tombstone for cellId: $cellId');
-      print('[ZOMBIE-V2] Tombstone list size: ${_deletedCellIds.length}');
+      if (kDebugMode) {
+        print('[ZOMBIE-V2] Storing tombstone for cellId: $cellId');
+        print('[ZOMBIE-V2] Tombstone list size: ${_deletedCellIds.length}');
+      }
     }
   }
 
@@ -1069,26 +1087,30 @@ class CellService {
     print('[CELL-IMPORT] Incoming Kind-31004: cellId=${cell.id}, name="${cell.name}"');
     print('[CELL-IMPORT] Membership check: isMember=${_myCells.any((c) => c.id == cell.id)},'
         ' wasLeave=${_dismissedCellIds.contains(cell.id)}');
-    print('[ZOMBIE-V3] WRITE PATH: handleMembershipConfirmed, cellId=${cell.id}, name="${cell.name}", source=Kind31004');
-    print('[ZOMBIE-V3] Is in tombstones? ${_deletedCellIds.contains(cell.id)}');
-    print('[ZOMBIE-V3] Is in dismissed? ${_dismissedCellIds.contains(cell.id)}');
-    print('[ZOMBIE-V2] Event received: kind=31004, cellId=${cell.id},'
-        ' action=membership_confirmed');
-    print('[ZOMBIE-V2] Current state:'
-        ' inMyCells=${_myCells.any((c) => c.id == cell.id)}'
-        ' inTombstones=${_deletedCellIds.contains(cell.id)}'
-        ' inDismissed=${_dismissedCellIds.contains(cell.id)}');
+    if (kDebugMode) {
+      print('[ZOMBIE-V3] WRITE PATH: handleMembershipConfirmed, cellId=${cell.id}, name="${cell.name}", source=Kind31004');
+      print('[ZOMBIE-V3] Is in tombstones? ${_deletedCellIds.contains(cell.id)}');
+      print('[ZOMBIE-V3] Is in dismissed? ${_dismissedCellIds.contains(cell.id)}');
+      print('[ZOMBIE-V2] Event received: kind=31004, cellId=${cell.id},'
+          ' action=membership_confirmed');
+      print('[ZOMBIE-V2] Current state:'
+          ' inMyCells=${_myCells.any((c) => c.id == cell.id)}'
+          ' inTombstones=${_deletedCellIds.contains(cell.id)}'
+          ' inDismissed=${_dismissedCellIds.contains(cell.id)}');
+    }
 
     // Guard 1 (pre-await): check tombstone + dismissed.
     if (_deletedCellIds.contains(cell.id)) {
-      print('[ZOMBIE-V2] Import blocked by tombstone: ${cell.id}');
-      print('[ZOMBIE-V2] Decision: REJECTED (reason: cell tombstoned/dissolved)');
+      if (kDebugMode) {
+        print('[ZOMBIE-V2] Import blocked by tombstone: ${cell.id}');
+        print('[ZOMBIE-V2] Decision: REJECTED (reason: cell tombstoned/dissolved)');
+      }
       print('[CELL-IMPORT] Decision: BLOCKED reason=tombstoned');
       return;
     }
     if (_dismissedCellIds.contains(cell.id)) {
       print('[JOIN] Ignoring membership confirmation for dismissed cell: ${cell.id}');
-      print('[ZOMBIE-V2] Decision: REJECTED (reason: dismissed/left)');
+      if (kDebugMode) print('[ZOMBIE-V2] Decision: REJECTED (reason: dismissed/left)');
       print('[CELL-IMPORT] Decision: BLOCKED reason=dismissed_left');
       return;
     }
@@ -1102,15 +1124,19 @@ class CellService {
           _dismissedCellIds.contains(cell.id)) {
         // Undo the DB insert — tombstone wins.
         await PodDatabase.instance.deleteCell(cell.id);
-        print('[ZOMBIE-V2] Post-await guard triggered for ${cell.id} —'
-            ' tombstone arrived during DB write, rolling back');
-        print('[ZOMBIE-V2] Decision: REJECTED (reason: tombstone arrived during await)');
+        if (kDebugMode) {
+          print('[ZOMBIE-V2] Post-await guard triggered for ${cell.id} —'
+              ' tombstone arrived during DB write, rolling back');
+          print('[ZOMBIE-V2] Decision: REJECTED (reason: tombstone arrived during await)');
+        }
         print('[CELL-IMPORT] Decision: BLOCKED reason=post_await_tombstone');
         return;
       }
 
-      print('[ZOMBIE-V3] Decision: ALLOWED (added to myCells, source: Kind31004)');
-      print('[ZOMBIE-V2] Decision: ADDED to myCells (source: membership_confirmed)');
+      if (kDebugMode) {
+        print('[ZOMBIE-V3] Decision: ALLOWED (added to myCells, source: Kind31004)');
+        print('[ZOMBIE-V2] Decision: ADDED to myCells (source: membership_confirmed)');
+      }
       print('[CELL-IMPORT] Decision: ALLOWED reason=membership_confirmed_Kind31004');
       _myCells.add(cell);
       _members[cell.id] = [];
@@ -1282,7 +1308,7 @@ class CellService {
       ..._myCells.map((c) => c.id),
       ..._discovered.map((c) => c.id),
     };
-    print('[CELL-WIPE] Collected ${allKnownIds.length} cell IDs to dismiss: $allKnownIds');
+    if (kDebugMode) print('[CELL-WIPE] Collected ${allKnownIds.length} cell IDs to dismiss: $allKnownIds');
 
     // 2. Set wipe timestamp (blocks unknown relay cells without IDs).
     _wipeAt = DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000;
@@ -1317,8 +1343,10 @@ class CellService {
     _myRequests.clear();
 
     _notify();
-    print('[CELL-WIPE] Nuclear wipe complete.'
-        ' WipeAt=$_wipeAt dismissed=${_dismissedCellIds.length}');
+    if (kDebugMode) {
+      print('[CELL-WIPE] Nuclear wipe complete.'
+          ' WipeAt=$_wipeAt dismissed=${_dismissedCellIds.length}');
+    }
   }
 
   /// Tombstones every cell currently in [_discovered] so they never re-appear
@@ -1329,12 +1357,16 @@ class CellService {
   ///
   /// Returns the number of cells that were tombstoned.
   Future<int> tombstoneAllDiscovered() async {
-    print('[ZOMBIE-CLEANUP] === Starting discovered cells tombstoning ===');
+    if (kDebugMode) {
+      print('[ZOMBIE-CLEANUP] === Starting discovered cells tombstoning ===');
+    }
 
     final discoveredIds = _discovered.map((c) => c.id).toList();
-    print('[ZOMBIE-CLEANUP] Found ${discoveredIds.length} discovered cells');
-    for (final cell in _discovered) {
-      print('[ZOMBIE-CLEANUP]   - ${cell.id} ("${cell.name}")');
+    if (kDebugMode) {
+      print('[ZOMBIE-CLEANUP] Found ${discoveredIds.length} discovered cells');
+      for (final cell in _discovered) {
+        print('[ZOMBIE-CLEANUP]   - ${cell.id} ("${cell.name}")');
+      }
     }
 
     _deletedCellIds.addAll(discoveredIds);
@@ -1362,7 +1394,7 @@ class CellService {
     _discovered.clear();
     _notify();
 
-    print('[ZOMBIE-CLEANUP] === Done: ${discoveredIds.length} cells tombstoned ===');
+    if (kDebugMode) print('[ZOMBIE-CLEANUP] === Done: ${discoveredIds.length} cells tombstoned ===');
     return discoveredIds.length;
   }
 

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'nostr_event.dart';
@@ -292,7 +293,7 @@ class NostrRelayManager {
         data.contains('NOTICE') ||
         data.contains('vote') ||
         data.contains('proposal')) {
-      print('[RELAY-RAW] ${_shortUrl(url)}: $data');
+      if (kDebugMode) print('[RELAY-RAW] ${_shortUrl(url)}: $data');
     }
 
     try {

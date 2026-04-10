@@ -578,9 +578,11 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       // Even if _handleCellAnnounceEvent already filtered self-events,
       // a second layer here catches any future path that emits to the stream.
       if (CellService.instance.isTombstoned(cell.id)) {
-        print('[ZOMBIE-FIX] Blocked in _onCellAnnounced (tombstone): '
-            '${cell.id} ("${cell.name}")');
-        print('[CELL-UPDATE] Decision: SKIPPED reason=tombstoned_in_chat_provider');
+        if (kDebugMode) {
+          print('[ZOMBIE-FIX] Blocked in _onCellAnnounced (tombstone): '
+              '${cell.id} ("${cell.name}")');
+          print('[CELL-UPDATE] Decision: SKIPPED reason=tombstoned_in_chat_provider');
+        }
         return;
       }
       // ─────────────────────────────────────────────────────────────────────

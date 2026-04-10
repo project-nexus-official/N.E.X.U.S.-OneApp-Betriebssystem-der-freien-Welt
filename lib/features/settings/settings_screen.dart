@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
@@ -25,12 +26,7 @@ import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/update_bottom_sheet.dart';
 import '../chat/chat_provider.dart';
 import '../contacts/widgets/trust_badge.dart';
-import '../../features/governance/cell.dart';
-import '../../features/governance/cell_member.dart';
 import '../../features/governance/cell_service.dart';
-import '../../features/governance/proposal.dart';
-import '../../features/governance/proposal_service.dart';
-import '../../features/governance/vote.dart';
 import 'admin_cell_management_screen.dart';
 import 'admin_management_screen.dart';
 import 'nostr_settings_screen.dart';
@@ -131,7 +127,6 @@ class SettingsScreen extends StatelessWidget {
             onTap: () => _showAbout(context),
           ),
           const _AppVersionSection(),
-          const _G2DebugSection(),
         ],
       ),
     );
@@ -356,7 +351,7 @@ class _NachrichtenSectionState extends State<_NachrichtenSection> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Alle Nachrichten löschen?'),
+        title: const Text('Alle Nachrichten unwiderruflich löschen?'),
         content: const Text(
           'Alle gespeicherten Nachrichten werden unwiderruflich gelöscht. '
           'Diese Aktion kann nicht rückgängig gemacht werden.',
@@ -780,240 +775,9 @@ class _AdminSection extends StatelessWidget {
             onTap: () => _nuclearWipeCells(context),
           ),
           // ── END CELL WIPE ────────────────────────────────────────────────
-          // ── MEMBERSHIP REPAIR ────────────────────────────────────────────
-          ListTile(
-            leading: const Icon(Icons.build, color: Colors.green),
-            title: const Text('🔧 Membership reparieren'),
-            subtitle: const Text(
-              'Stellt FOUNDER-Status für eigene Cells wieder her '
-              '(nach Nuclear Wipe Vorfall)',
-              style: TextStyle(fontSize: 11),
-            ),
-            onTap: () => _runMembershipRepair(context),
-          ),
-          // ── END MEMBERSHIP REPAIR ────────────────────────────────────────
-          // ── CLAIM DISCOVERED CELL ────────────────────────────────────────
-          ListTile(
-            leading: const Icon(Icons.home_work, color: Colors.green),
-            title: const Text('🏠 Discovered Cell übernehmen'),
-            subtitle: const Text(
-              'Nimmt eine entdeckte Cell als eigene Zelle (Founder) zurück',
-              style: TextStyle(fontSize: 11),
-            ),
-            onTap: () => _claimDiscoveredCell(context),
-          ),
-          // ── END CLAIM DISCOVERED CELL ─────────────────────────────────────
-          // ── ZOMBIE TOMBSTONE ─────────────────────────────────────────────
-          ListTile(
-            leading: const Icon(Icons.delete_sweep, color: Colors.orange),
-            title: const Text('🪦 Discovered Zombies tombstonen'),
-            subtitle: const Text(
-              'Markiert alle aktuell entdeckten Cells als gelöscht '
-              'damit sie nicht zurückkommen',
-              style: TextStyle(fontSize: 11),
-            ),
-            onTap: () => _tombstoneZombies(context),
-          ),
-          // ── END ZOMBIE TOMBSTONE ─────────────────────────────────────────
         ],
       ],
     );
-  }
-
-  Future<void> _claimDiscoveredCell(BuildContext context) async {
-    final discovered = CellService.instance.discoveredCells;
-    if (discovered.isEmpty) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Keine entdeckten Cells vorhanden.'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
-    // Let the user pick a cell.
-    final cell = await showDialog<Cell>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: const Text('🏠 Welche Cell übernehmen?'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: discovered.length,
-            itemBuilder: (_, i) {
-              final c = discovered[i];
-              final shortId = c.id.length > 16
-                  ? '${c.id.substring(0, 8)}…${c.id.substring(c.id.length - 8)}'
-                  : c.id;
-              return ListTile(
-                title: Text(c.name,
-                    style: const TextStyle(color: AppColors.onDark)),
-                subtitle: Text(shortId,
-                    style:
-                        const TextStyle(fontSize: 11, color: Colors.white54)),
-                onTap: () => Navigator.of(ctx).pop(c),
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Abbrechen'),
-          ),
-        ],
-      ),
-    );
-
-    if (cell == null || !context.mounted) return;
-
-    // Confirmation dialog.
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: const Text('Cell als Founder übernehmen?'),
-        content: Text(
-          '"${cell.name}" wird in deine eigenen Zellen aufgenommen '
-          'und du wirst als Founder eingetragen.\n\n'
-          'Du solltest nur Cells übernehmen, die du selbst erstellt hast.',
-          style: const TextStyle(color: AppColors.onDark),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Abbrechen'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.gold),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Cell übernehmen',
-                style: TextStyle(color: Colors.black)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true || !context.mounted) return;
-
-    final ok = await CellService.instance.claimDiscoveredCell(cell.id);
-
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(ok
-            ? '✅ Cell "${cell.name}" wiederhergestellt'
-            : '❌ Fehler: Cell nicht gefunden'),
-        backgroundColor: ok ? Colors.green : Colors.red,
-        duration: const Duration(seconds: 4),
-      ),
-    );
-  }
-
-  Future<void> _tombstoneZombies(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: const Text('Discovered Zombies tombstonen?'),
-        content: const Text(
-          'Alle aktuell im Cell-Hub angezeigten "entdeckten" '
-          'Cells werden dauerhaft als gelöscht markiert. '
-          'Sie kommen auch nach einem Neustart nicht zurück.\n\n'
-          'Eigene Cells in der DB werden NICHT angetastet.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Abbrechen'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Tombstonen'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true || !context.mounted) return;
-
-    final count = await CellService.instance.tombstoneAllDiscovered();
-
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('🪦 $count Zombie-Cells tombstoned'),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 4),
-        ),
-      );
-    }
-  }
-
-  Future<void> _runMembershipRepair(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: const Text('Membership reparieren?'),
-        content: const Text(
-          'Diese Aktion prüft alle Cells in deiner DB und fügt einen '
-          'FOUNDER-Eintrag hinzu, wenn deine DID die createdBy-DID ist '
-          'und noch kein Membership-Eintrag existiert.\n\n'
-          'Es werden nur Einträge HINZUGEFÜGT, niemals gelöscht oder '
-          'überschrieben.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Abbrechen'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Reparatur starten'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true || !context.mounted) return;
-
-    try {
-      final result =
-          await CellService.instance.repairFounderMemberships();
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '✅ Reparatur abgeschlossen: '
-              '${result['checked']} geprüft, '
-              '${result['repaired']} repariert, '
-              '${result['skipped']} übersprungen',
-            ),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 6),
-          ),
-        );
-      }
-    } catch (e, stack) {
-      print('[REPAIR] EXCEPTION: $e');
-      print('[REPAIR] Stack: $stack');
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ Fehler: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
   }
 
   Future<void> _confirmTransfer(BuildContext context, String myDid) async {
@@ -1123,19 +887,15 @@ class _AdminSection extends StatelessWidget {
   }
 
   Future<void> _nuclearWipeCells(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
+    final confirmed1 = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surface,
         title: const Text('☢️ Alle Zellen löschen?',
             style: TextStyle(color: Colors.redAccent)),
         content: const Text(
-          'Löscht ALLE Zell-Daten:\n'
-          '• Datenbank (cells, members, requests)\n'
-          '• SharedPreferences (Block-Listen, Wipe-Timestamp)\n'
-          '• In-Memory-Zustand\n\n'
-          'Nostr-Relay-Events älter als JETZT werden dauerhaft ignoriert.\n\n'
-          'Nicht rückgängig zu machen!',
+          'Achtung: Diese Aktion löscht ALLE Zellen-Daten '
+          'unwiderruflich. Bist du sicher?',
         ),
         actions: [
           TextButton(
@@ -1143,13 +903,36 @@ class _AdminSection extends StatelessWidget {
               child: const Text('Abbrechen')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Löschen',
+            child: const Text('Ja, löschen',
                 style: TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),
     );
-    if (confirmed != true || !context.mounted) return;
+    if (confirmed1 != true || !context.mounted) return;
+
+    final confirmed2 = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Wirklich alle Zellen löschen?',
+            style: TextStyle(color: Colors.redAccent)),
+        content: const Text(
+          'Dies kann nicht rückgängig gemacht werden.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abbrechen')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Endgültig löschen',
+                style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed2 != true || !context.mounted) return;
 
     await CellService.instance.nuclearWipe();
 
@@ -1212,16 +995,18 @@ class _AdminSection extends StatelessWidget {
       }.toList();
 
       // ── ZOMBIE-DIAG: Cleanup pressed ────────────────────────────────────
-      print('[ZOMBIE-DIAG] === CLEANUP PRESSED ===');
-      print('[ZOMBIE-DIAG] DB cells to clean: $cellCount');
-      for (final c in cells) {
-        print('[ZOMBIE-DIAG]   DB cell: "${c['name']}" id=${c['id']}');
+      if (kDebugMode) {
+        print('[ZOMBIE-DIAG] === CLEANUP PRESSED ===');
+        print('[ZOMBIE-DIAG] DB cells to clean: $cellCount');
+        for (final c in cells) {
+          print('[ZOMBIE-DIAG]   DB cell: "${c['name']}" id=${c['id']}');
+        }
+        print('[ZOMBIE-DIAG] Discovered cells (in-memory): ${discoveredIds.length}');
+        for (final id in discoveredIds) {
+          print('[ZOMBIE-DIAG]   Discovered id: $id');
+        }
+        print('[ZOMBIE-DIAG] allCellIds to block: $allCellIds');
       }
-      print('[ZOMBIE-DIAG] Discovered cells (in-memory): ${discoveredIds.length}');
-      for (final id in discoveredIds) {
-        print('[ZOMBIE-DIAG]   Discovered id: $id');
-      }
-      print('[ZOMBIE-DIAG] allCellIds to block: $allCellIds');
       // ────────────────────────────────────────────────────────────────────
 
       // ── STEP 1: Block ALL cell IDs + record wipe timestamp ──
@@ -1234,15 +1019,17 @@ class _AdminSection extends StatelessWidget {
           ' (${cellCount} persisted + ${discoveredIds.length} discovered)');
 
       // ── ZOMBIE-DIAG: Verify what was actually saved ───────────────────
-      final verifyPrefs = await SharedPreferences.getInstance();
-      final savedRaw = verifyPrefs.getString('nexus_dismissed_cell_ids');
-      final savedWipe = verifyPrefs.getInt('nexus_cell_wipe_at');
-      final savedIds = savedRaw != null
-          ? (jsonDecode(savedRaw) as List<dynamic>).cast<String>()
-          : <String>[];
-      print('[ZOMBIE-DIAG] Block list AFTER save: ${savedIds.length} entries');
-      print('[ZOMBIE-DIAG] Block list content: $savedIds');
-      print('[ZOMBIE-DIAG] Wipe timestamp saved: ${savedWipe ?? "NOT SAVED"}');
+      if (kDebugMode) {
+        final verifyPrefs = await SharedPreferences.getInstance();
+        final savedRaw = verifyPrefs.getString('nexus_dismissed_cell_ids');
+        final savedWipe = verifyPrefs.getInt('nexus_cell_wipe_at');
+        final savedIds = savedRaw != null
+            ? (jsonDecode(savedRaw) as List<dynamic>).cast<String>()
+            : <String>[];
+        print('[ZOMBIE-DIAG] Block list AFTER save: ${savedIds.length} entries');
+        print('[ZOMBIE-DIAG] Block list content: $savedIds');
+        print('[ZOMBIE-DIAG] Wipe timestamp saved: ${savedWipe ?? "NOT SAVED"}');
+      }
       // ─────────────────────────────────────────────────────────────────
 
       // ── STEP 2: Publish dissolution events for cells where we are founder ──
@@ -1488,445 +1275,5 @@ class _BackupSectionState extends State<_BackupSection> {
         ),
       ],
     );
-  }
-}
-
-// ── G2 Debug Section (temporär – wird nach Prompt 1C entfernt) ─────────────────
-
-/// Nur sichtbar für Superadmin.  Enthält Buttons zum manuellen Testen der
-/// G2-Governance-Funktionalität ohne UI (Prompt 1C kommt später).
-class _G2DebugSection extends StatelessWidget {
-  const _G2DebugSection();
-
-  @override
-  Widget build(BuildContext context) {
-    final myDid = IdentityService.instance.currentIdentity?.did ?? '';
-    if (!RoleService.instance.isSuperadmin(myDid)) return const SizedBox.shrink();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const _SectionHeader('🧪 G2 Debug (temporär)'),
-        _debugTile(
-          context,
-          icon: Icons.add_task,
-          label: 'G2 Test-Antrag erstellen',
-          onTap: () => _createTestProposal(context),
-        ),
-        _debugTile(
-          context,
-          icon: Icons.how_to_vote_outlined,
-          label: 'G2 Test-Antrag → Voting starten',
-          onTap: () => _startTestVoting(context),
-        ),
-        _debugTile(
-          context,
-          icon: Icons.thumb_up_outlined,
-          label: 'G2 Test-Vote: JA',
-          onTap: () => _castTestVote(context, VoteChoice.YES, 'Debug Test JA'),
-        ),
-        _debugTile(
-          context,
-          icon: Icons.thumb_down_outlined,
-          label: 'G2 Test-Vote: NEIN',
-          onTap: () => _castTestVote(context, VoteChoice.NO, 'Debug Test NEIN'),
-        ),
-        _debugTile(
-          context,
-          icon: Icons.fast_forward,
-          label: 'G2 Test-Voting beenden (Force)',
-          onTap: () => _forceFinalize(context),
-        ),
-        _debugTile(
-          context,
-          icon: Icons.receipt_long,
-          label: 'G2 Audit-Log anzeigen',
-          onTap: () => _showAuditLog(context),
-        ),
-        _debugTile(
-          context,
-          icon: Icons.delete_sweep,
-          label: '🗑️ G2 Test-Anträge löschen',
-          onTap: () => _cleanupTestProposals(context),
-        ),
-        _debugTile(
-          context,
-          icon: Icons.delete_forever,
-          label: '☢️ ALLE Anträge löschen (Debug)',
-          onTap: () => _confirmDeleteAllProposals(context),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-          child: Text(
-            'Diese Buttons werden nach Prompt 1C (UI) entfernt.',
-            style: TextStyle(
-              fontSize: 11,
-              color: Colors.amber.withValues(alpha: 0.6),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _debugTile(BuildContext context,
-      {required IconData icon,
-      required String label,
-      required VoidCallback onTap}) {
-    return ListTile(
-      dense: true,
-      leading: Icon(icon, color: Colors.amber, size: 20),
-      title: Text(label,
-          style: const TextStyle(color: Colors.amber, fontSize: 14)),
-      onTap: onTap,
-    );
-  }
-
-  // ── Helpers ─────────────────────────────────────────────────────────────────
-
-  /// Finds the newest proposal (ANY title) in [status], across all known proposals.
-  Proposal? _findAnyProposal(ProposalStatus status) {
-    final all = ProposalService.instance.allProposals;
-    print('[G2-DEBUG] All proposals: ${all.length}');
-    for (final p in all) {
-      print('[G2-DEBUG]   - "${p.title}" status=${p.status.name} cell=${p.cellId}');
-    }
-    print('[G2-DEBUG] Searching for status: ${status.name}');
-
-    final matching = all
-        .where((p) => p.status == status)
-        .toList()
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    final found = matching.firstOrNull;
-    if (found != null) {
-      print('[G2-DEBUG] Found: ${found.title} (${found.id})');
-    } else {
-      print('[G2-DEBUG] None found in status ${status.name}');
-    }
-    return found;
-  }
-
-  /// Finds the newest proposal overall (any status, any title).
-  Proposal? _findNewestProposal() {
-    print('[G2-DEBUG] Searching for newest proposal (any status)');
-    final proposals = List<Proposal>.from(ProposalService.instance.allProposals)
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    final found = proposals.firstOrNull;
-    if (found != null) {
-      print('[G2-DEBUG] Found: ${found.title}');
-    } else {
-      print('[G2-DEBUG] None found');
-    }
-    return found;
-  }
-
-  void _snack(BuildContext context, String msg,
-      {bool error = false}) {
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      backgroundColor: error ? Colors.red.shade700 : Colors.green.shade700,
-      duration: const Duration(seconds: 4),
-    ));
-  }
-
-  // ── Button handlers ──────────────────────────────────────────────────────────
-
-  Future<void> _createTestProposal(BuildContext context) async {
-    print('[G2-DEBUG] _createTestProposal called');
-    final myDid = IdentityService.instance.currentIdentity?.did ?? '';
-    final myPseudonym = IdentityService.instance.currentIdentity?.pseudonym ?? '';
-
-    // Finde erste Zelle in der der User bestätigtes Mitglied ist.
-    final cells = CellService.instance.myCells;
-    String? cellId;
-    for (final cell in cells) {
-      final membership = CellService.instance.myMembershipIn(cell.id);
-      if (membership != null &&
-          membership.isConfirmed &&
-          membership.role != MemberRole.pending) {
-        cellId = cell.id;
-        break;
-      }
-    }
-
-    if (cellId == null) {
-      print('[G2-DEBUG] No cell found');
-      _snack(context, 'Erstelle zuerst eine Zelle', error: true);
-      return;
-    }
-
-    try {
-      final proposal = await ProposalService.instance.createDraft(
-        cellId: cellId,
-        creatorDid: myDid,
-        creatorPseudonym: myPseudonym,
-        title: 'G2 Test-Antrag ${DateTime.now().toIso8601String().substring(0, 19)}',
-        description: 'Dies ist ein automatischer Test-Antrag für G2. '
-            'Status wird sofort auf DISCUSSION gesetzt.',
-        category: 'Sonstiges',
-      );
-      print('[G2-DEBUG] Draft created: ${proposal.id}');
-
-      await ProposalService.instance.publishToDiscussion(proposal.id);
-      print('[G2-DEBUG] Published to DISCUSSION: ${proposal.id}');
-
-      _snack(context,
-          '✅ Test-Antrag erstellt und publiziert: ${proposal.id.substring(0, 8)}…');
-    } catch (e) {
-      print('[G2-DEBUG] _createTestProposal error: $e');
-      _snack(context, '❌ Fehler: $e', error: true);
-    }
-  }
-
-  Future<void> _startTestVoting(BuildContext context) async {
-    print('[G2-DEBUG] _startTestVoting called');
-    final p = _findAnyProposal(ProposalStatus.DISCUSSION);
-    if (p == null) {
-      _snack(context,
-          'Kein passender Antrag gefunden (Status: DISCUSSION)',
-          error: true);
-      return;
-    }
-    try {
-      await ProposalService.instance.startVoting(p.id);
-      print('[G2-DEBUG] Voting started: ${p.id}');
-      _snack(context, '✅ Voting starten: ${p.title}');
-    } catch (e) {
-      print('[G2-DEBUG] _startTestVoting error: $e');
-      _snack(context, '❌ Fehler: $e', error: true);
-    }
-  }
-
-  Future<void> _castTestVote(
-      BuildContext context, VoteChoice choice, String reasoning) async {
-    print('[G2-DEBUG] _castTestVote: $choice');
-    final p = _findAnyProposal(ProposalStatus.VOTING);
-    if (p == null) {
-      _snack(context,
-          'Kein passender Antrag gefunden (Status: VOTING)',
-          error: true);
-      return;
-    }
-    try {
-      await ProposalService.instance.castVote(p.id, choice, reasoning: reasoning);
-      print('[G2-DEBUG] Vote cast: $choice on ${p.id}');
-      _snack(context, '✅ ${choice.name}: ${p.title}');
-    } catch (e) {
-      print('[G2-DEBUG] _castTestVote error: $e');
-      _snack(context, '❌ Fehler: $e', error: true);
-    }
-  }
-
-  Future<void> _forceFinalize(BuildContext context) async {
-    print('[G2-DEBUG] _forceFinalize called');
-    final p = _findAnyProposal(ProposalStatus.VOTING);
-    if (p == null) {
-      _snack(context,
-          'Kein passender Antrag gefunden (Status: VOTING)',
-          error: true);
-      return;
-    }
-    try {
-      // Voting-Deadline auf jetzt setzen damit Grace-Period sofort endet.
-      p.votingEndsAt = DateTime.now().toUtc().subtract(const Duration(seconds: 1));
-      p.gracePeriodHours = 0;
-      await PodDatabase.instance.upsertProposal(p.id, p.cellId, p.toMap());
-      print('[G2-DEBUG] votingEndsAt forced to now, gracePeriodHours=0');
-
-      await ProposalService.instance.processGracePeriodStart(p.id);
-      print('[G2-DEBUG] Grace period started');
-
-      await ProposalService.instance.finalizeProposal(p.id);
-      print('[G2-DEBUG] Proposal finalized');
-
-      final result = p.resultSummary ?? '?';
-      _snack(context, '✅ Finalisiert: ${p.title} → $result '
-          '(J:${p.resultYes ?? 0} N:${p.resultNo ?? 0} '
-          'E:${p.resultAbstain ?? 0})');
-    } catch (e) {
-      print('[G2-DEBUG] _forceFinalize error: $e');
-      _snack(context, '❌ Fehler: $e', error: true);
-    }
-  }
-
-  Future<void> _showAuditLog(BuildContext context) async {
-    print('[G2-DEBUG] _showAuditLog called');
-
-    // Finde neuesten Antrag (beliebiger Titel, beliebiger Status).
-    final p = _findNewestProposal();
-
-    if (p == null) {
-      _snack(context, 'Kein Antrag gefunden', error: true);
-      return;
-    }
-    final entries = await ProposalService.instance.getAuditLog(p.id);
-    final recent = entries.reversed.take(20).toList();
-
-    if (!context.mounted) return;
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A1A),
-        title: Text(
-          'Audit-Log: ${p.title.substring(0, p.title.length.clamp(0, 30))}…',
-          style: const TextStyle(color: Colors.amber, fontSize: 14),
-        ),
-        content: SizedBox(
-          width: 400,
-          height: 400,
-          child: recent.isEmpty
-              ? const Center(
-                  child: Text('Keine Einträge',
-                      style: TextStyle(color: Colors.white54)))
-              : ListView.separated(
-                  itemCount: recent.length,
-                  separatorBuilder: (_, __) => const Divider(
-                      height: 1, color: Colors.white12),
-                  itemBuilder: (_, i) {
-                    final e = recent[i];
-                    final ts = e.timestamp
-                        .toLocal()
-                        .toIso8601String()
-                        .substring(11, 19);
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Text(
-                        '[$ts] ${e.eventType.name}\n  → ${e.actorPseudonym.isEmpty ? e.actorDid.substring(0, 12) : e.actorPseudonym}',
-                        style: const TextStyle(
-                            color: Colors.white70, fontSize: 11),
-                      ),
-                    );
-                  },
-                ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Schließen',
-                style: TextStyle(color: Colors.amber)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _cleanupTestProposals(BuildContext context) async {
-    print('[G2-DEBUG] _cleanupTestProposals called');
-    final all = ProposalService.instance.allProposals
-        .where((p) => p.title.startsWith('G2 Test-Antrag'))
-        .toList();
-
-    print('[G2-DEBUG] Cleanup found ${all.length} test proposals');
-
-    if (all.isEmpty) {
-      _snack(context, 'Keine Test-Anträge gefunden');
-      return;
-    }
-
-    int deleted = 0;
-    for (final p in all) {
-      try {
-        print('[G2-DEBUG] Tombstoning and withdrawing test proposal: ${p.id}');
-
-        // 1. Force status to WITHDRAWN so the published Kind-31010 carries
-        //    status=WITHDRAWN — peer devices tombstone it on receipt.
-        p.status = ProposalStatus.WITHDRAWN;
-        p.withdrawnAt = DateTime.now().toUtc();
-        await PodDatabase.instance.upsertProposal(p.id, p.cellId, p.toMap());
-
-        // 2. Publish withdrawal event BEFORE local delete so the publish fn
-        //    can still read the proposal from _proposals cache.
-        await ProposalService.instance.publishProposalWithdrawal(p.id);
-
-        // 3. tombstoneAndDelete: sets tombstone synchronously, removes from
-        //    cache, notifies stream, then async DB cleanup.
-        await ProposalService.instance.tombstoneAndDelete(p.id);
-
-        deleted++;
-      } catch (e) {
-        print('[G2-DEBUG] Cleanup error for ${p.id}: $e');
-      }
-    }
-
-    print('[G2-DEBUG] Cleanup complete: $deleted deleted and tombstoned');
-    if (context.mounted) {
-      _snack(context, '✅ $deleted Test-Anträge gelöscht und tombstoned');
-    }
-  }
-
-  Future<void> _confirmDeleteAllProposals(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A1A),
-        title: const Text(
-          'Alle Anträge löschen?',
-          style: TextStyle(color: Colors.red),
-        ),
-        content: const Text(
-          'Dies löscht ALLE Anträge, Stimmen, Decision Records '
-          'und Audit-Einträge — lokal UND via Withdrawal-Events '
-          'auf den Relays. Diese Aktion kann nicht rückgängig '
-          'gemacht werden.\n\n'
-          'Nur für Test-Zwecke verwenden!',
-          style: TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Abbrechen',
-                style: TextStyle(color: Colors.amber)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red.shade800,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Ja, alle löschen'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true && context.mounted) {
-      await _deleteAllProposals(context);
-    }
-  }
-
-  Future<void> _deleteAllProposals(BuildContext context) async {
-    print('[CLEANUP] === Starting full proposal cleanup ===');
-
-    final all = List<Proposal>.from(ProposalService.instance.allProposals);
-    print('[CLEANUP] Found ${all.length} proposals to delete');
-
-    if (all.isEmpty) {
-      _snack(context, 'Keine Anträge gefunden');
-      return;
-    }
-
-    int deleted = 0;
-    for (final p in all) {
-      try {
-        print('[CLEANUP] Tombstoning and withdrawing: ${p.id}');
-
-        p.status = ProposalStatus.WITHDRAWN;
-        p.withdrawnAt = DateTime.now().toUtc();
-        await PodDatabase.instance.upsertProposal(p.id, p.cellId, p.toMap());
-
-        await ProposalService.instance.publishProposalWithdrawal(p.id);
-        await ProposalService.instance.tombstoneAndDelete(p.id);
-
-        deleted++;
-      } catch (e) {
-        print('[CLEANUP] Error for ${p.id}: $e');
-      }
-    }
-
-    print('[CLEANUP] Done: $deleted proposals deleted and tombstoned');
-    if (context.mounted) {
-      _snack(context, '✅ $deleted Anträge gelöscht und tombstoned');
-    }
   }
 }
