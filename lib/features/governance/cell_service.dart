@@ -23,6 +23,26 @@ List<String> _parseJsonStringList(String? raw) {
   return [];
 }
 
+/// Defensive SharedPreferences list reader.
+/// Handles both formats:
+///   - value stored as StringList via setStringList()
+///   - value stored as JSON string via setString(jsonEncode([...]))
+/// Returns [] instead of throwing on type mismatch (shared_preferences_legacy
+/// throws when the stored type doesn't match the requested type).
+List<String> _safeGetStringList(SharedPreferences prefs, String key) {
+  try {
+    final raw = prefs.get(key);
+    if (raw == null) return [];
+    if (raw is List) return raw.cast<String>();
+    if (raw is String && raw.isNotEmpty) {
+      return _parseJsonStringList(raw);
+    }
+    return [];
+  } catch (_) {
+    return [];
+  }
+}
+
 /// Manages the local user's cell memberships and join requests.
 ///
 /// Follows the same singleton/stream pattern as [GroupChannelService].
@@ -198,35 +218,48 @@ class CellService {
     try {
       // ── Schritt 1: SharedPreferences laden ────────────────────────────────
       print('[CELLS-INIT] Schritt 1: SharedPreferences laden');
-      final prefs = await SharedPreferences.getInstance();
+      SharedPreferences? prefs;
+      int? rawWipeAt;
+      try {
+        prefs = await SharedPreferences.getInstance();
 
-      // ── RENAME-DIAG: raw SharedPrefs state at startup ────────────────────
-      final tombstones = prefs.getStringList('nexus_cell_tombstones') ?? [];
-      final dismissed = prefs.getStringList('nexus_dismissed_cell_ids') ?? [];
-      print('[RENAME-DIAG] Tombstones: $tombstones');
-      print('[RENAME-DIAG] Dismissed: $dismissed');
-      // ─────────────────────────────────────────────────────────────────────
+        // ── RENAME-DIAG: raw SharedPrefs state at startup ──────────────────
+        // Use _safeGetStringList to avoid type-cast exceptions when a key was
+        // previously stored with setString() instead of setStringList().
+        final tombstones = _safeGetStringList(prefs, 'nexus_cell_tombstones');
+        final dismissed = _safeGetStringList(prefs, 'nexus_dismissed_cell_ids');
+        print('[RENAME-DIAG] Tombstones: $tombstones');
+        print('[RENAME-DIAG] Dismissed: $dismissed');
+        // ───────────────────────────────────────────────────────────────────
 
-      // ── Load tombstone + dismissed lists BEFORE any Nostr events arrive ────
-      final rawWipeAt = prefs.getInt(_wipeKey);
+        // ── Load tombstone + dismissed lists BEFORE any Nostr events arrive ──
+        rawWipeAt = prefs.getInt(_wipeKey);
 
-      // Defensive parse — handles malformed or missing values gracefully.
-      final deletedFromPrefs = _parseJsonStringList(prefs.getString(_deletedCellsKey));
-      final dismissedFromPrefs = _parseJsonStringList(prefs.getString(_dismissedKey));
-      _deletedCellIds.addAll(deletedFromPrefs);
-      _dismissedCellIds.addAll(dismissedFromPrefs);
-      _wipeAt = rawWipeAt;
+        // Defensive parse — handles malformed or missing values gracefully.
+        final deletedFromPrefs = _parseJsonStringList(prefs.getString(_deletedCellsKey));
+        final dismissedFromPrefs = _parseJsonStringList(prefs.getString(_dismissedKey));
+        _deletedCellIds.addAll(deletedFromPrefs);
+        _dismissedCellIds.addAll(dismissedFromPrefs);
+        _wipeAt = rawWipeAt;
 
-      print('[CELLS-INIT] SharedPrefs: ${deletedFromPrefs.length} tombstones,'
-          ' ${dismissedFromPrefs.length} dismissed, wipeAt=${rawWipeAt ?? "NOT SET"}');
+        print('[CELLS-INIT] SharedPrefs OK: ${deletedFromPrefs.length} tombstones,'
+            ' ${dismissedFromPrefs.length} dismissed, wipeAt=${rawWipeAt ?? "NOT SET"}');
+      } catch (e) {
+        print('[CELLS-INIT] FEHLER in Schritt 1 (SharedPrefs): $e');
+        print('[CELLS-INIT] Fahre mit leeren Listen fort — SQLite-Load folgt');
+      }
 
       // ── Schritt 2: One-time Migration SharedPrefs → SQLite ────────────────
       print('[CELLS-INIT] Schritt 2: SharedPrefs-Migration starten');
-      try {
-        await _migrateSharedPrefsTombstonesToSqlite(prefs);
-        print('[CELLS-INIT] SharedPrefs-Migration abgeschlossen');
-      } catch (e) {
-        print('[CELLS-INIT] FEHLER in Schritt 2 (Migration): $e');
+      if (prefs == null) {
+        print('[CELLS-INIT] Schritt 2 übersprungen (SharedPrefs nicht verfügbar)');
+      } else {
+        try {
+          await _migrateSharedPrefsTombstonesToSqlite(prefs);
+          print('[CELLS-INIT] SharedPrefs-Migration abgeschlossen');
+        } catch (e) {
+          print('[CELLS-INIT] FEHLER in Schritt 2 (Migration): $e');
+        }
       }
 
       // ── Schritt 3: Tombstones aus SQLite laden ────────────────────────────
