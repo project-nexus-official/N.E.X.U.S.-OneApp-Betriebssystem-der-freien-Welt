@@ -25,6 +25,7 @@ import '../../shared/theme/app_theme.dart';
 import '../../shared/widgets/update_bottom_sheet.dart';
 import '../chat/chat_provider.dart';
 import '../contacts/widgets/trust_badge.dart';
+import '../../features/governance/cell.dart';
 import '../../features/governance/cell_member.dart';
 import '../../features/governance/cell_service.dart';
 import '../../features/governance/proposal.dart';
@@ -791,6 +792,17 @@ class _AdminSection extends StatelessWidget {
             onTap: () => _runMembershipRepair(context),
           ),
           // ── END MEMBERSHIP REPAIR ────────────────────────────────────────
+          // ── CLAIM DISCOVERED CELL ────────────────────────────────────────
+          ListTile(
+            leading: const Icon(Icons.home_work, color: Colors.green),
+            title: const Text('🏠 Discovered Cell übernehmen'),
+            subtitle: const Text(
+              'Nimmt eine entdeckte Cell als eigene Zelle (Founder) zurück',
+              style: TextStyle(fontSize: 11),
+            ),
+            onTap: () => _claimDiscoveredCell(context),
+          ),
+          // ── END CLAIM DISCOVERED CELL ─────────────────────────────────────
           // ── ZOMBIE TOMBSTONE ─────────────────────────────────────────────
           ListTile(
             leading: const Icon(Icons.delete_sweep, color: Colors.orange),
@@ -805,6 +817,100 @@ class _AdminSection extends StatelessWidget {
           // ── END ZOMBIE TOMBSTONE ─────────────────────────────────────────
         ],
       ],
+    );
+  }
+
+  Future<void> _claimDiscoveredCell(BuildContext context) async {
+    final discovered = CellService.instance.discoveredCells;
+    if (discovered.isEmpty) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Keine entdeckten Cells vorhanden.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    // Let the user pick a cell.
+    final cell = await showDialog<Cell>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('🏠 Welche Cell übernehmen?'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: discovered.length,
+            itemBuilder: (_, i) {
+              final c = discovered[i];
+              final shortId = c.id.length > 16
+                  ? '${c.id.substring(0, 8)}…${c.id.substring(c.id.length - 8)}'
+                  : c.id;
+              return ListTile(
+                title: Text(c.name,
+                    style: const TextStyle(color: AppColors.onDark)),
+                subtitle: Text(shortId,
+                    style:
+                        const TextStyle(fontSize: 11, color: Colors.white54)),
+                onTap: () => Navigator.of(ctx).pop(c),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Abbrechen'),
+          ),
+        ],
+      ),
+    );
+
+    if (cell == null || !context.mounted) return;
+
+    // Confirmation dialog.
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('Cell als Founder übernehmen?'),
+        content: Text(
+          '"${cell.name}" wird in deine eigenen Zellen aufgenommen '
+          'und du wirst als Founder eingetragen.\n\n'
+          'Du solltest nur Cells übernehmen, die du selbst erstellt hast.',
+          style: const TextStyle(color: AppColors.onDark),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Abbrechen'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.gold),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Cell übernehmen',
+                style: TextStyle(color: Colors.black)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    final ok = await CellService.instance.claimDiscoveredCell(cell.id);
+
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok
+            ? '✅ Cell "${cell.name}" wiederhergestellt'
+            : '❌ Fehler: Cell nicht gefunden'),
+        backgroundColor: ok ? Colors.green : Colors.red,
+        duration: const Duration(seconds: 4),
+      ),
     );
   }
 

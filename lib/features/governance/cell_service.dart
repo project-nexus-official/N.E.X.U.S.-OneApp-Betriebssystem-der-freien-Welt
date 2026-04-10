@@ -135,6 +135,59 @@ class CellService {
 
   // ── Initialisation ─────────────────────────────────────────────────────────
 
+  static const _tombstoneMigrationKey = 'tombstones_migrated_to_sqlite_v1';
+
+  /// One-time migration: copies SharedPreferences tombstone + dismissed lists
+  /// into the SQLite tombstones table.  Idempotent — runs once per install.
+  Future<void> _migrateSharedPrefsTombstonesToSqlite(SharedPreferences prefs) async {
+    if (prefs.getBool(_tombstoneMigrationKey) == true) {
+      print('[TOMBSTONE-MIGRATION] Already done, skipping');
+      return;
+    }
+
+    print('[TOMBSTONE-MIGRATION] === Starting one-time migration ===');
+    int migrated = 0;
+
+    final rawDeleted = prefs.getString(_deletedCellsKey);
+    if (rawDeleted != null) {
+      final ids = (jsonDecode(rawDeleted) as List<dynamic>).cast<String>();
+      print('[TOMBSTONE-MIGRATION] Found ${ids.length} cell tombstones in SharedPrefs');
+      for (final id in ids) {
+        await PodDatabase.instance.addTombstone(
+          id: id, type: 'cell', reason: 'migrated from SharedPreferences');
+        await PodDatabase.instance.addTombstone(
+          id: id, type: 'cell_dismissed', reason: 'migrated from SharedPreferences');
+        migrated++;
+      }
+    }
+
+    final rawDismissed = prefs.getString(_dismissedKey);
+    if (rawDismissed != null) {
+      final ids = (jsonDecode(rawDismissed) as List<dynamic>).cast<String>();
+      print('[TOMBSTONE-MIGRATION] Found ${ids.length} cell dismissed in SharedPrefs');
+      for (final id in ids) {
+        await PodDatabase.instance.addTombstone(
+          id: id, type: 'cell_dismissed', reason: 'migrated from SharedPreferences');
+        migrated++;
+      }
+    }
+
+    await prefs.setBool(_tombstoneMigrationKey, true);
+    print('[TOMBSTONE-MIGRATION] === Done: $migrated tombstones migrated ===');
+  }
+
+  /// Loads tombstones from SQLite into in-memory sets on every app start.
+  Future<void> _loadTombstonesFromSqlite() async {
+    final cellTombstones = await PodDatabase.instance.listTombstones('cell');
+    final cellDismissed = await PodDatabase.instance.listTombstones('cell_dismissed');
+
+    _deletedCellIds.addAll(cellTombstones);
+    _dismissedCellIds.addAll(cellDismissed);
+
+    print('[TOMBSTONE] Loaded from SQLite:'
+        ' ${cellTombstones.length} tombstones, ${cellDismissed.length} dismissed');
+  }
+
   Future<void> load() async {
     try {
       // Load dismissed cell IDs and wipe timestamp first so discovery filter
@@ -162,6 +215,11 @@ class CellService {
         _dismissedCellIds.addAll(list);
       }
       _wipeAt = rawWipeAt;
+
+      // ── One-time migration from SharedPrefs → SQLite ─────────────────────
+      await _migrateSharedPrefsTombstonesToSqlite(prefs);
+      // ── Load tombstones from SQLite (primary source after migration) ──────
+      await _loadTombstonesFromSqlite();
 
       // ── ZOMBIE-V2: startup diagnosis ──────────────────────────────────────
       print('[ZOMBIE-V2] === APP START CELL DIAGNOSIS ===');
@@ -684,6 +742,12 @@ class CellService {
     final isNew = _deletedCellIds.add(cellId); // in-memory first, synchronous
     _dismissedCellIds.add(cellId);             // also add to dismissed
     _discovered.removeWhere((c) => c.id == cellId);
+    // SQLite (primary)
+    await PodDatabase.instance.addTombstone(
+      id: cellId, type: 'cell', reason: 'dissolution');
+    await PodDatabase.instance.addTombstone(
+      id: cellId, type: 'cell_dismissed', reason: 'dissolution');
+    // SharedPreferences (fallback)
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
         _deletedCellsKey, jsonEncode(_deletedCellIds.toList()));
@@ -705,6 +769,10 @@ class CellService {
   Future<void> _dismissCell(String cellId) async {
     _dismissedCellIds.add(cellId); // idempotent Set.add
     _discovered.removeWhere((c) => c.id == cellId);
+    // SQLite (primary)
+    await PodDatabase.instance.addTombstone(
+      id: cellId, type: 'cell_dismissed', reason: 'leave_or_removed');
+    // SharedPreferences (fallback)
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
         _dismissedKey, jsonEncode(_dismissedCellIds.toList()));
@@ -1170,7 +1238,12 @@ class CellService {
     _dismissedCellIds.addAll(allKnownIds);
     // Tombstone list is also kept (dissolved cells must never return).
 
-    // 4. Persist updated block lists + wipe timestamp to SharedPrefs.
+    // 4a. Persist to SQLite (primary).
+    for (final id in allKnownIds) {
+      await PodDatabase.instance.addTombstone(
+        id: id, type: 'cell_dismissed', reason: 'nuclearWipe');
+    }
+    // 4b. Persist updated block lists + wipe timestamp to SharedPrefs (fallback).
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
         _dismissedKey, jsonEncode(_dismissedCellIds.toList()));
@@ -1212,6 +1285,15 @@ class CellService {
     _deletedCellIds.addAll(discoveredIds);
     _dismissedCellIds.addAll(discoveredIds);
 
+    // SQLite (primary)
+    for (final id in discoveredIds) {
+      await PodDatabase.instance.addTombstone(
+        id: id, type: 'cell', reason: 'tombstoneAllDiscovered');
+      await PodDatabase.instance.addTombstone(
+        id: id, type: 'cell_dismissed', reason: 'tombstoneAllDiscovered');
+    }
+
+    // SharedPreferences (fallback for 1–2 versions)
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
       _deletedCellsKey,
@@ -1309,6 +1391,70 @@ class CellService {
 
     print('[REPAIR] === Done: checked=$checked, repaired=$repaired, skipped=$skipped ===');
     return {'checked': checked, 'repaired': repaired, 'skipped': skipped};
+  }
+
+  /// Claims a cell from the discovered list as if the local user were the
+  /// founder.  This is a superadmin recovery action for cases where the user
+  /// created a cell on one device but lost the local DB (e.g. after a nuclear
+  /// wipe).
+  ///
+  /// The method:
+  ///   1. Writes the cell to the DB.
+  ///   2. Creates a FOUNDER membership entry.
+  ///   3. Moves the cell from [_discovered] to [_myCells].
+  ///   4. Triggers cell-internal channel setup via [onMembershipConfirmed].
+  ///
+  /// Returns `true` on success, `false` if the cell was not found.
+  Future<bool> claimDiscoveredCell(String cellId) async {
+    final myDid = IdentityService.instance.currentIdentity?.did;
+    if (myDid == null) return false;
+
+    final cellIdx = _discovered.indexWhere((c) => c.id == cellId);
+    if (cellIdx < 0) {
+      print('[CLAIM] Cell $cellId not found in discovered');
+      return false;
+    }
+
+    final cell = _discovered[cellIdx];
+    print('[CLAIM] Claiming cell: ${cell.id} ("${cell.name}")');
+    print('[CLAIM] Cell createdBy: ${cell.createdBy}');
+    print('[CLAIM] My DID: $myDid');
+
+    if (cell.createdBy != myDid) {
+      print('[CLAIM] WARNING: Cell was not created by me — proceeding (admin override)');
+    }
+
+    // 1. Save cell to DB.
+    await PodDatabase.instance.upsertCell(cell.id, cell.toJson());
+    print('[CLAIM] Cell saved to DB');
+
+    // 2. Create FOUNDER membership.
+    final founder = CellMember(
+      cellId: cell.id,
+      did: myDid,
+      joinedAt: cell.createdAt,
+      role: MemberRole.founder,
+      confirmedBy: myDid,
+    );
+    await PodDatabase.instance.upsertCellMember(cell.id, myDid, founder.toJson());
+    print('[CLAIM] Founder membership created');
+
+    // 3. Update in-memory state.
+    _discovered.removeAt(cellIdx);
+    _myCells.add(cell);
+    _members[cell.id] = [founder];
+    _requests[cell.id] = [];
+
+    _notify();
+    onGovernanceMembershipChanged?.call();
+
+    // 4. Set up cell-internal channels.
+    if (onMembershipConfirmed != null) {
+      await onMembershipConfirmed!(cell, myDid);
+    }
+
+    print('[CLAIM] === Cell claimed successfully: "${cell.name}" ===');
+    return true;
   }
 
   void _notify() => _streamCtrl.add(null);

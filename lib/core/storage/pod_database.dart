@@ -55,7 +55,7 @@ class PodDatabase {
 
     _db = await openDatabase(
       dbPath,
-      version: 13,
+      version: 14,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -422,6 +422,18 @@ class PodDatabase {
       )
     ''');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_pd_proposal ON proposal_discussions(proposal_id)');
+
+    // v14: persistent tombstones (replaces fragile SharedPreferences storage).
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS tombstones (
+        id         TEXT NOT NULL,
+        type       TEXT NOT NULL,
+        reason     TEXT,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (id, type)
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_tombstones_type ON tombstones(type)');
   }
 
   static Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -711,6 +723,18 @@ class PodDatabase {
         )
       ''');
       await db.execute('CREATE INDEX IF NOT EXISTS idx_pd_proposal ON proposal_discussions(proposal_id)');
+    }
+    if (oldVersion < 14) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS tombstones (
+          id         TEXT NOT NULL,
+          type       TEXT NOT NULL,
+          reason     TEXT,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (id, type)
+        )
+      ''');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_tombstones_type ON tombstones(type)');
     }
   }
 
@@ -1966,6 +1990,59 @@ class PodDatabase {
       'proposals',
       where: 'cell_id = ?',
       whereArgs: [cellId],
+    );
+  }
+
+  // ── Tombstones namespace ──────────────────────────────────────────────────
+
+  Future<void> addTombstone({
+    required String id,
+    required String type,
+    String? reason,
+  }) async {
+    await _database.insert(
+      'tombstones',
+      {
+        'id': id,
+        'type': type,
+        'reason': reason,
+        'created_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<bool> hasTombstone({
+    required String id,
+    required String type,
+  }) async {
+    final rows = await _database.query(
+      'tombstones',
+      where: 'id = ? AND type = ?',
+      whereArgs: [id, type],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
+  Future<Set<String>> listTombstones(String type) async {
+    final rows = await _database.query(
+      'tombstones',
+      columns: ['id'],
+      where: 'type = ?',
+      whereArgs: [type],
+    );
+    return rows.map((r) => r['id'] as String).toSet();
+  }
+
+  Future<void> removeTombstone({
+    required String id,
+    required String type,
+  }) async {
+    await _database.delete(
+      'tombstones',
+      where: 'id = ? AND type = ?',
+      whereArgs: [id, type],
     );
   }
 }
