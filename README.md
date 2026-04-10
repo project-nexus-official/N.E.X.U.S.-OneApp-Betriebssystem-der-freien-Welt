@@ -2,41 +2,50 @@
 
 ### Das Cockpit der Souveränität — Eine dezentrale App für die Menschheitsfamilie
 
-![Version](https://img.shields.io/badge/version-v0.1.3--alpha-gold)
+![Version](https://img.shields.io/badge/version-v0.1.8--alpha-gold)
 ![Lizenz](https://img.shields.io/badge/lizenz-AGPL%20v3-blue)
 ![Plattform](https://img.shields.io/badge/plattform-Android%20%7C%20Windows-lightgrey)
-![Tests](https://img.shields.io/badge/tests-315%2B%20passing-brightgreen)
+
+---
+
+> ⚠️ **Rechtliche Hinweise & Haftungsausschluss**  
+> Diese Software befindet sich in aktiver Alpha-Entwicklung. Vor der Nutzung bitte den vollständigen **[DISCLAIMER.md](DISCLAIMER.md)** lesen. Die Nutzung erfolgt auf eigene Verantwortung.
 
 ---
 
 ## Was ist die OneApp?
 
-Die NEXUS OneApp ist eine dezentrale Kommunikations- und Selbstverwaltungs-App — ohne zentralen Server, ohne Konzernkontrolle, ohne Zensur. Sie ist Schritt für Schritt darauf ausgelegt, WhatsApp durch souveränen Chat, Banken durch das AETHER-Protokoll und Parlamente durch Liquid Democracy zu ersetzen.
+Die N.E.X.U.S. OneApp ist eine dezentrale Kommunikations- und Selbstverwaltungs-App — ohne zentralen Server, ohne Konzernkontrolle, ohne Zensur. Sie ist Schritt für Schritt darauf ausgelegt, WhatsApp durch souveränen Chat, Banken durch das AETHER-Protokoll und Parlamente durch Liquid Democracy zu ersetzen.
 
 Der gesamte Quellcode ist Open Source (AGPL v3). Alle Nachrichten sind Ende-zu-Ende-verschlüsselt. Du besitzt deine Identität, deine Daten und deine Schlüssel — niemand sonst.
 
-Den vollständigen Bauplan des NEXUS-Projekts findest du auf **[nexus-terminal.org](https://nexus-terminal.org)**.
+Den vollständigen Bauplan des N.E.X.U.S.-Projekts findest du auf **[nexus-terminal.org](https://nexus-terminal.org)**.
 
 ---
 
-## Was funktioniert bereits? (Phase 1a)
+## Was funktioniert bereits? (v0.1.8-alpha)
 
 | Bereich | Feature |
 |---|---|
 | **Identität** | Self-Sovereign Identity via Seed Phrase (BIP-39), DID (W3C-Standard), Pseudonym |
 | **Chat** | Ende-zu-Ende-verschlüsselter Direkt-Chat (X25519 + AES-256-GCM) |
 | **Transport** | BLE Mesh, LAN (lokal) + Nostr (Internet-Fallback) |
-| **Nachrichten** | Text, Bilder (JPEG), Sprachnachrichten (AAC/WAV), Emojis |
-| **Chat-Features** | Antworten/Zitieren (Swipe), Nachrichtensuche (global + in-chat) |
-| **Kanäle** | Benannte Gruppenkanäle (NIP-28), Discovery, Auto-Join `#nexus-global` |
+| **Nachrichten** | Text, Bilder (JPEG), Sprachnachrichten (AAC/WAV), Emojis, Reaktionen |
+| **Chat-Features** | Antworten/Zitieren (Swipe), Nachrichtensuche, Weiterleiten, Favoriten |
+| **Kanäle** | Öffentliche & private Kanäle (NIP-28/44), Gruppen, Ankündigungs-Kanäle |
 | **Kontakte** | 4 Vertrauensstufen (Entdeckt → Kontakt → Vertrauensperson → Bürge) |
-| **Sicherheit** | Blockier-System (still, lokal), Schlüssel-Verifizierung (QR + Fingerprint) |
-| **Entdecken** | QR-Code Scanner für Face-to-Face Kontaktaustausch |
-| **Dashboard** | Live-Radar (lokale Peers), NEXUS-Node-Zähler (7-Tage-Fenster) |
+| **Zellen** | Lokale & thematische Gemeinschaften mit GPS-Geohash, Beitrittsanfragen, Mitgliederverwaltung |
+| **Zellen-Leben** | Pinnwand, Diskussion, Agora (Abstimmungen), Mitglieder — 4 Tabs pro Zelle |
+| **Agora** | Direkte Demokratie: Anträge erstellen, diskutieren, abstimmen (Ja/Nein/Enthaltung) |
+| **Abstimmungs-Sync** | Echtzeit-Synchronisation zwischen allen Geräten via Nostr (NIP-01) |
+| **Dorfplatz** | Dezentraler sozialer Feed: Posts, Reposts, Kommentare, Umfragen, Reaktionen |
+| **Dorfplatz-Sync** | Reposts & Löschungen synchronisieren sich geräteübergreifend (NIP-18, NIP-09) |
+| **Sicherheit** | Blockier-System, Schlüssel-Verifizierung (QR + Fingerprint), Selective Disclosure |
+| **Dashboard** | Live-Radar (lokale Peers), N.E.X.U.S.-Node-Zähler |
 | **Grundsätze** | Bewusster Onboarding-Flow mit den Grundsätzen der Menschheitsfamilie |
 | **Push** | Benachrichtigungen ohne Google/Firebase (eigene Implementierung) |
 | **Updates** | Automatischer Update-Checker via GitHub Releases |
-| **Tests** | 315+ automatisierte Unit- und Widget-Tests |
+| **Backup** | Automatisches Backup, Export & Wiederherstellung |
 
 ---
 
@@ -50,15 +59,19 @@ Den vollständigen Bauplan des NEXUS-Projekts findest du auf **[nexus-terminal.o
 
 ### Android
 
-1. Gehe zu [GitHub Releases](https://github.com/project-nexus-official/N.E.X.U.S.-OneApp-Betriebssystem-der-freien-Welt/releases)
-2. Lade die neueste `nexus-vX.Y.Z.apk` herunter
+1. Gehe zu [GitHub Releases](https://github.com/project-nexus-official/oneapp/releases)
+2. Lade die neueste `NexusOneApp_0.1.8.apk` herunter
 3. Installiere die APK (Einstellungen → Unbekannte Quellen erlauben)
 
 ### Windows
 
-1. Gehe zu [GitHub Releases](https://github.com/project-nexus-official/N.E.X.U.S.-OneApp-Betriebssystem-der-freien-Welt/releases)
-2. Lade `nexus-vX.Y.Z.zip` herunter und entpacke es
-3. Führe `nexus_oneapp.exe` aus
+1. Gehe zu [GitHub Releases](https://github.com/project-nexus-official/oneapp/releases)
+2. Lade `Setup_NexusOneApp_v0.1.8.exe` herunter
+3. Installer ausführen und Anweisungen folgen
+
+### Bedienungsanleitung
+
+Die vollständige Bedienungsanleitung steht als PDF im [aktuellen Release](https://github.com/project-nexus-official/oneapp/releases/tag/v0.1.8-alpha) zum Download bereit.
 
 > iOS und macOS folgen in einer späteren Phase.
 
@@ -70,12 +83,12 @@ Den vollständigen Bauplan des NEXUS-Projekts findest du auf **[nexus-terminal.o
 
 | Layer | Technologie |
 |---|---|
-| Frontend | Flutter / Dart (iOS, Android, Windows, macOS, Linux) |
-| Blockchain | Substrate / Rust (eigene souveräne Chain — Phase 1c) |
-| Chat-Protokoll | BLE Mesh + Nostr (inspiriert von BitChat) |
-| Verschlüsselung | X25519 + AES-256-GCM, Noise Protocol, Post-Quanten ready |
-| Datenbank | SQLite (sqflite / sqflite_ffi), AES-256-GCM verschlüsselt |
-| Identität | BIP-39 Seed Phrase, Ed25519, DID (W3C did:key) |
+| Frontend | Flutter / Dart (Android, Windows — iOS/macOS folgen) |
+| Transport | BLE Mesh + LAN + Nostr |
+| Verschlüsselung | X25519 + NIP-44, Ed25519, AES-256-GCM |
+| Datenbank | SQLite (sqflite / sqflite_ffi) |
+| Identität | BIP-39 Seed Phrase, Ed25519/SLIP-0010, DID (W3C did:key) |
+| Protokoll | Nostr (NIP-01/04/28/44) |
 
 ### Voraussetzungen
 
@@ -86,19 +99,12 @@ Den vollständigen Bauplan des NEXUS-Projekts findest du auf **[nexus-terminal.o
 ### Setup
 
 ```bash
-git clone https://github.com/project-nexus-official/N.E.X.U.S.-OneApp-Betriebssystem-der-freien-Welt.git
-cd N.E.X.U.S.-OneApp-Betriebssystem-der-freien-Welt
+git clone https://github.com/project-nexus-official/oneapp.git
+cd oneapp
 
 flutter pub get
 flutter run                  # Android-Gerät oder Emulator
 flutter run -d windows       # Windows Desktop
-```
-
-### Tests
-
-```bash
-flutter test                 # alle 315+ Tests
-flutter test test/features/  # nur Feature-Tests
 ```
 
 ### Projektstruktur
@@ -110,38 +116,24 @@ lib/
 │   ├── identity/          # DID, Seed Phrase, Pseudonym
 │   ├── contacts/          # Kontakt-Service, Trust-Levels
 │   ├── router.dart        # go_router mit Identity + Principles Guard
-│   └── storage/           # SQLite-Datenbank (verschlüsselt)
+│   └── storage/           # SQLite-Datenbank
 │
 ├── features/              # UI-Screens nach Domain
 │   ├── onboarding/        # Seed Phrase, Identität, Grundsätze-Flow
 │   ├── dashboard/         # Startscreen, Radar, Node-Counter
-│   ├── chat/              # Direktnachrichten, Kanäle, Radar
+│   ├── chat/              # Direktnachrichten, Kanäle
+│   ├── cells/             # Zellen, Agora, Mitgliederverwaltung
+│   ├── dorfplatz/         # Sozialer Feed
 │   ├── contacts/          # Kontaktliste, Details, QR-Scanner
-│   ├── discover/          # Entdecken-Hub
-│   ├── governance/        # Liquid Democracy (Phase 1b)
 │   ├── profile/           # Eigenes Profil, Selective Disclosure
 │   └── settings/          # App-Einstellungen
 │
 └── services/              # Plattformübergreifende Services
-    ├── principles_service.dart   # Grundsätze (Accept/Skip)
-    ├── update_service.dart       # GitHub Release Checker
+    ├── cell_service.dart         # Zellen-Verwaltung
+    ├── feed_service.dart         # Dorfplatz-Feed
     ├── notification_service.dart # Push ohne Firebase
-    └── background_service.dart   # Hintergrund-Transport
+    └── update_service.dart       # GitHub Release Checker
 ```
-
-### Transport-Architektur
-
-Der `TransportManager` verwaltet ein Plugin-System aus drei Transportschichten:
-
-```
-BLE Mesh  ──┐
-            ├──► TransportManager ──► ChatProvider ──► UI
-LAN/mDNS ──┤
-            │
-Nostr    ──┘  (Internet-Fallback, Catch-Up für verpasste Nachrichten)
-```
-
-Nachrichten werden über den besten verfügbaren Transport gesendet. Nostr dient als Relay für Offline-Empfänger.
 
 ### KI-gestützte Entwicklung
 
@@ -151,9 +143,9 @@ Dieses Projekt nutzt Claude Code für KI-gestützte Entwicklung. Alle Konvention
 
 ## Roadmap
 
-### Phase 1b — Governance *(in Entwicklung)*
-- Liquid Democracy: delegierbare Stimmen, Vorschlagssystem
-- Sphären-basierte Abstimmungen
+### v0.1.9 — Governance Stufe 2
+- G2 Quadratic Voting (gewichtete Stimmen)
+- G2 Stimmen-Delegation pro Antrag (echte Liquid Democracy)
 
 ### Phase 1c — AETHER Wallet & Marktplatz
 - VITA Ꝟ (fließend, Demurrage 0,5%/Monat)
@@ -171,7 +163,7 @@ Dieses Projekt nutzt Claude Code für KI-gestützte Entwicklung. Alle Konvention
 
 ### Als Nutzer: Testen und Feedback geben
 
-Installiere die App, nutze sie im Alltag und melde Bugs oder Verbesserungsvorschläge auf **[nexus-terminal.org](https://nexus-terminal.org)**.
+Installiere die App, nutze sie im Alltag und melde Bugs oder Verbesserungsvorschläge direkt als [GitHub Issue](https://github.com/project-nexus-official/oneapp/issues) oder im Discord.
 
 ### Als Entwickler: Code beitragen
 
@@ -188,21 +180,25 @@ git commit -m "feat: kurze Beschreibung"
 
 **Gesuchte Rollen:**
 - Flutter / Dart (Frontend, Tests)
-- Rust / Substrate (eigene Blockchain — Phase 1c)
+- Protokoll-Design (P2P, Kryptographie, Nostr)
 - UX / UI Design (Figma, mobile-first)
-- Protokoll-Design (P2P, Kryptographie)
+- Rust / Substrate (eigene Blockchain — Phase 1c)
 
 ### Genesis Circle
 
-Werde Teil des Gründungskreises und gestalte die Grundlagen mit: **[nexus-terminal.org](https://nexus-terminal.org)**
+Werde Teil des Gründungskreises und gestalte die Grundlagen mit — 100 Architekten, 6 Archetypen, 5 Arbeitskreise.
+
+👉 **[nexus-terminal.org](https://nexus-terminal.org)**
 
 ---
 
-## Lizenz
+## Rechtliches
+
+> ⚠️ Bitte den vollständigen **[DISCLAIMER.md](DISCLAIMER.md)** vor der Nutzung lesen.
 
 **Code:** [AGPL v3](LICENSE) — Open Source, Copyleft. Jede Nutzung, Modifikation oder Weiterverbreitung muss unter denselben Bedingungen erfolgen und den Quellcode offenlegen.
 
-**Bauplan, Konzepte und Inhalte:** © Josh Richman 2024–2026. Alle Rechte vorbehalten. Der Bauplan des NEXUS-Projekts (Protokoll, Governance-Modell, AETHER-Ökonomie) darf ohne ausdrückliche Genehmigung nicht reproduziert oder kommerziell genutzt werden.
+**Bauplan, Konzepte und Inhalte:** © Josh Richman 2024–2026. Alle Rechte vorbehalten. Der Bauplan des N.E.X.U.S.-Projekts (Protokoll, Governance-Modell, AETHER-Ökonomie) darf ohne ausdrückliche Genehmigung nicht reproduziert oder kommerziell genutzt werden.
 
 ---
 
@@ -210,10 +206,19 @@ Werde Teil des Gründungskreises und gestalte die Grundlagen mit: **[nexus-termi
 
 | | |
 |---|---|
-| Website | [nexus-terminal.org](https://nexus-terminal.org) |
-| Telegram | [t.me/t.me/Nexus_Project_official](https://t.me/Nexus_Project_official) |
-| GitHub Releases | [Releases](https://github.com/project-nexus-official/N.E.X.U.S.-OneApp-Betriebssystem-der-freien-Welt/releases) |
+| 🌐 Website | [nexus-terminal.org](https://nexus-terminal.org) |
+| 💬 Telegram Kanal | [t.me/NexusProjectOfficial](https://t.me/NexusProjectOfficial) |
+| 💬 Telegram Gruppe | [t.me/Nexus_Project_official](https://t.me/Nexus_Project_official) |
+| 📺 YouTube | [Project-N.e.x.u.s-Official](https://www.youtube.com/@Project-N.e.x.u.s-Official) |
+| 📖 Roman-Trilogie | [Amazon Kindle](https://www.amazon.de/dp/B0GGL1ZD7B) |
+| 🎧 Hörbuch (Gratis) | [YouTube Playlist](https://www.youtube.com/playlist?list=PLLIatNIX1ph05NEJKZ1dG7yEqgl6txJBy) |
+| 📘 Facebook | [NexusTerminal](https://www.facebook.com/NexusTerminal) |
+| 📸 Instagram | [n.e.x.u.s._navigator](https://www.instagram.com/n.e.x.u.s._navigator) |
+| 🐦 X (Twitter) | [nexusxnavigator](https://x.com/nexusxnavigator) |
+| 🦋 Bluesky | [nexus-navigator.bsky.social](https://bsky.app/profile/nexus-navigator.bsky.social) |
+| 🐙 GitHub | [project-nexus-official/oneapp](https://github.com/project-nexus-official/oneapp) |
 
 ---
 
-*Protokoll, nicht Plattform. Für alle.*
+*Protokoll, nicht Plattform. Für alle.*  
+*Wir reformieren nicht. Wir bauen parallel. Dezentral statt Zentralmacht. Vertrauen statt Kontrolle. Liebe als Systemparameter — nicht als Floskel.*
