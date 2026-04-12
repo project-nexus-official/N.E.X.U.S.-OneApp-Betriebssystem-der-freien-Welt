@@ -4,8 +4,6 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:shared_preferences/shared_preferences.dart';
-
 import 'package:flutter/foundation.dart';
 
 import 'package:cryptography/cryptography.dart' show AesCbc, MacAlgorithm,
@@ -1328,9 +1326,8 @@ class NostrTransport implements MessageTransport {
       (_) => _refreshMetadataSubscription(),
     );
 
-    // Channel discovery: set up with a 'since' filter so deleted channels
-    // (tombstoned locally) are not overwritten by stale Kind-40 replays.
-    // Uses SharedPreferences key 'channel_last_sync' (Unix seconds).
+    // Channel discovery: subscribe without a 'since' filter; tombstones in
+    // GroupChannelService prevent deleted channels from reappearing.
     _setupChannelDiscovery(); // fire-and-forget async
 
     // Cell announcements (Kind-30000, parameterized replaceable) — all time.
@@ -1792,30 +1789,19 @@ class NostrTransport implements MessageTransport {
   }
 
   /// Subscribes to Kind-40 channel announcements with a persistent since
-  /// timestamp.  On first launch uses "30 days ago" as default so users see
-  /// recently active channels without fetching the entire relay history.
+  /// Sets up subscriptions for channel discovery (Kind-40) and channel
+  /// deletion events (Kind-5).  No `since` filter is applied — tombstones
+  /// in [GroupChannelService] handle filtering of previously deleted channels
+  /// so that they cannot reappear regardless of relay history.
   Future<void> _setupChannelDiscovery() async {
-    final thirtyDaysAgo =
-        DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000 - 30 * 86400;
-    int since = thirtyDaysAgo;
-    SharedPreferences? prefs;
-    try {
-      prefs = await SharedPreferences.getInstance();
-      since = prefs.getInt('channel_last_sync') ?? thirtyDaysAgo;
-    } catch (_) {
-      // Flutter bindings not initialised (e.g. in unit tests) — use default.
-    }
-
     if (_channelDiscoverySubId != null) {
       _relayManager.closeSubscription(_channelDiscoverySubId!);
     }
     _channelDiscoverySubId = _relayManager.subscribe({
       'kinds': [NostrKind.channelCreate],
       '#t': ['nexus-channel'],
-      'since': since,
     });
-    print('[CHANNEL-SYNC] Subscribing since=$since '
-        '(${DateTime.fromMillisecondsSinceEpoch(since * 1000, isUtc: true)})');
+    print('[CHANNEL-SYNC] Subscribing since=0 (all-time, tombstone-filtered)');
     print('[CHANNEL-SYNC] subId=$_channelDiscoverySubId');
 
     // Subscribe to channel deletion events (Kind-5 tagged nexus-channel-delete).
@@ -1825,18 +1811,9 @@ class NostrTransport implements MessageTransport {
     _channelDeleteSubId = _relayManager.subscribe({
       'kinds': [NostrKind.deletion],
       '#t': ['nexus-channel-delete'],
-      'since': since,
     });
     print('[CHANNEL-SYNC] Channel-delete sub: $_channelDeleteSubId '
-        '(Kind-5 nexus-channel-delete since=$since)');
-
-    // Persist timestamp for next startup so we only fetch new events.
-    try {
-      await prefs?.setInt(
-        'channel_last_sync',
-        DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
-      );
-    } catch (_) {}
+        '(Kind-5 nexus-channel-delete, all-time)');
   }
 
   void _handleChannelCreateEvent(NostrEvent event) {

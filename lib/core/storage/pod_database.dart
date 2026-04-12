@@ -2089,8 +2089,16 @@ class PodDatabase {
   Future<void> addDeletedChannel(String channelId) =>
       addTombstone(id: channelId, type: 'channel');
 
+  /// Also tombstone by normalised channel name so that a re-discovered channel
+  /// with a different UUID is still suppressed.
+  Future<void> addDeletedChannelName(String channelName) =>
+      addTombstone(id: channelName, type: 'channel_name');
+
   Future<bool> isChannelDeleted(String channelId) =>
       hasTombstone(id: channelId, type: 'channel');
 
   Future<Set<String>> listDeletedChannelIds() => listTombstones('channel');
+
+  Future<Set<String>> listDeletedChannelNames() =>
+      listTombstones('channel_name');
 }

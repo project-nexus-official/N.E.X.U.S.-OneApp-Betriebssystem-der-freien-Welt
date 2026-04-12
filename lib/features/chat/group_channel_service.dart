@@ -23,6 +23,10 @@ class GroupChannelService {
   /// a restart.
   Set<String> _deletedChannelIds = {};
 
+  /// In-memory set of normalised channel NAMES that have been tombstoned.
+  /// Guards against re-discovery when a channel comes back with a different UUID.
+  Set<String> _deletedChannelNames = {};
+
   final _joinedController =
       StreamController<List<GroupChannel>>.broadcast();
 
@@ -64,17 +68,31 @@ class GroupChannelService {
     try {
       // Load tombstones FIRST so we can filter _joined against them immediately.
       _deletedChannelIds = await PodDatabase.instance.listDeletedChannelIds();
-      debugPrint('[CHANNEL-LOAD] Tombstones geladen: ${_deletedChannelIds.length} IDs');
+      _deletedChannelNames = await PodDatabase.instance.listDeletedChannelNames();
+      debugPrint('[CHANNEL-LOAD] Tombstones geladen: '
+          '${_deletedChannelIds.length} IDs, '
+          '${_deletedChannelNames.length} Namen');
+      debugPrint('[CHANNEL-LOAD] Tombstone IDs: $_deletedChannelIds');
+      debugPrint('[CHANNEL-LOAD] Tombstone Namen: $_deletedChannelNames');
 
       final allRows = await PodDatabase.instance.listChannels();
       final all = allRows.map(GroupChannel.fromJson).toList();
 
+      // Debug: print every channel ID+name so we can spot mismatches.
+      for (final ch in all) {
+        debugPrint('[CHANNEL-LOAD] Checking channel: id=${ch.id} name=${ch.name}');
+      }
+
       // Filter out tombstoned channels so they never reappear in the UI.
       final active = all
-          .where((ch) => !_deletedChannelIds.contains(ch.id))
+          .where((ch) =>
+              !_deletedChannelIds.contains(ch.id) &&
+              !_deletedChannelNames.contains(ch.name))
           .toList();
       final deletedOnes = all
-          .where((ch) => _deletedChannelIds.contains(ch.id))
+          .where((ch) =>
+              _deletedChannelIds.contains(ch.id) ||
+              _deletedChannelNames.contains(ch.name))
           .toList();
 
       _joined
@@ -196,11 +214,14 @@ class GroupChannelService {
         '(joined=$joinedCount, discovered=$discoveredCount)');
 
     // Tombstone prevents this channel from re-appearing via Nostr discovery
-    // after restart (Kind-40 events have no 'since' filter by default).
+    // after restart. We tombstone both ID and name because a re-discovered
+    // channel may arrive with a different UUID.
     _deletedChannelIds.add(channel.id);
+    _deletedChannelNames.add(channel.name);
     try {
       await PodDatabase.instance.addDeletedChannel(channel.id);
-      debugPrint('[CHANNEL-DELETE] Tombstone gesetzt: ${channel.id}');
+      await PodDatabase.instance.addDeletedChannelName(channel.name);
+      debugPrint('[CHANNEL-DELETE] Tombstone gesetzt: id=${channel.id} name=${channel.name}');
     } catch (e) {
       debugPrint('[CHANNEL-DELETE] Tombstone FAILED: $e');
     }
@@ -230,6 +251,9 @@ class GroupChannelService {
       joinedChannel = _joined.firstWhere((c) => c.id == channelId);
     } catch (_) {}
     if (joinedChannel != null) {
+      // Also tombstone by name so discovery cannot re-add it.
+      _deletedChannelNames.add(joinedChannel.name);
+      await PodDatabase.instance.addDeletedChannelName(joinedChannel.name);
       _joined.removeWhere((c) => c.id == channelId);
       try {
         await PodDatabase.instance.deleteChannel(channelId);
@@ -250,7 +274,8 @@ class GroupChannelService {
   /// Adds the channel to the discovered list unless it is hidden
   /// (isDiscoverable == false) or already joined.
   void addDiscoveredFromNostr(GroupChannel channel) {
-    if (_deletedChannelIds.contains(channel.id)) {
+    if (_deletedChannelIds.contains(channel.id) ||
+        _deletedChannelNames.contains(channel.name)) {
       print('[CHANNEL-SYNC] Überspringe gelöschten Kanal: ${channel.id} '
           'name=${channel.name}');
       return;
