@@ -1294,6 +1294,8 @@ class NostrTransport implements MessageTransport {
     );
 
     // Channel discovery: subscribe to Kind-40 to find available channels.
+    // NOTE: No 'since' filter — fetches ALL Kind-40 events ever published.
+    // This means previously-deleted channels re-appear in _discovered on restart.
     if (_channelDiscoverySubId != null) {
       _relayManager.closeSubscription(_channelDiscoverySubId!);
     }
@@ -1301,7 +1303,8 @@ class NostrTransport implements MessageTransport {
       'kinds': [NostrKind.channelCreate],
       '#t': ['nexus-channel'],
     });
-    print('[NOSTR] Channel discovery sub: $_channelDiscoverySubId');
+    print('[CHANNEL-SYNC] Subscribing since=0 (all-time, no since filter)');
+    print('[CHANNEL-SYNC] subId=$_channelDiscoverySubId');
 
     // Cell announcements (Kind-30000, parameterized replaceable) — all time.
     if (_cellSubId != null) _relayManager.closeSubscription(_cellSubId!);
@@ -1754,9 +1757,8 @@ class NostrTransport implements MessageTransport {
       final shortSender = event.pubkey.length >= 8
           ? event.pubkey.substring(0, 8)
           : event.pubkey;
-      print('[CHANNEL-CREATE-RECV] Kind-40 received from $shortSender…: '
-          'name=$channelName id=$channelId');
-      print('[CHANNEL-CREATE-RECV] Dispatching to channel discovery stream');
+      print('[CHANNEL-SYNC] Received Kind-40 event: name=$channelName '
+          'id=$channelId from=$shortSender…');
       // Emit so GroupChannelService / ChatProvider can add to discovered list.
       _channelAnnouncedController.add({
         ...data,
@@ -1764,7 +1766,7 @@ class NostrTransport implements MessageTransport {
         '_created_at': event.createdAt,
       });
     } catch (e) {
-      print('[CHANNEL-CREATE-RECV] ✗ Parse FAILED: $e');
+      print('[CHANNEL-SYNC] ✗ Kind-40 parse FAILED: $e');
     }
   }
 

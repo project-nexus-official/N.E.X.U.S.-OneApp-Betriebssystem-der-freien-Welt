@@ -61,7 +61,14 @@ class GroupChannelService {
       _joined
         ..clear()
         ..addAll(rows.map(GroupChannel.fromJson));
-      debugPrint('[CHANNELS] Loaded ${_joined.length} joined channels from DB');
+      // Note: no is_deleted flag or tombstone mechanism exists for channels.
+      // All rows in group_channels are treated as active.
+      debugPrint('[CHANNEL-LOAD] Loaded ${_joined.length} channels from DB');
+      debugPrint('[CHANNEL-LOAD] Filtered 0 deleted channels '
+          '(no tombstone mechanism — hard-delete only)');
+      for (final ch in _joined) {
+        debugPrint('[CHANNEL-LOAD]   • ${ch.name} id=${ch.id}');
+      }
     } catch (_) {
       // DB not yet open (e.g. during onboarding).
     }
@@ -157,8 +164,23 @@ class GroupChannelService {
       (c) => c.name == n,
       orElse: () => throw StateError('Not joined: $n'),
     );
+    debugPrint('[CHANNEL-DELETE] Deleting channel: ${channel.id} name=${channel.name}');
+    // NOTE: No Nostr Kind-5 event is published for channel deletion.
+    // Kind-5 exists for messages (publishNostrDeletion) and cells
+    // (publishCellDeletion), but NOT for channels (Kind-40).
+    debugPrint('[CHANNEL-DELETE] Kind-5 published: false '
+        '(no channel deletion event — relays still hold Kind-40)');
+    final removedCount = _joined.where((c) => c.name == n).length;
     _joined.removeWhere((c) => c.name == n);
-    await PodDatabase.instance.deleteChannel(channel.id);
+    debugPrint('[CHANNEL-DELETE] Removed from _joined: $removedCount entry/entries');
+    debugPrint('[CHANNEL-DELETE] Note: _discovered NOT cleared — '
+        'channel may reappear in discovery after restart');
+    try {
+      await PodDatabase.instance.deleteChannel(channel.id);
+      debugPrint('[CHANNEL-DELETE] DB delete: success id=${channel.id}');
+    } catch (e) {
+      debugPrint('[CHANNEL-DELETE] DB delete: FAILED — $e');
+    }
     _joinedController.add(joinedChannels);
     _channelChangedController.add(null);
   }

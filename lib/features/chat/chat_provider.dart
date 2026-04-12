@@ -2296,21 +2296,29 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> leaveOrDeleteChannel(String channelName) async {
     final channel = GroupChannelService.instance.findByName(channelName);
     final nostrTag = channel?.nostrTag;
+    debugPrint('[CHANNEL-DELETE] leaveOrDeleteChannel: $channelName '
+        'nostrTag=$nostrTag');
 
     // 1. Remove from group_channels DB + _joined in-memory list.
     try {
       await GroupChannelService.instance.leaveChannel(channelName);
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[CHANNEL-DELETE] leaveChannel error: $e');
+    }
 
     // 2. Stop Nostr subscription so the relay stops delivering messages.
     if (nostrTag != null) {
       _nostrTransport?.unsubscribeFromChannel(nostrTag);
+      debugPrint('[CHANNEL-DELETE] Nostr unsub: $nostrTag');
+    } else {
+      debugPrint('[CHANNEL-DELETE] Nostr unsub: skipped (nostrTag null)');
     }
 
     // 3. Delete all local messages for this channel.
     _conversationCache.remove(channelName);
     _cacheLoadedFromDb.remove(channelName);
     await ConversationService.instance.deleteConversation(channelName);
+    debugPrint('[CHANNEL-DELETE] Local messages deleted for: $channelName');
     notifyListeners();
   }
 
