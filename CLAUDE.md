@@ -1,40 +1,196 @@
-# CLAUDE.md – NEXUS OneApp
+# CLAUDE.md – N.E.X.U.S. OneApp
 
-## ⛔ KRITISCHE ENTWICKLUNGSREGELN
-1. NIEMALS `adb uninstall` oder `flutter install` verwenden.
+## ⛔ KRITISCHE ENTWICKLUNGSREGELN — ABSOLUTE VERBOTE
+
+Diese Regeln haben in den letzten Wochen Datenverlust verhindert oder 
+verursacht. Sie sind NICHT verhandelbar.
+
+1. **NIEMALS `flutter clean` vorschlagen oder ausführen.**
+   `flutter clean` löscht SharedPreferences auf Windows und hat am 
+   09.04.2026 Datenverlust verursacht (Tombstones, geclaimte Cells, 
+   Founder-Status). Wenn ein Build-Problem `flutter clean` zu erfordern 
+   scheint: STOPP, frage nach mehr Logs, suche eine andere Lösung.
+
+2. **NIEMALS `adb uninstall` oder `flutter install` verwenden.**
    Immer `flutter run` für Updates — das behält alle Nutzerdaten.
    `adb uninstall` LÖSCHT den Android Keystore und damit die 
    Identität des Nutzers UNWIEDERBRINGLICH (außer per Seed Phrase).
    Lokale Daten (Kontakte, Nachrichten, Posts) sind dann verloren.
 
-2. NIEMALS die bestehende Datenbank löschen oder neu erstellen 
-   bei Migrationen. Immer CREATE TABLE IF NOT EXISTS und 
-   ALTER TABLE für Änderungen. Bestehende Tabellen und Daten 
-   sind heilig.
+3. **NIEMALS die bestehende Datenbank löschen oder neu erstellen** 
+   bei Migrationen. Immer `CREATE TABLE IF NOT EXISTS` und 
+   `ALTER TABLE` für Änderungen. Bestehende Tabellen und Daten 
+   sind heilig. NIEMALS `DROP TABLE` oder `DELETE FROM` auf 
+   bestehende Tabellen.
 
-3. Immer mit `flutter run` auf dem Gerät testen BEVOR gepusht 
-   wird. Nie ungetestete Builds releasen.
+4. **NIEMALS "Nuclear Wipe", "fresh start", "App-Daten löschen" 
+   oder ähnliches als Lösungsweg vorschlagen.** Diese Aktionen 
+   haben Datenverlust verursacht. Wenn du unter Druck stehst und 
+   einen "Standard-Fix" vorschlagen willst — STOPP. Frage stattdessen 
+   nach mehr Logs oder genauer Symptom-Beschreibung.
+
+5. **Immer mit `flutter run` auf dem Gerät testen BEVOR gepusht 
+   wird.** Nie ungetestete Builds releasen.
+
+## 🌍 SPRACHE & TERMINOLOGIE (zwingend)
+
+N.E.X.U.S. ist eine Graswurzelbewegung der Menschheitsfamilie. Die 
+Sprache der Bewegung ist präzise und nicht verhandelbar.
+
+- **Immer:** "Menschheitsfamilie" — niemals "System", "Gesellschaft" 
+  oder "Community" als Synonym
+- **Immer:** "N.E.X.U.S." mit Punkten — niemals "NEXUS"
+- **Immer:** "Graswurzelbewegung" — niemals "Projekt"
+- **Echte Umlaute:** ä, ö, ü, ß — niemals ae/oe/ue/ss in 
+  User-facing Strings, Commit-Messages oder Dokumentation
+- **Projekt-Begriffe konsequent verwenden:**
+  - "Zellen" (nicht Gruppen/Communities für Governance-Einheiten)
+  - "Anträge" (nicht Proposals in User-facing Strings; im Code 
+    bleibt `Proposal` als Klassenname konsistent)
+  - "Pinnwand" / "Diskussion" / "Agora" / "Mitglieder" (Cell-Tabs)
+  - "Dorfplatz" (nicht Feed/Schwarzes Brett)
+  - "Pioniere" (Telegram-Mitglieder) vs. "Architekten" (Genesis Circle)
+- **Code-Kommentare:** Englisch (Effective Dart)
+- **UI-Texte und User-facing Strings:** Deutsch mit echten Umlauten
+
+## 🧩 PROAKTIVES LOGIK- & SYNC-PROTOKOLL
+
+1. **Impact Analysis:** Bevor du Code änderst, analysiere alle 
+   Abhängigkeiten. Frage dich: "Welche anderen Module verlassen 
+   sich auf diese Logik?" Bei Unklarheit: nachfragen statt raten.
+
+2. **Nostr-Synchronisation:** Bei jeder Änderung an Nostr-Events 
+   (Kinds, Tags, Signing):
+   - Prüfe NIP-Konformität (NIP-01, NIP-04, NIP-09, NIP-25, 
+     NIP-28, NIP-33, NIP-44)
+   - **NIP-01 e-Tag MUSS 64-Hex Event-ID sein** — keine UUIDs, 
+     keine sonstigen Strings. Diese Regel hat am 08.04.2026 einen 
+     8-Stunden-Bug-Marathon verursacht. Für Custom-IDs (z.B. 
+     `proposal_id`) immer ein Custom-Tag verwenden, nicht den 
+     e-Tag missbrauchen.
+   - **OK-Handler ist Pflicht:** Jeder `publish()` muss einen 
+     OK-Handler haben der die Antwort des Relays auswertet. Ohne 
+     OK-Handler werden Relay-Fehler still ignoriert und der 
+     Empfänger sieht das Event nie.
+   - Replaceable Events (Kind 30000-39999): `d`-Tag und `created_at` 
+     korrekt setzen, sonst überschreibt sich nichts.
+   - Idempotenz: Simuliere im Kopf "Was passiert wenn dieses Event 
+     doppelt oder verzögert eintrifft?" — jeder Handler muss damit 
+     umgehen können.
+
+3. **Diagnose vor Fix:** Bei Sync-Bugs IMMER zuerst Raw-Relay-Logging 
+   einbauen (`[PUBLISH]`, `[RELAY-RAW]`, `[RELAY-OK]`), testen, 
+   Logfiles analysieren — DANN gezielt fixen. Nie raten und 
+   spekulativ Code ändern.
+
+4. **Tests (wo Infrastruktur existiert):** Für neue Logik-Verknüpfungen 
+   einen Unit-Test in `test/` erstellen. Wenn keine Test-Infrastruktur 
+   für den betroffenen Bereich existiert (z.B. Mock-Relay-Tests), 
+   dokumentiere das als TODO im Commit und teste manuell auf beiden 
+   Geräten. Niemals Tests erfinden die nicht laufen können.
+
+5. **Zustands-Validierung:** Prüfe bei UI-Änderungen ob der State 
+   (Provider/Service) auch bei Verbindungsabbrüchen (Offline-First) 
+   konsistent bleibt. In-Memory-State und DB-State müssen synchron 
+   gehalten werden — eine reine DB-Änderung ohne State-Update führt 
+   zu UI-Bugs (Lehre aus dem Zombie-Cell-Bug).
+
+## 🛡️ SECURITY & SAFETY AUDIT (vor jedem Commit)
+
+1. **Key-Safety:** Suche aktiv nach hardcoded Keys, API-Tokens oder 
+   unverschlüsselter Speicherung von sensitiven Daten. Private Keys 
+   gehören in den Android Keystore / Windows DPAPI, niemals in 
+   SharedPreferences oder SQLite-Klartext.
+
+2. **Daten-Verschlüsselung:** Prüfe ob private Daten vor dem 
+   Speichern in die SQLite-DB (`PodDatabase`) verschlüsselt werden 
+   (AES-256-GCM mit aus Seed abgeleitetem Key). Die `enc`-Spalte 
+   in den Tabellen ist Pflicht für alle privaten Inhalte.
+
+3. **Nomenklatur (für neuen Code im AETHER-Kontext):** Verwende 
+   projektkonforme Begriffe statt Finanz-Vokabular wenn neue 
+   Wert-Module gebaut werden:
+   - ✅ `energyToken`, `vitaBalance`, `valueExchange`, `timeEquivalent`
+   - ❌ `money`, `payment`, `price`, `wallet`, `bank`
+   - **Wichtig:** Bestehende Code-Stellen (z.B. die `wallet`-Route 
+     im ShellRoute) werden NICHT umbenannt ohne expliziten Auftrag. 
+     Diese Regel gilt nur für NEUEN Code in AETHER- und 
+     Wert-Modulen.
+
+4. **Input-Validierung:** Checke alle eingehenden Nostr-Events auf 
+   schädliche Payloads bevor sie verarbeitet werden — ungültige 
+   Signaturen, übergroße Payloads, malformed JSON, fehlende 
+   Pflicht-Tags. Niemals Daten aus dem Netz unvalidiert in die 
+   DB schreiben.
+
+## 🤖 SELBSTSTÄNDIGKEITS-MODUS
+
+- Wenn eine Aufgabe unklar ist oder logische Lücken im Plan bestehen: 
+  **Stoppe und frage nach**, anstatt Vermutungen im Code zu 
+  implementieren. Es ist okay zu sagen "Ich brauche mehr Informationen 
+  bevor ich das umsetzen kann."
+
+- Schlage proaktiv Verbesserungen vor wenn du siehst dass eine 
+  bestehende Implementierung gegen das dezentrale Paradigma verstößt 
+  (zentrale Server, Single Points of Failure, ungerechtfertigte 
+  Vertrauensannahmen).
+
+- **Wenn du unter Druck stehst und einen Standard-Tipp vorschlagen 
+  willst der gegen die Verbote oben verstößt — STOPP.** Frage 
+  stattdessen nach mehr Logs oder genauer Symptom-Beschreibung. 
+  Lieber langsam und sicher als schnell und mit Datenverlust.
+
+## 🧪 TEST-WORKFLOW (wichtig: Joachim liest keine Live-Logs)
+
+Joachim hat keinen Programmierhintergrund und kann Logs NICHT live 
+im Terminal verfolgen. Alle Tests müssen Logfiles erzeugen die er 
+hochladen kann:
+
+- **Standard-Befehl:** `flutter run > test-name.txt 2>&1` 
+  (Android über USB) oder `flutter run -d windows > test-name.txt 2>&1`
+- **Bei mehreren Test-Läufen:** separate Dateinamen verwenden 
+  (`test-1-vorher.txt`, `test-2-nachher.txt`)
+- **Beide Geräte parallel testen:** Handy + Windows haben oft 
+  unterschiedliche Logs — beide Files brauchen wir
+- **Diagnose-Logs immer mit aussagekräftigen Präfixen:** 
+  `[CELL-CREATE]`, `[PUBLISH]`, `[RELAY-OK]`, `[ZOMBIE-V3]` etc. — 
+  damit Joachim und du die richtigen Stellen schnell findet
+- **Eine Sache pro Prompt:** Nicht mehrere Bugs gleichzeitig fixen. 
+  Erst diagnostizieren, dann fixen, dann verifizieren, dann nächster 
+  Bug. Sammelfixes haben in der Vergangenheit zu Eskalations-Spiralen 
+  geführt.
 
 ## Projekt-Übersicht
-Die NEXUS OneApp ist eine dezentrale, zensurresistente App für die Menschheitsfamilie.
-Sie implementiert das AETHER-Protokoll mit drei Wertformen:
+Die N.E.X.U.S. OneApp ist eine dezentrale, zensurresistente App für 
+die Menschheitsfamilie. Sie implementiert das AETHER-Protokoll mit 
+drei Wertformen:
 - VITA Ꝟ (fließend, für Alltag, mit Demurrage 0,5%/Monat)
 - TERRA ₮ (fest, für Infrastruktur, kein Demurrage)
 - AURA ₳ (immateriell, Reputation, nicht transferierbar)
 
 ## Architektur-Entscheidungen
-- Frontend: Flutter (Dart) – eine Codebase für iOS + Android + Desktop
-- Blockchain: Substrate (Rust) – eigene souveräne Chain
-- Chat-Protokoll: Inspiriert von BitChat – BLE Mesh + Nostr als Internet-Fallback
-- Daten: Solid PODs für persönliche Datensouveränität
-- Offline-First: SQLite + CRDTs (Automerge) für lokale Datenhaltung
-- Verschlüsselung: Noise Protocol (E2E), Post-Quanten ready
+- **Frontend:** Flutter (Dart) – eine Codebase für Android + Windows 
+  (iOS und Linux später)
+- **Identität:** BIP-39 Seed Phrase, Ed25519/SLIP-0010, did:key 
+  W3C Standard
+- **Verschlüsselung:** X25519/NIP-44 (E2E Chat), AES-256-GCM 
+  (Storage), HKDF-SHA256
+- **Transport (heute):** Nostr (primär), BLE Mesh, LAN Discovery
+- **Transport (geplant):** WiFi Direct, LoRa-Gateway-Integration 
+  für Pioniere, perspektivisch Reticulum als Meta-Transport-Layer
+- **Daten:** SQLite (`PodDatabase`) lokal, AES-256-GCM verschlüsselt, 
+  Nostr-Events für Sync
+- **Offline-First:** Kernfunktionen müssen ohne Internet laufen
+- **Blockchain (Phase 1c):** Substrate (Rust) – eigene souveräne 
+  Chain für AETHER
 
 ## Projekt-Phasen
-Phase 1a: Fundament + Identität + BLE Mesh-Chat (Killer-App #1)
-Phase 1b: Governance (Liquid Democracy)
-Phase 1c: AETHER Wallet + Lokaler Marktplatz
-Phase 2: Care-System + Sphären-Plugins
+- **Phase 1a:** Fundament + Identität + Chat ✅ (komplett)
+- **Phase 1b:** Governance — G1 (Zellen, Anträge) ✅, G2 (Liquid 
+  Democracy) ⏳ in Arbeit, G3-G5 später
+- **Phase 1c:** AETHER Wallet + Lokaler Marktplatz
+- **Phase 2:** Care-System + Sphären-Plugins (Asklepios, Paideia, 
+  Demeter, Hestia)
 
 ## Implementierter Feature-Stand (Phase 1a)
 
@@ -415,63 +571,104 @@ Phase 2: Care-System + Sphären-Plugins
   - Onboarding-Flow (neu): Seed Phrase → Nickname → Grundsätze → Backup-Einrichtung → Dashboard
   - Restore-Flow (neu): Seed-Phrase-Eingabe → Backup-Suche → Wiederherstellung → Dashboard
 
->>> PHASE 1b: Governance G1 abgeschlossen – G2 (Liquid Democracy Abstimmung) als nächstes <<<
+>>> PHASE 1b: Governance G1 abgeschlossen – G2 (Liquid Democracy Abstimmung) als nächstes <
 
 ## Release-Prozess
 
 Vor jedem Release folgende Schritte in dieser Reihenfolge:
 
 1. **Version hochzählen** in `pubspec.yaml`:
-   ```yaml
-   version: X.Y.Z+B   # z.B. 0.1.4+4
-   ```
+```yaml
+   version: X.Y.Z+B   # z.B. 0.1.8+8
+```
    Format: `major.minor.patch+buildNumber`
 
-2. **Build erstellen**:
-   ```bash
+2. **Version im Inno Setup Skript aktualisieren:**
+   `installer\windows_setup.iss` → `#define AppVersion`
+
+3. **Build erstellen:**
+```bash
    flutter build apk --release          # Android
    flutter build windows --release      # Windows
-   ```
+```
 
-3. **Commit + Push**:
-   ```bash
-   git add pubspec.yaml
+4. **Testen auf beiden Plattformen** bevor commit/push.
+
+5. **Commit + Push:**
+```bash
+   git add pubspec.yaml installer/windows_setup.iss
    git commit -m "chore: bump version to vX.Y.Z"
    git push origin master:main
-   ```
+```
 
-4. **Windows Installer erstellen** (optional, empfohlen):
-   ```bash
+6. **Windows Installer erstellen:**
+```bash
    installer\build_installer.bat
-   ```
-   Voraussetzung: [Inno Setup 6](https://jrsoftware.org/isdl.php) installiert (Standard-Pfad).
+```
+   Voraussetzung: Inno Setup 6 installiert (Standard-Pfad).
    Output: `installer\Output\Setup_NexusOneApp_vX.Y.Z.exe`
 
-   Versionsnummer im Skript aktualisieren: `installer\windows_setup.iss` → `#define AppVersion`
-
-5. **GitHub Release erstellen**:
-   - Tag: `vX.Y.Z` (z.B. `v0.1.4`)
-   - Release-Titel: `NEXUS OneApp vX.Y.Z`
+7. **GitHub Release erstellen:**
+   - Tag: `vX.Y.Z-alpha` (z.B. `v0.1.8-alpha`)
+   - Release-Titel: `N.E.X.U.S. OneApp vX.Y.Z`
    - APK als Asset hochladen: `nexus-vX.Y.Z.apk`
-   - Windows-Installer hochladen: `Setup_NexusOneApp_vX.Y.Z.exe` *(bevorzugt)*
-   - Windows-ZIP als Asset hochladen: `nexus-vX.Y.Z.zip` *(Fallback)*
-   - Release Notes auf Deutsch verfassen
+   - Windows-Installer hochladen: `Setup_NexusOneApp_vX.Y.Z.exe`
+   - Release Notes auf Deutsch verfassen (mit echten Umlauten 
+     und N.E.X.U.S. mit Punkten)
 
 Der Update-Checker der App prüft diesen GitHub Release automatisch.
 Für Windows sucht er nach einem `.exe`-Asset, dann `.zip` als Fallback.
 
 ## Code-Standards
 - Dart/Flutter: Effective Dart Style Guide
-- Tests: Jede neue Funktion braucht Unit-Tests
-- Sprache: Code und Kommentare auf Englisch, UI-Texte auf Deutsch
-- Commit-Messages: Conventional Commits (feat:, fix:, docs:)
+- Tests: Wo Test-Infrastruktur existiert, jede neue Funktion mit 
+  Unit-Tests; sonst manueller Test auf beiden Geräten dokumentieren
+- Sprache: Code und Kommentare auf Englisch, UI-Texte auf Deutsch 
+  mit echten Umlauten
+- Commit-Messages: Conventional Commits (`feat:`, `fix:`, `docs:`, 
+  `chore:`, `debug:`)
+- Git: `git push origin master:main`
 
 ## Befehle
-- flutter run – App starten
-- flutter test – Tests laufen lassen
+- `flutter run > log.txt 2>&1` – App starten mit Logfile
+- `flutter run -d windows > log.txt 2>&1` – Windows-Build mit Log
+- `flutter test` – Tests laufen lassen (wo vorhanden)
+- `flutter build apk --release` – Android Release-Build
+- `flutter build windows --release` – Windows Release-Build
 
 ## Design-Prinzipien
-1. "Protokoll, nicht Plattform" – wir bauen einen Standard, keine geschlossene App
-2. "Killer-App zuerst" – Chat muss funktionieren bevor Ökonomie kommt
-3. "Offline-First" – Kernfunktionen müssen ohne Internet laufen
-4. "So einfach wie WhatsApp" – Komplexität gehört in den Hintergrund
+1. **"Protokoll, nicht Plattform"** – wir bauen einen Standard, 
+   keine geschlossene App
+2. **"Killer-App zuerst"** – Chat und Governance müssen funktionieren 
+   bevor Ökonomie kommt
+3. **"Offline-First"** – Kernfunktionen müssen ohne Internet laufen
+4. **"So einfach wie WhatsApp"** – Komplexität gehört in den 
+   Hintergrund
+5. **"Diagnose vor Fix"** – Bei Bugs erst loggen, dann verstehen, 
+   dann fixen. Niemals raten.
+
+## Selbst-Verifikation nach jeder Implementierung
+
+Nach JEDER Code-Änderung — vor dem Commit — folgende
+Schritte zwingend ausführen:
+
+1. flutter analyze
+   → Muss 0 Fehler und 0 Warnings zeigen
+   → Bei Fehlern: sofort fixen, nicht committen
+
+2. flutter test
+   → Darf keine bestehenden Tests brechen
+   → Bei Fehlern: sofort fixen, nicht committen
+
+3. Manuelle Code-Prüfung:
+   → Jede State-Änderung: notifyListeners() aufgerufen?
+   → Jeder neue StreamController: dispose() vorhanden?
+   → Jeder neue Provider-Wert: via context.watch() oder
+     Consumer abonniert?
+   → Jede neue Subscription: wird sie beim App-Start
+     aufgebaut und beim Beenden geschlossen?
+
+4. Erst wenn alle Punkte grün: git add + commit
+
+Diese Regel gilt für ALLE Prompts — auch wenn der
+Prompt es nicht explizit erwähnt.
