@@ -78,21 +78,30 @@ class GroupChannelService {
       final allRows = await PodDatabase.instance.listChannels();
       final all = allRows.map(GroupChannel.fromJson).toList();
 
-      // Debug: print every channel ID+name so we can spot mismatches.
+      // Debug: byte-level comparison to detect whitespace/encoding issues.
       for (final ch in all) {
-        debugPrint('[CHANNEL-LOAD] Checking channel: id=${ch.id} name=${ch.name}');
+        final chId = ch.id.trim();
+        debugPrint('[CHANNEL-LOAD] Checking channel: id=$chId name=${ch.name}');
+        if (_deletedChannelIds.isNotEmpty) {
+          final tombstone = _deletedChannelIds.first;
+          debugPrint('[CHANNEL-LOAD-DEBUG] chId bytes: ${chId.codeUnits}');
+          debugPrint('[CHANNEL-LOAD-DEBUG] tombstone bytes: ${tombstone.codeUnits}');
+          debugPrint('[CHANNEL-LOAD-DEBUG] contains(raw): ${_deletedChannelIds.contains(ch.id)}');
+          debugPrint('[CHANNEL-LOAD-DEBUG] contains(trimmed): ${_deletedChannelIds.contains(chId)}');
+        }
       }
 
+      // Normalise IDs with trim() to guard against whitespace artefacts.
       // Filter out tombstoned channels so they never reappear in the UI.
       final active = all
           .where((ch) =>
-              !_deletedChannelIds.contains(ch.id) &&
-              !_deletedChannelNames.contains(ch.name))
+              !_deletedChannelIds.contains(ch.id.trim()) &&
+              !_deletedChannelNames.contains(ch.name.trim()))
           .toList();
       final deletedOnes = all
           .where((ch) =>
-              _deletedChannelIds.contains(ch.id) ||
-              _deletedChannelNames.contains(ch.name))
+              _deletedChannelIds.contains(ch.id.trim()) ||
+              _deletedChannelNames.contains(ch.name.trim()))
           .toList();
 
       _joined
@@ -216,11 +225,12 @@ class GroupChannelService {
     // Tombstone prevents this channel from re-appearing via Nostr discovery
     // after restart. We tombstone both ID and name because a re-discovered
     // channel may arrive with a different UUID.
-    _deletedChannelIds.add(channel.id);
-    _deletedChannelNames.add(channel.name);
+    // Trim to avoid whitespace artefacts causing lookup misses.
+    _deletedChannelIds.add(channel.id.trim());
+    _deletedChannelNames.add(channel.name.trim());
     try {
-      await PodDatabase.instance.addDeletedChannel(channel.id);
-      await PodDatabase.instance.addDeletedChannelName(channel.name);
+      await PodDatabase.instance.addDeletedChannel(channel.id.trim());
+      await PodDatabase.instance.addDeletedChannelName(channel.name.trim());
       debugPrint('[CHANNEL-DELETE] Tombstone gesetzt: id=${channel.id} name=${channel.name}');
     } catch (e) {
       debugPrint('[CHANNEL-DELETE] Tombstone FAILED: $e');
@@ -274,17 +284,24 @@ class GroupChannelService {
   /// Adds the channel to the discovered list unless it is hidden
   /// (isDiscoverable == false) or already joined.
   void addDiscoveredFromNostr(GroupChannel channel) {
-    if (_deletedChannelIds.contains(channel.id) ||
-        _deletedChannelNames.contains(channel.name)) {
+    final isJoined = _joined.any((c) => c.name == channel.name);
+    print('[CHANNEL-SYNC] Kind-40 empfangen: ${channel.name} → joined=$isJoined '
+        'id=${channel.id}');
+    if (_deletedChannelIds.contains(channel.id.trim()) ||
+        _deletedChannelNames.contains(channel.name.trim())) {
       print('[CHANNEL-SYNC] Überspringe gelöschten Kanal: ${channel.id} '
           'name=${channel.name}');
       return;
     }
-    if (!channel.isDiscoverable) return; // hidden channels not in discovery
-    if (_joined.any((c) => c.name == channel.name)) return;
+    if (!channel.isDiscoverable) {
+      print('[CHANNEL-SYNC] Überspringe nicht-öffentlichen Kanal: ${channel.name}');
+      return;
+    }
+    if (isJoined) return;
     _discovered.removeWhere((c) => c.name == channel.name);
     _discovered.add(channel);
     _channelChangedController.add(null);
+    print('[CHANNEL-SYNC] Zu discovered hinzugefügt: ${channel.name}');
   }
 
   /// Restores a channel from a backup JSON map (merge – only adds if not

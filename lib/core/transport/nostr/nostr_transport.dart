@@ -1611,7 +1611,6 @@ class NostrTransport implements MessageTransport {
   /// skipped here.
   void _handleFeedDeletion(NostrEvent event) {
     if (_keys == null) return;
-    if (event.pubkey == _keys!.publicKeyHex) return; // own deletion, already applied locally
     final ids = event.tagValues('e');
     if (ids.isEmpty) return;
     final tTags = event.tagValues('t');
@@ -1620,15 +1619,22 @@ class NostrTransport implements MessageTransport {
         : event.pubkey;
 
     // Channel deletion (Kind-5 with t=nexus-channel-delete).
+    // NOTE: own-pubkey check is intentionally skipped here because both
+    // Android and Windows share the same Nostr keypair (same seed phrase).
+    // A channel deletion published from device A must be applied on device B
+    // even though B sees event.pubkey == localPubkey.
     if (tTags.contains('nexus-channel-delete')) {
-      print('[CHANNEL-DELETE-RECV] Kind-5 für Kanal received from $shortSender…: '
+      print('[CHANNEL-DELETE-RECV] Kind-5 für Kanal empfangen von $shortSender…: '
           '${ids.length} channel-id(s)');
       for (final id in ids) {
-        print('[CHANNEL-DELETE-RECV] Kanal-ID: $id');
+        print('[CHANNEL-DELETE-RECV] Tombstone gesetzt: $id');
       }
       _channelDeletedController.add(ids);
       return;
     }
+
+    // For feed/message deletions: skip own events (already applied locally).
+    if (event.pubkey == _keys!.publicKeyHex) return;
 
     // Dorfplatz / message deletion.
     final isDorfplatz = tTags.contains('nexus-dorfplatz');
