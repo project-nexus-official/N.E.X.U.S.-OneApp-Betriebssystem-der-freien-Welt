@@ -449,7 +449,40 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
         isDiscoverable: (data['isDiscoverable'] as bool?) ?? true,
         nostrTag: nostrTag,
       );
-      GroupChannelService.instance.addDiscoveredFromNostr(channel);
+
+      final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+      final isOwnChannel = channel.createdBy == myDid;
+      final alreadyJoined = GroupChannelService.instance.isJoined(channel.name);
+
+      // Diagnostic: show which list the channel lands in.
+      print('[CHANNEL-UI] Channel added to UI: ${channel.name}');
+      print('[CHANNEL-UI] List source: ${alreadyJoined ? "_joined" : isOwnChannel ? "_joined (auto)" : "_discovered"}'
+          ' count=${GroupChannelService.instance.joinedChannels.length}');
+
+      if (alreadyJoined) {
+        // Already in _joined — just refresh the UI list.
+        ConversationService.instance.notifyUpdate();
+        print('[CHANNEL-UI] Rebuild triggered for channel list');
+        notifyListeners();
+        return;
+      }
+
+      if (isOwnChannel) {
+        // Channel was created by the current user on another device → auto-join
+        // so it appears in the Kanäle tab on this device without manual action.
+        GroupChannelService.instance.joinChannel(channel).then((_) {
+          ConversationService.instance.notifyUpdate();
+          print('[CHANNEL-UI] Rebuild triggered for channel list');
+          notifyListeners();
+        });
+      } else {
+        // Another user's channel: add to _discovered for the discovery screen
+        // (JoinChannelScreen). It intentionally does NOT appear in the Kanäle tab.
+        GroupChannelService.instance.addDiscoveredFromNostr(channel);
+        ConversationService.instance.notifyUpdate();
+        print('[CHANNEL-UI] Rebuild triggered for channel list');
+        notifyListeners();
+      }
     } catch (e) {
       debugPrint('[CHAT] Channel announced parse error: $e');
     }
