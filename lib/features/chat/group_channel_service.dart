@@ -163,6 +163,37 @@ class GroupChannelService {
     }
   }
 
+  /// Returns the channel whose Kind-40 Nostr event ID matches [eventId], or
+  /// null if no such channel is found in memory.  Used by the Kind-5 receiver
+  /// to translate Nostr event IDs back to internal channel UUIDs.
+  GroupChannel? findByNostrEventId(String eventId) {
+    try {
+      return _joined.firstWhere((c) => c.nostrEventId == eventId);
+    } catch (_) {
+      try {
+        return _discovered.firstWhere((c) => c.nostrEventId == eventId);
+      } catch (_) {
+        return null;
+      }
+    }
+  }
+
+  /// Updates the [nostrEventId] for the in-memory channel and persists it.
+  ///
+  /// Called after [publishChannelCreate] returns the real Nostr event ID.
+  Future<void> setNostrEventId(String channelId, String nostrEventId) async {
+    final idx = _joined.indexWhere((c) => c.id == channelId);
+    if (idx >= 0) {
+      _joined[idx] = _joined[idx].copyWith(nostrEventId: nostrEventId);
+    }
+    await PodDatabase.instance.setChannelNostrEventId(channelId, nostrEventId);
+    // Also update the enc blob so restores include the nostrEventId.
+    final updated = idx >= 0 ? _joined[idx] : null;
+    if (updated != null) {
+      await PodDatabase.instance.upsertChannel(channelId, updated.toJson());
+    }
+  }
+
   /// Replaces the stored channel with [updated] and persists it.
   Future<void> updateChannel(GroupChannel updated) async {
     final idx = _joined.indexWhere((c) => c.id == updated.id);

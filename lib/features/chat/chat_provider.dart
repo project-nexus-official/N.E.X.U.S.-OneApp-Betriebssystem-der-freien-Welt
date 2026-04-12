@@ -502,8 +502,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// via Nostr discovery.  Also cleans up local messages for the channel.
   Future<void> _onChannelDeletedFromNostr(List<String> channelIds) async {
     for (final channelId in channelIds) {
-      print('[CHANNEL-DELETE-RECV] Kind-5 für Kanal: $channelId');
       final channel = GroupChannelService.instance.findById(channelId);
+      final channelName = channel?.name ?? '?';
+      print('[CHANNEL-DELETE-RECV] Kanal entfernt: $channelName (id=$channelId)');
       // Mark deleted in service (tombstone + memory cleanup).
       await GroupChannelService.instance.markChannelDeletedLocally(channelId);
       // If we had joined this channel, clean up local messages too.
@@ -513,8 +514,6 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
         _conversationCache.remove(channel.name);
         _cacheLoadedFromDb.remove(channel.name);
         await ConversationService.instance.deleteConversation(channel.name);
-        print('[CHANNEL-DELETE-RECV] Kanal lokal gelöscht + tombstone: $channelId '
-            'name=${channel.name}');
       }
       notifyListeners();
     }
@@ -2343,7 +2342,12 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     if (channel != null) {
       final myDid = IdentityService.instance.currentIdentity?.did ?? '';
       if (channel.createdBy == myDid) {
-        _nostrTransport?.publishChannelDeletion(channel.id, channel.name);
+        // Pass the stored Nostr event ID so the Kind-5 e-tag is NIP-01 compliant.
+        await _nostrTransport?.publishChannelDeletion(
+          channel.id,
+          channel.name,
+          nostrEventId: channel.nostrEventId,
+        );
       } else {
         debugPrint('[CHANNEL-DELETE] Kind-5: übersprungen — Nutzer ist nicht Creator');
       }

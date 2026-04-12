@@ -55,7 +55,7 @@ class PodDatabase {
 
     _db = await openDatabase(
       dbPath,
-      version: 15,
+      version: 16,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -744,6 +744,14 @@ class PodDatabase {
         'ALTER TABLE message_reactions ADD COLUMN nostr_event_id TEXT',
       );
     }
+    if (oldVersion < 16) {
+      // Add nostr_event_id column to group_channels so NIP-09 Kind-5 channel
+      // deletion events can use the real 64-hex Nostr event ID in the e-tag
+      // instead of the internal UUID (which violates NIP-01).
+      await db.execute(
+        'ALTER TABLE group_channels ADD COLUMN nostr_event_id TEXT',
+      );
+    }
   }
 
   // ── Identity namespace ────────────────────────────────────────────────────
@@ -1078,9 +1086,38 @@ class PodDatabase {
         'updated_at': now,
         // Store cell_id as a plain column for efficient querying.
         'cell_id': data['cellId'] as String?,
+        // Store nostr_event_id as a plain column for Kind-5 deletion lookup.
+        if (data['nostrEventId'] != null)
+          'nostr_event_id': data['nostrEventId'] as String,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+  }
+
+  /// Updates only the [nostrEventId] column for the channel with [channelId].
+  ///
+  /// Called after [publishChannelCreate] returns the real Nostr event ID so
+  /// that [publishChannelDeletion] can later use it as a NIP-01 compliant e-tag.
+  Future<void> setChannelNostrEventId(String channelId, String nostrEventId) async {
+    await _database.update(
+      'group_channels',
+      {'nostr_event_id': nostrEventId},
+      where: 'id = ?',
+      whereArgs: [channelId],
+    );
+  }
+
+  /// Returns the internal channel UUID for the given Nostr [eventId], or null
+  /// if no channel with that Kind-40 event ID exists locally.
+  Future<String?> getChannelIdByNostrEventId(String eventId) async {
+    final rows = await _database.query(
+      'group_channels',
+      columns: ['id'],
+      where: 'nostr_event_id = ?',
+      whereArgs: [eventId],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first['id'] as String?;
   }
 
   /// Returns all channels (public + cell-internal).

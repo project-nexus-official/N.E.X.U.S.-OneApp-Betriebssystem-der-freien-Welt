@@ -12,6 +12,7 @@ import 'package:cryptography/cryptography.dart' show AesCbc, MacAlgorithm,
 import '../../../core/contacts/contact_service.dart';
 import '../../../core/identity/profile.dart';
 import '../../../core/identity/profile_service.dart';
+import '../../../features/chat/group_channel_service.dart';
 import '../../../features/profile/profile_image_service.dart';
 import '../message_transport.dart';
 import '../nexus_message.dart';
@@ -388,8 +389,11 @@ class NostrTransport implements MessageTransport {
   ///
   /// The channelSecret (for private channels) is NOT included in the Kind-40
   /// event — it is distributed only to accepted members via encrypted DMs.
-  void publishChannelCreate(Map<String, dynamic> channelData) {
-    if (_keys == null) return;
+  /// Publishes a NIP-28 Kind-40 channel creation event and returns the Nostr
+  /// event ID (64-char hex) so the caller can persist it for later NIP-09
+  /// deletion events.  Returns null if no keys are available.
+  Future<String?> publishChannelCreate(Map<String, dynamic> channelData) async {
+    if (_keys == null) return null;
     final isPublic = (channelData['isPublic'] as bool?) ?? true;
     final isDiscoverable = (channelData['isDiscoverable'] as bool?) ?? true;
     final channelId = channelData['id'] as String? ?? '';
@@ -417,29 +421,52 @@ class NostrTransport implements MessageTransport {
     print('[CHANNEL-CREATE] Tags: t=$nostrTag t=nexus-channel access=${isPublic ? 'public' : 'private'} discoverable=$isDiscoverable');
     print('[CHANNEL-CREATE] Relays: $connectedRelays (see [RELAY-OK] for responses)');
     _relayManager.publish(event);
+    return event.id;
   }
 
   /// Publishes a NIP-09 Kind-5 deletion event for a channel.
   ///
-  /// Uses an `e` tag with the channel's UUID and a custom `t=nexus-channel-delete`
-  /// tag so receivers can distinguish channel deletions from message deletions.
+  /// If [nostrEventId] is a valid 64-char hex Nostr event ID it is used as the
+  /// NIP-01 compliant `e` tag so public relays accept the event.
+  /// The custom `channel_id` tag (containing the internal UUID) is ALWAYS
+  /// included so the receiver can identify the channel even on legacy events
+  /// that lack a valid `e` tag.
+  ///
   /// NOTE: This is a best-effort hint — relays and peers may not honour it.
-  void publishChannelDeletion(String channelId, String channelName) {
+  Future<void> publishChannelDeletion(
+    String channelId,
+    String channelName, {
+    String? nostrEventId,
+  }) async {
     if (_keys == null) return;
+    final tags = <List<String>>[
+      ['t', 'nexus-channel-delete'],
+      // Custom tag always present — used by receiver to locate the channel.
+      ['channel_id', channelId],
+      // k-tag for NIP-09 compliance: marks which kind is being deleted.
+      ['k', '${NostrKind.channelCreate}'],
+    ];
+
+    // NIP-01: e-tag MUST be a 64-char hex event ID.  Only add it when we have
+    // the real Nostr event ID; otherwise the relay rejects the event entirely.
+    if (nostrEventId != null && nostrEventId.length == 64) {
+      tags.insert(0, ['e', nostrEventId]);
+      print('[CHANNEL-DEL-PUB] Using real event-id for e-tag');
+    } else {
+      print('[CHANNEL-DEL-PUB] No valid nostrEventId available — '
+          'channel_id custom tag only (legacy channel)');
+    }
+
     final event = NostrEvent.create(
       keys: _keys!,
       kind: NostrKind.deletion,
       content: 'Kanal "$channelName" wurde gelöscht.',
-      tags: [
-        ['e', channelId],
-        ['t', 'nexus-channel-delete'],
-      ],
+      tags: tags,
     );
     final connectedRelays =
         _relayManager.statuses.where((s) => s.state == RelayState.connected).length;
     print('[CHANNEL-DEL-PUB] Publishing Kind-5 channel delete');
-    print('[CHANNEL-DEL-PUB] channelId=$channelId');
-    print('[CHANNEL-DEL-PUB] channelId.length=${channelId.length} (must be 64 for valid e-tag, UUID=36)');
+    print('[CHANNEL-DEL-PUB] channelId=$channelId nostrEventId=$nostrEventId');
     print('[CHANNEL-DEL-PUB] Tags being sent:');
     for (final tag in event.tags) {
       print('[CHANNEL-DEL-PUB]   $tag');
@@ -1634,21 +1661,53 @@ class NostrTransport implements MessageTransport {
   /// Own-pubkey check is intentionally skipped: Android and Windows share the
   /// same Nostr keypair (same seed phrase), so a deletion from device A must
   /// be applied on device B even if event.pubkey == localPubkey.
+  ///
+  /// Resolution priority for the internal channel UUID:
+  ///   1. Custom `channel_id` tag — always present in events from this client.
+  ///   2. In-memory lookup via `nostrEventId` from the `e` tag.
+  ///   3. If neither matches: skip (unknown channel — may have been deleted already).
   void _handleChannelDeletion(NostrEvent event) {
-    final ids = event.tagValues('e');
     final tTags = event.tagValues('t');
     print('[CHANNEL-DELETE-RECV] _handleChannelDeletion called');
-    print('[CHANNEL-DELETE-RECV] e-tags (channel IDs to delete): $ids');
     print('[CHANNEL-DELETE-RECV] t-tags: $tTags');
-    for (final id in ids) {
-      print('[CHANNEL-DELETE-RECV]   id=$id  length=${id.length} (64=valid Nostr ID, 36=UUID)');
+    print('[CHANNEL-DELETE-RECV] Raw tags: ${event.tags}');
+
+    final resolvedIds = <String>[];
+
+    // PRIORITY 1: custom channel_id tag — contains the internal UUID directly.
+    final channelIdTags = event.tags
+        .where((t) => t.length >= 2 && t[0] == 'channel_id')
+        .map((t) => t[1])
+        .toList();
+    if (channelIdTags.isNotEmpty) {
+      print('[CHANNEL-DELETE-RECV] channel_id custom tag(s) found: $channelIdTags');
+      resolvedIds.addAll(channelIdTags);
+    } else {
+      // PRIORITY 2: e-tag → look up in-memory by nostrEventId.
+      final eTags = event.tagValues('e');
+      print('[CHANNEL-DELETE-RECV] No channel_id tag — trying e-tag lookup. '
+          'e-tags: $eTags');
+      for (final eventId in eTags) {
+        print('[CHANNEL-DELETE-RECV]   e-tag=$eventId length=${eventId.length}');
+        if (eventId.length == 64) {
+          final ch = GroupChannelService.instance.findByNostrEventId(eventId);
+          if (ch != null) {
+            print('[CHANNEL-DELETE-RECV]   → resolved to channelId=${ch.id} name=${ch.name}');
+            resolvedIds.add(ch.id);
+          } else {
+            print('[CHANNEL-DELETE-RECV]   → no in-memory channel for eventId=${eventId.substring(0, 8)}…');
+          }
+        }
+      }
     }
-    if (ids.isEmpty) {
-      print('[CHANNEL-DELETE-RECV] ⚠ No e-tags found — dropping event, nothing to delete');
+
+    if (resolvedIds.isEmpty) {
+      print('[CHANNEL-DELETE-RECV] ⚠ No channel resolved — dropping event');
       return;
     }
-    print('[CHANNEL-DELETE-RECV] Forwarding ${ids.length} id(s) to channelDeletedController');
-    _channelDeletedController.add(ids);
+
+    print('[CHANNEL-DELETE-RECV] Forwarding ${resolvedIds.length} UUID(s) to channelDeletedController: $resolvedIds');
+    _channelDeletedController.add(resolvedIds);
   }
 
   /// Handles incoming NIP-09 Kind-5 deletion requests for feed posts and

@@ -54,6 +54,11 @@ class GroupChannel {
   /// in the general Kanäle list. Only shown within [CellScreen].
   final String? cellId;
 
+  /// The Nostr event ID (64-char hex) of the Kind-40 creation event.
+  /// Null for legacy channels created before this field was introduced.
+  /// Used for NIP-09 compliant Kind-5 deletion events.
+  final String? nostrEventId;
+
   GroupChannel({
     required this.id,
     required this.name,
@@ -68,6 +73,7 @@ class GroupChannel {
     this.channelMode = ChannelMode.discussion,
     List<String>? members,
     this.cellId,
+    this.nostrEventId,
   }) : members = members ?? [];
 
   /// The conversation_id used to store messages for this channel.
@@ -114,6 +120,7 @@ class GroupChannel {
     ChannelMode? channelMode,
     List<String>? members,
     String? cellId,
+    String? nostrEventId,
   }) {
     final newName = name ?? this.name;
     return GroupChannel(
@@ -130,6 +137,7 @@ class GroupChannel {
       channelMode: channelMode ?? this.channelMode,
       members: members ?? List.from(this.members),
       cellId: cellId ?? this.cellId,
+      nostrEventId: nostrEventId ?? this.nostrEventId,
     );
   }
 
@@ -182,6 +190,7 @@ class GroupChannel {
         'channelMode': channelMode.value,
         if (members.isNotEmpty) 'members': members,
         if (cellId != null) 'cellId': cellId,
+        if (nostrEventId != null) 'nostrEventId': nostrEventId,
       };
 
   factory GroupChannel.fromJson(Map<String, dynamic> json) => GroupChannel(
@@ -207,6 +216,7 @@ class GroupChannel {
         channelMode: ChannelModeJson.fromString(json['channelMode'] as String?),
         members: _parseStringList(json['members']),
         cellId: json['cellId'] as String?,
+        nostrEventId: json['nostrEventId'] as String?,
       );
 
   @override

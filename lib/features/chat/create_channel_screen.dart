@@ -79,7 +79,14 @@ class _CreateChannelScreenState extends State<CreateChannelScreen> {
     // ALL channels (public and private) are announced on Nostr (Kind-40) and
     // subscribed to. Private messages are encrypted with the channelSecret.
     final nostr = context.read<ChatProvider>().nostrTransport;
-    nostr?.publishChannelCreate(channel.toJson());
+    // publishChannelCreate now returns the Nostr event ID so we can store it
+    // for NIP-09 compliant deletion events later.
+    final nostrEventId = await nostr?.publishChannelCreate(channel.toJson());
+    if (nostrEventId != null) {
+      await GroupChannelService.instance.setNostrEventId(channel.id, nostrEventId);
+      print('[CHANNEL-CREATE] Stored nostrEventId for ${channel.name}: '
+          '${nostrEventId.substring(0, 8)}…');
+    }
     nostr?.subscribeToChannel(channel.nostrTag);
 
     Navigator.of(context).pop(channel);
