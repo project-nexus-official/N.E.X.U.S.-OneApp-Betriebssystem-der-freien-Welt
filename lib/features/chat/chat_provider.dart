@@ -317,6 +317,10 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       // Republish all cells where the local user is FOUNDER so that other
       // devices can discover them. We delay by 3 s to let relays connect first.
       Future.delayed(const Duration(seconds: 3), _republishMyCells);
+
+      // One-shot: republish tombstoned channel deletes so pre-v0.1.8 zombies
+      // are healed on all devices. Delay 5 s to let relay connections stabilise.
+      Future.delayed(const Duration(seconds: 5), _republishZombieChannels);
     } catch (e) {
       debugPrint('[CHAT] Channel init failed: $e');
     }
@@ -800,6 +804,67 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     debugPrint('[CELL] Republishing ${founderCells.length} founder cell(s) to Nostr');
     for (final cell in founderCells) {
       _nostrTransport?.publishCellAnnouncement(cell.toJson());
+    }
+  }
+
+  /// One-shot republish of all channel tombstones so that devices that missed
+  /// the original Kind-5 delete (because the event was rejected by the relay
+  /// before the NIP-01 fix in v0.1.8) can now receive it.
+  ///
+  /// Runs once per installation; controlled by the SharedPreferences flag
+  /// `channel_zombie_republish_v1_done`.
+  Future<void> _republishZombieChannels() async {
+    final prefs = await SharedPreferences.getInstance();
+    final done = prefs.getBool('channel_zombie_republish_v1_done') ?? false;
+    if (done) {
+      print('[ZOMBIE-REPUBLISH] Already done (v1), skipping');
+      return;
+    }
+
+    final tombstoneIds = await PodDatabase.instance.listDeletedChannelIds();
+    print('[ZOMBIE-REPUBLISH] Found ${tombstoneIds.length} tombstones to republish');
+
+    if (tombstoneIds.isEmpty) {
+      print('[ZOMBIE-REPUBLISH] No tombstones — setting flag');
+      await prefs.setBool('channel_zombie_republish_v1_done', true);
+      print('[ZOMBIE-REPUBLISH] Setting flag channel_zombie_republish_v1_done=true');
+      return;
+    }
+
+    int successful = 0;
+    int failed = 0;
+
+    for (final channelId in tombstoneIds) {
+      // nostrEventId was deleted together with the group_channels row and is
+      // therefore unavailable. publishChannelDeletion falls back to the
+      // channel_id custom tag, which the receiver uses to identify the channel.
+      print('[ZOMBIE-REPUBLISH] Tombstone: channelId=$channelId hasNostrEventId=false');
+      print('[ZOMBIE-REPUBLISH] Publishing delete for $channelId');
+      try {
+        await _nostrTransport?.publishChannelDeletion(
+          channelId,
+          '(gelöschter Kanal)',
+          nostrEventId: null,
+        );
+        // OK/rejection is logged by NostrRelayManager as [RELAY-OK] for
+        // every published event — no silent failures.
+        print('[ZOMBIE-REPUBLISH-OK] published channelId=$channelId '
+            '(relay response → see [RELAY-OK] above)');
+        successful++;
+      } catch (e) {
+        print('[ZOMBIE-REPUBLISH] FAILED to publish: $channelId — $e');
+        failed++;
+      }
+    }
+
+    print('[ZOMBIE-REPUBLISH] Done. Successful: $successful, Failed: $failed');
+
+    if (failed == 0) {
+      await prefs.setBool('channel_zombie_republish_v1_done', true);
+      print('[ZOMBIE-REPUBLISH] Setting flag channel_zombie_republish_v1_done=true');
+    } else {
+      print('[ZOMBIE-REPUBLISH] Not setting flag (failures exist) '
+          '— will retry on next start');
     }
   }
 
