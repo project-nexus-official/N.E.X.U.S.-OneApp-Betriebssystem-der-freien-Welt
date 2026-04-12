@@ -285,15 +285,17 @@ class NostrRelayManager {
       url.replaceAll('wss://', '').replaceAll('ws://', '');
 
   void _handleMessage(String url, String data) {
-    // Raw-Logging für Diagnose: alle relay-Antworten die vote/31011/OK betreffen
+    // Raw-Logging für Diagnose: alle relay-Antworten die vote/31011/OK/Kind-5 betreffen
     if (data.contains('31011') ||
         data.contains('31010') ||
         data.contains('"OK"') ||
         data.startsWith('["OK"') ||
         data.contains('NOTICE') ||
         data.contains('vote') ||
-        data.contains('proposal')) {
-      if (kDebugMode) print('[RELAY-RAW] ${_shortUrl(url)}: $data');
+        data.contains('proposal') ||
+        data.contains('"kind":5') ||
+        data.contains('nexus-channel-delete')) {
+      print('[RELAY-RAW] ${_shortUrl(url)}: $data');
     }
 
     try {

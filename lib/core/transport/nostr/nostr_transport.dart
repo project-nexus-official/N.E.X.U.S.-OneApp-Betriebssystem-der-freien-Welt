@@ -437,9 +437,14 @@ class NostrTransport implements MessageTransport {
     );
     final connectedRelays =
         _relayManager.statuses.where((s) => s.state == RelayState.connected).length;
-    print('[CHANNEL-DELETE] Kind-5 publiziert: '
-        '${event.id.length >= 8 ? event.id.substring(0, 8) : event.id}…');
-    print('[CHANNEL-DELETE] e-tag: $channelId  relays: $connectedRelays');
+    print('[CHANNEL-DEL-PUB] Publishing Kind-5 channel delete');
+    print('[CHANNEL-DEL-PUB] channelId=$channelId');
+    print('[CHANNEL-DEL-PUB] channelId.length=${channelId.length} (must be 64 for valid e-tag, UUID=36)');
+    print('[CHANNEL-DEL-PUB] Tags being sent:');
+    for (final tag in event.tags) {
+      print('[CHANNEL-DEL-PUB]   $tag');
+    }
+    print('[CHANNEL-DEL-PUB] Targeting $connectedRelays relay(s)');
     _relayManager.publish(event);
   }
 
@@ -1501,7 +1506,31 @@ class NostrTransport implements MessageTransport {
           _handleBroadcast(event);
         }
       case NostrKind.deletion:
-        _handleFeedDeletion(event);
+        final tTags = event.tagValues('t');
+        final shortId =
+            event.id.length >= 8 ? event.id.substring(0, 8) : event.id;
+        print('[KIND5-RECV] Received Kind-5 from relay');
+        print('[KIND5-RECV] Event ID: $shortId…');
+        print('[KIND5-RECV] Author: ${event.pubkey.length >= 8 ? event.pubkey.substring(0, 8) : event.pubkey}…');
+        print('[KIND5-RECV] created_at: ${event.createdAt}');
+        print('[KIND5-RECV] Raw tags (count=${event.tags.length}):');
+        for (final tag in event.tags) {
+          print('[KIND5-RECV]   $tag');
+        }
+        final eTags5 = event.tags.where((t) => t.isNotEmpty && t[0] == 'e').toList();
+        final tTagsFull = event.tags.where((t) => t.isNotEmpty && t[0] == 't').toList();
+        final kTags5 = event.tags.where((t) => t.isNotEmpty && t[0] == 'k').toList();
+        print('[KIND5-RECV] e-tags found: ${eTags5.length} → $eTags5');
+        print('[KIND5-RECV] t-tags found: ${tTagsFull.length} → $tTagsFull');
+        print('[KIND5-RECV] k-tags found: ${kTags5.length} → $kTags5');
+        print('[KIND5-ROUTE] Attempting to route Kind-5…');
+        if (tTags.contains('nexus-channel-delete')) {
+          print('[KIND5-ROUTE] Decision: CHANNEL_DELETE (t-tag=nexus-channel-delete matched)');
+          _handleChannelDeletion(event);
+        } else {
+          print('[KIND5-ROUTE] Decision: FEED/MSG_DELETE (no nexus-channel-delete t-tag)');
+          _handleFeedDeletion(event);
+        }
       case NostrKind.repost:
         _handleFeedPost(event);
       case NostrKind.reaction:
@@ -1600,15 +1629,34 @@ class NostrTransport implements MessageTransport {
     });
   }
 
-  /// Handles incoming NIP-09 Kind-5 deletion requests.
+  /// Handles incoming Kind-5 channel deletion events (t=nexus-channel-delete).
   ///
-  /// Routes the event to the correct stream based on the `t` tag:
-  ///   - `nexus-channel-delete` → channel deletion stream
-  ///   - `nexus-dorfplatz`      → feed deletion stream
-  ///   - (no t-tag)             → feed deletion stream (chat deletions fall here)
+  /// Own-pubkey check is intentionally skipped: Android and Windows share the
+  /// same Nostr keypair (same seed phrase), so a deletion from device A must
+  /// be applied on device B even if event.pubkey == localPubkey.
+  void _handleChannelDeletion(NostrEvent event) {
+    final ids = event.tagValues('e');
+    final tTags = event.tagValues('t');
+    print('[CHANNEL-DELETE-RECV] _handleChannelDeletion called');
+    print('[CHANNEL-DELETE-RECV] e-tags (channel IDs to delete): $ids');
+    print('[CHANNEL-DELETE-RECV] t-tags: $tTags');
+    for (final id in ids) {
+      print('[CHANNEL-DELETE-RECV]   id=$id  length=${id.length} (64=valid Nostr ID, 36=UUID)');
+    }
+    if (ids.isEmpty) {
+      print('[CHANNEL-DELETE-RECV] ⚠ No e-tags found — dropping event, nothing to delete');
+      return;
+    }
+    print('[CHANNEL-DELETE-RECV] Forwarding ${ids.length} id(s) to channelDeletedController');
+    _channelDeletedController.add(ids);
+  }
+
+  /// Handles incoming NIP-09 Kind-5 deletion requests for feed posts and
+  /// chat messages.
   ///
-  /// Own deletions are already applied locally before publishing, so they are
-  /// skipped here.
+  /// Channel deletions (t=nexus-channel-delete) are already routed to
+  /// [_handleChannelDeletion] before this is called, so only feed/message
+  /// deletions reach here.  Own events are skipped (already applied locally).
   void _handleFeedDeletion(NostrEvent event) {
     if (_keys == null) return;
     final ids = event.tagValues('e');
@@ -1617,21 +1665,6 @@ class NostrTransport implements MessageTransport {
     final shortSender = event.pubkey.length >= 8
         ? event.pubkey.substring(0, 8)
         : event.pubkey;
-
-    // Channel deletion (Kind-5 with t=nexus-channel-delete).
-    // NOTE: own-pubkey check is intentionally skipped here because both
-    // Android and Windows share the same Nostr keypair (same seed phrase).
-    // A channel deletion published from device A must be applied on device B
-    // even though B sees event.pubkey == localPubkey.
-    if (tTags.contains('nexus-channel-delete')) {
-      print('[CHANNEL-DELETE-RECV] Kind-5 für Kanal empfangen von $shortSender…: '
-          '${ids.length} channel-id(s)');
-      for (final id in ids) {
-        print('[CHANNEL-DELETE-RECV] Tombstone gesetzt: $id');
-      }
-      _channelDeletedController.add(ids);
-      return;
-    }
 
     // For feed/message deletions: skip own events (already applied locally).
     if (event.pubkey == _keys!.publicKeyHex) return;
@@ -1810,16 +1843,17 @@ class NostrTransport implements MessageTransport {
     print('[CHANNEL-SYNC] Subscribing since=0 (all-time, tombstone-filtered)');
     print('[CHANNEL-SYNC] subId=$_channelDiscoverySubId');
 
-    // Subscribe to channel deletion events (Kind-5 tagged nexus-channel-delete).
+    // Subscribe to ALL Kind-5 deletion events — no #t filter because public
+    // relays do not index custom tags like nexus-channel-delete.  The Dart-side
+    // router in _onRelayEvent inspects t-tags and dispatches to
+    // _handleChannelDeletion or _handleFeedDeletion accordingly.
     if (_channelDeleteSubId != null) {
       _relayManager.closeSubscription(_channelDeleteSubId!);
     }
     _channelDeleteSubId = _relayManager.subscribe({
       'kinds': [NostrKind.deletion],
-      '#t': ['nexus-channel-delete'],
     });
-    print('[CHANNEL-SYNC] Channel-delete sub: $_channelDeleteSubId '
-        '(Kind-5 nexus-channel-delete, all-time)');
+    print('[CHANNEL-SYNC] Kind-5 sub (all, no #t filter): $_channelDeleteSubId');
   }
 
   void _handleChannelCreateEvent(NostrEvent event) {
