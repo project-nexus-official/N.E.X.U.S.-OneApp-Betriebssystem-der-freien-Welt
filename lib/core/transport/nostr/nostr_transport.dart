@@ -4,6 +4,8 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'package:flutter/foundation.dart';
 
 import 'package:cryptography/cryptography.dart' show AesCbc, MacAlgorithm,
@@ -76,6 +78,7 @@ class NostrTransport implements MessageTransport {
   String? _presenceSubId;
   String? _metadataSubId;
   String? _channelDiscoverySubId;
+  String? _channelDeleteSubId;
 
   // nostrTag → subscription ID for joined group channels
   final Map<String, String> _channelSubIds = {};
@@ -86,6 +89,14 @@ class NostrTransport implements MessageTransport {
   /// Emits a channel data map whenever a Kind-40 announcement arrives.
   Stream<Map<String, dynamic>> get onChannelAnnounced =>
       _channelAnnouncedController.stream;
+
+  final _channelDeletedController =
+      StreamController<List<String>>.broadcast();
+
+  /// Emits a list of channel IDs whenever a Kind-5 nexus-channel-delete event
+  /// arrives from another peer.
+  Stream<List<String>> get onChannelDeleted =>
+      _channelDeletedController.stream;
 
   final _feedPostController =
       StreamController<Map<String, dynamic>>.broadcast();
@@ -407,6 +418,30 @@ class NostrTransport implements MessageTransport {
     print('[CHANNEL-CREATE] EventId: ${event.id.length >= 8 ? event.id.substring(0, 8) : event.id}…');
     print('[CHANNEL-CREATE] Tags: t=$nostrTag t=nexus-channel access=${isPublic ? 'public' : 'private'} discoverable=$isDiscoverable');
     print('[CHANNEL-CREATE] Relays: $connectedRelays (see [RELAY-OK] for responses)');
+    _relayManager.publish(event);
+  }
+
+  /// Publishes a NIP-09 Kind-5 deletion event for a channel.
+  ///
+  /// Uses an `e` tag with the channel's UUID and a custom `t=nexus-channel-delete`
+  /// tag so receivers can distinguish channel deletions from message deletions.
+  /// NOTE: This is a best-effort hint — relays and peers may not honour it.
+  void publishChannelDeletion(String channelId, String channelName) {
+    if (_keys == null) return;
+    final event = NostrEvent.create(
+      keys: _keys!,
+      kind: NostrKind.deletion,
+      content: 'Kanal "$channelName" wurde gelöscht.',
+      tags: [
+        ['e', channelId],
+        ['t', 'nexus-channel-delete'],
+      ],
+    );
+    final connectedRelays =
+        _relayManager.statuses.where((s) => s.state == RelayState.connected).length;
+    print('[CHANNEL-DELETE] Kind-5 publiziert: '
+        '${event.id.length >= 8 ? event.id.substring(0, 8) : event.id}…');
+    print('[CHANNEL-DELETE] e-tag: $channelId  relays: $connectedRelays');
     _relayManager.publish(event);
   }
 
@@ -1293,18 +1328,10 @@ class NostrTransport implements MessageTransport {
       (_) => _refreshMetadataSubscription(),
     );
 
-    // Channel discovery: subscribe to Kind-40 to find available channels.
-    // NOTE: No 'since' filter — fetches ALL Kind-40 events ever published.
-    // This means previously-deleted channels re-appear in _discovered on restart.
-    if (_channelDiscoverySubId != null) {
-      _relayManager.closeSubscription(_channelDiscoverySubId!);
-    }
-    _channelDiscoverySubId = _relayManager.subscribe({
-      'kinds': [NostrKind.channelCreate],
-      '#t': ['nexus-channel'],
-    });
-    print('[CHANNEL-SYNC] Subscribing since=0 (all-time, no since filter)');
-    print('[CHANNEL-SYNC] subId=$_channelDiscoverySubId');
+    // Channel discovery: set up with a 'since' filter so deleted channels
+    // (tombstoned locally) are not overwritten by stale Kind-40 replays.
+    // Uses SharedPreferences key 'channel_last_sync' (Unix seconds).
+    _setupChannelDiscovery(); // fire-and-forget async
 
     // Cell announcements (Kind-30000, parameterized replaceable) — all time.
     if (_cellSubId != null) _relayManager.closeSubscription(_cellSubId!);
@@ -1578,22 +1605,37 @@ class NostrTransport implements MessageTransport {
 
   /// Handles incoming NIP-09 Kind-5 deletion requests.
   ///
-  /// Reads all ['e', <nostrEventId>] tags and emits the list of IDs to delete.
-  /// Only processes events from other peers — own deletions are already applied
-  /// locally in FeedService.deletePost() before the event is published.
+  /// Routes the event to the correct stream based on the `t` tag:
+  ///   - `nexus-channel-delete` → channel deletion stream
+  ///   - `nexus-dorfplatz`      → feed deletion stream
+  ///   - (no t-tag)             → feed deletion stream (chat deletions fall here)
+  ///
+  /// Own deletions are already applied locally before publishing, so they are
+  /// skipped here.
   void _handleFeedDeletion(NostrEvent event) {
     if (_keys == null) return;
     if (event.pubkey == _keys!.publicKeyHex) return; // own deletion, already applied locally
     final ids = event.tagValues('e');
     if (ids.isEmpty) return;
     final tTags = event.tagValues('t');
-    final isDorfplatz = tTags.contains('nexus-dorfplatz');
-    // Distinguish Dorfplatz post deletions (have t=nexus-dorfplatz) from
-    // chat message deletions (no t-tag) so we can diagnose routing gaps.
-    final prefix = isDorfplatz ? 'FEED-DELETE-RECV' : 'MSG-DELETE-RECV';
     final shortSender = event.pubkey.length >= 8
         ? event.pubkey.substring(0, 8)
         : event.pubkey;
+
+    // Channel deletion (Kind-5 with t=nexus-channel-delete).
+    if (tTags.contains('nexus-channel-delete')) {
+      print('[CHANNEL-DELETE-RECV] Kind-5 für Kanal received from $shortSender…: '
+          '${ids.length} channel-id(s)');
+      for (final id in ids) {
+        print('[CHANNEL-DELETE-RECV] Kanal-ID: $id');
+      }
+      _channelDeletedController.add(ids);
+      return;
+    }
+
+    // Dorfplatz / message deletion.
+    final isDorfplatz = tTags.contains('nexus-dorfplatz');
+    final prefix = isDorfplatz ? 'FEED-DELETE-RECV' : 'MSG-DELETE-RECV';
     print('[$prefix] Kind-5 received from $shortSender…: '
         '${ids.length} e-tag(s), t-tags=$tTags');
     for (final id in ids) {
@@ -1747,6 +1789,54 @@ class NostrTransport implements MessageTransport {
     } catch (e) {
       print('[CELL] Cell member-update parse FAILED: $e');
     }
+  }
+
+  /// Subscribes to Kind-40 channel announcements with a persistent since
+  /// timestamp.  On first launch uses "30 days ago" as default so users see
+  /// recently active channels without fetching the entire relay history.
+  Future<void> _setupChannelDiscovery() async {
+    final thirtyDaysAgo =
+        DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000 - 30 * 86400;
+    int since = thirtyDaysAgo;
+    SharedPreferences? prefs;
+    try {
+      prefs = await SharedPreferences.getInstance();
+      since = prefs.getInt('channel_last_sync') ?? thirtyDaysAgo;
+    } catch (_) {
+      // Flutter bindings not initialised (e.g. in unit tests) — use default.
+    }
+
+    if (_channelDiscoverySubId != null) {
+      _relayManager.closeSubscription(_channelDiscoverySubId!);
+    }
+    _channelDiscoverySubId = _relayManager.subscribe({
+      'kinds': [NostrKind.channelCreate],
+      '#t': ['nexus-channel'],
+      'since': since,
+    });
+    print('[CHANNEL-SYNC] Subscribing since=$since '
+        '(${DateTime.fromMillisecondsSinceEpoch(since * 1000, isUtc: true)})');
+    print('[CHANNEL-SYNC] subId=$_channelDiscoverySubId');
+
+    // Subscribe to channel deletion events (Kind-5 tagged nexus-channel-delete).
+    if (_channelDeleteSubId != null) {
+      _relayManager.closeSubscription(_channelDeleteSubId!);
+    }
+    _channelDeleteSubId = _relayManager.subscribe({
+      'kinds': [NostrKind.deletion],
+      '#t': ['nexus-channel-delete'],
+      'since': since,
+    });
+    print('[CHANNEL-SYNC] Channel-delete sub: $_channelDeleteSubId '
+        '(Kind-5 nexus-channel-delete since=$since)');
+
+    // Persist timestamp for next startup so we only fetch new events.
+    try {
+      await prefs?.setInt(
+        'channel_last_sync',
+        DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000,
+      );
+    } catch (_) {}
   }
 
   void _handleChannelCreateEvent(NostrEvent event) {

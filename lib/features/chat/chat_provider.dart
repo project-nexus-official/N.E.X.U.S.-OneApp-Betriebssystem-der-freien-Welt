@@ -129,6 +129,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   StreamSubscription<NexusMessage>? _msgSub;
   StreamSubscription<List<NexusPeer>>? _peersSub;
   StreamSubscription<Map<String, dynamic>>? _channelAnnouncedSub;
+  StreamSubscription<List<String>>? _channelDeletedSub;
   Timer? _muteExpiryTimer;
 
   // ── Initialization ─────────────────────────────────────────────────────────
@@ -276,6 +277,13 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       if (_nostrTransport != null) {
         _channelAnnouncedSub =
             _nostrTransport!.onChannelAnnounced.listen(_onChannelAnnounced);
+      }
+
+      // Listen for channel deletions (Kind-5 nexus-channel-delete) from other peers.
+      _channelDeletedSub?.cancel();
+      if (_nostrTransport != null) {
+        _channelDeletedSub =
+            _nostrTransport!.onChannelDeleted.listen(_onChannelDeletedFromNostr);
       }
 
       // Listen for newly discovered cells via Kind-30000.
@@ -485,6 +493,30 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       }
     } catch (e) {
       debugPrint('[CHAT] Channel announced parse error: $e');
+    }
+  }
+
+  /// Handles incoming Kind-5 channel deletion events from other peers.
+  ///
+  /// Marks the channel as deleted locally + tombstone so it cannot re-appear
+  /// via Nostr discovery.  Also cleans up local messages for the channel.
+  Future<void> _onChannelDeletedFromNostr(List<String> channelIds) async {
+    for (final channelId in channelIds) {
+      print('[CHANNEL-DELETE-RECV] Kind-5 für Kanal: $channelId');
+      final channel = GroupChannelService.instance.findById(channelId);
+      // Mark deleted in service (tombstone + memory cleanup).
+      await GroupChannelService.instance.markChannelDeletedLocally(channelId);
+      // If we had joined this channel, clean up local messages too.
+      if (channel != null) {
+        final nostrTag = channel.nostrTag;
+        _nostrTransport?.unsubscribeFromChannel(nostrTag);
+        _conversationCache.remove(channel.name);
+        _cacheLoadedFromDb.remove(channel.name);
+        await ConversationService.instance.deleteConversation(channel.name);
+        print('[CHANNEL-DELETE-RECV] Kanal lokal gelöscht + tombstone: $channelId '
+            'name=${channel.name}');
+      }
+      notifyListeners();
     }
   }
 
@@ -2299,14 +2331,25 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     debugPrint('[CHANNEL-DELETE] leaveOrDeleteChannel: $channelName '
         'nostrTag=$nostrTag');
 
-    // 1. Remove from group_channels DB + _joined in-memory list.
+    // 1. Remove from group_channels DB + _joined in-memory list (sets tombstone).
     try {
       await GroupChannelService.instance.leaveChannel(channelName);
     } catch (e) {
       debugPrint('[CHANNEL-DELETE] leaveChannel error: $e');
     }
 
-    // 2. Stop Nostr subscription so the relay stops delivering messages.
+    // 2. Publish Kind-5 deletion event — only if the current user is the creator
+    //    (members leaving should not signal deletion to others).
+    if (channel != null) {
+      final myDid = IdentityService.instance.currentIdentity?.did ?? '';
+      if (channel.createdBy == myDid) {
+        _nostrTransport?.publishChannelDeletion(channel.id, channel.name);
+      } else {
+        debugPrint('[CHANNEL-DELETE] Kind-5: übersprungen — Nutzer ist nicht Creator');
+      }
+    }
+
+    // 3. Stop Nostr subscription so the relay stops delivering messages.
     if (nostrTag != null) {
       _nostrTransport?.unsubscribeFromChannel(nostrTag);
       debugPrint('[CHANNEL-DELETE] Nostr unsub: $nostrTag');
@@ -2314,7 +2357,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       debugPrint('[CHANNEL-DELETE] Nostr unsub: skipped (nostrTag null)');
     }
 
-    // 3. Delete all local messages for this channel.
+    // 4. Delete all local messages for this channel.
     _conversationCache.remove(channelName);
     _cacheLoadedFromDb.remove(channelName);
     await ConversationService.instance.deleteConversation(channelName);

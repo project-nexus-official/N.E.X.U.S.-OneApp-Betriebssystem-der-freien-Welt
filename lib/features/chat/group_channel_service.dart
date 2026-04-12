@@ -18,6 +18,11 @@ class GroupChannelService {
   /// Channels discovered via Nostr Kind-40 that the user has not yet joined.
   final List<GroupChannel> _discovered = [];
 
+  /// In-memory set of channel IDs that have been tombstoned (deleted by user).
+  /// Loaded from DB at startup so discovered channels cannot re-appear after
+  /// a restart.
+  Set<String> _deletedChannelIds = {};
+
   final _joinedController =
       StreamController<List<GroupChannel>>.broadcast();
 
@@ -61,13 +66,18 @@ class GroupChannelService {
       _joined
         ..clear()
         ..addAll(rows.map(GroupChannel.fromJson));
-      // Note: no is_deleted flag or tombstone mechanism exists for channels.
-      // All rows in group_channels are treated as active.
+
+      // Load tombstoned channel IDs so the discovery filter works on startup.
+      _deletedChannelIds = await PodDatabase.instance.listDeletedChannelIds();
+
       debugPrint('[CHANNEL-LOAD] Loaded ${_joined.length} channels from DB');
-      debugPrint('[CHANNEL-LOAD] Filtered 0 deleted channels '
-          '(no tombstone mechanism — hard-delete only)');
+      debugPrint('[CHANNEL-LOAD] Filtered ${_deletedChannelIds.length} deleted channels '
+          '(tombstone count)');
       for (final ch in _joined) {
         debugPrint('[CHANNEL-LOAD]   • ${ch.name} id=${ch.id}');
+      }
+      if (_deletedChannelIds.isNotEmpty) {
+        debugPrint('[CHANNEL-LOAD] Tombstoned IDs: $_deletedChannelIds');
       }
     } catch (_) {
       // DB not yet open (e.g. during onboarding).
@@ -157,7 +167,8 @@ class GroupChannelService {
     return channel;
   }
 
-  /// Removes the channel from joined list and deletes from DB.
+  /// Removes the channel from joined list, sets a tombstone, and deletes from
+  /// DB so it cannot re-appear after restart via Nostr discovery.
   Future<void> leaveChannel(String name) async {
     final n = GroupChannel.normaliseName(name);
     final channel = _joined.firstWhere(
@@ -165,31 +176,75 @@ class GroupChannelService {
       orElse: () => throw StateError('Not joined: $n'),
     );
     debugPrint('[CHANNEL-DELETE] Deleting channel: ${channel.id} name=${channel.name}');
-    // NOTE: No Nostr Kind-5 event is published for channel deletion.
-    // Kind-5 exists for messages (publishNostrDeletion) and cells
-    // (publishCellDeletion), but NOT for channels (Kind-40).
-    debugPrint('[CHANNEL-DELETE] Kind-5 published: false '
-        '(no channel deletion event — relays still hold Kind-40)');
-    final removedCount = _joined.where((c) => c.name == n).length;
+
+    final joinedCount = _joined.where((c) => c.name == n).length;
+    final discoveredCount = _discovered.where((c) => c.name == n).length;
+
     _joined.removeWhere((c) => c.name == n);
-    debugPrint('[CHANNEL-DELETE] Removed from _joined: $removedCount entry/entries');
-    debugPrint('[CHANNEL-DELETE] Note: _discovered NOT cleared — '
-        'channel may reappear in discovery after restart');
+    _discovered.removeWhere((c) => c.name == n);
+    debugPrint('[CHANNEL-DELETE] Aus _joined und _discovered entfernt '
+        '(joined=$joinedCount, discovered=$discoveredCount)');
+
+    // Tombstone prevents this channel from re-appearing via Nostr discovery
+    // after restart (Kind-40 events have no 'since' filter by default).
+    _deletedChannelIds.add(channel.id);
+    try {
+      await PodDatabase.instance.addDeletedChannel(channel.id);
+      debugPrint('[CHANNEL-DELETE] Tombstone gesetzt: ${channel.id}');
+    } catch (e) {
+      debugPrint('[CHANNEL-DELETE] Tombstone FAILED: $e');
+    }
+
     try {
       await PodDatabase.instance.deleteChannel(channel.id);
       debugPrint('[CHANNEL-DELETE] DB delete: success id=${channel.id}');
     } catch (e) {
       debugPrint('[CHANNEL-DELETE] DB delete: FAILED — $e');
     }
+
     _joinedController.add(joinedChannels);
     _channelChangedController.add(null);
   }
 
+  /// Marks a channel as deleted when a Kind-5 deletion event is received from
+  /// another peer.  Handles both joined and discovered channels.
+  Future<void> markChannelDeletedLocally(String channelId) async {
+    if (_deletedChannelIds.contains(channelId)) return; // already tombstoned
+
+    _deletedChannelIds.add(channelId);
+    await PodDatabase.instance.addDeletedChannel(channelId);
+
+    // Remove from _joined (if present) and delete from DB.
+    GroupChannel? joinedChannel;
+    try {
+      joinedChannel = _joined.firstWhere((c) => c.id == channelId);
+    } catch (_) {}
+    if (joinedChannel != null) {
+      _joined.removeWhere((c) => c.id == channelId);
+      try {
+        await PodDatabase.instance.deleteChannel(channelId);
+      } catch (_) {}
+    }
+
+    // Remove from _discovered (if present).
+    _discovered.removeWhere((c) => c.id == channelId);
+
+    _joinedController.add(joinedChannels);
+    _channelChangedController.add(null);
+    debugPrint('[CHANNEL-DELETE-RECV] Kanal lokal gelöscht + tombstone: $channelId');
+  }
+
   /// Called when a Nostr Kind-40 announcement arrives.
   ///
+  /// Skips channels that have been tombstoned (deleted by this user).
   /// Adds the channel to the discovered list unless it is hidden
   /// (isDiscoverable == false) or already joined.
   void addDiscoveredFromNostr(GroupChannel channel) {
+    if (_deletedChannelIds.contains(channel.id)) {
+      print('[CHANNEL-SYNC] Überspringe gelöschten Kanal: ${channel.id} '
+          'name=${channel.name}');
+      return;
+    }
     if (!channel.isDiscoverable) return; // hidden channels not in discovery
     if (_joined.any((c) => c.name == channel.name)) return;
     _discovered.removeWhere((c) => c.name == channel.name);

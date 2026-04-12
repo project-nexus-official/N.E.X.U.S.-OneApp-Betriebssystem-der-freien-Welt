@@ -2083,4 +2083,14 @@ class PodDatabase {
       whereArgs: [id, type],
     );
   }
+
+  // ── Channel tombstones (convenience wrappers over generic tombstones) ──────
+
+  Future<void> addDeletedChannel(String channelId) =>
+      addTombstone(id: channelId, type: 'channel');
+
+  Future<bool> isChannelDeleted(String channelId) =>
+      hasTombstone(id: channelId, type: 'channel');
+
+  Future<Set<String>> listDeletedChannelIds() => listTombstones('channel');
 }
