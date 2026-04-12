@@ -999,7 +999,9 @@ class _ChannelConversationScreenState
     );
 
     if (confirmed == true && mounted) {
-      await GroupChannelService.instance.leaveChannel(_channel.name);
+      // Use ChatProvider so the full leave/delete pipeline runs:
+      // tombstone + Nostr unsub + Kind-5 (if creator) + local message cleanup.
+      await context.read<ChatProvider>().leaveOrDeleteChannel(_channel.name);
       if (mounted) Navigator.of(context).pop();
     }
   }

@@ -211,8 +211,9 @@ class _ChannelAdminScreenState extends State<ChannelAdminScreen> {
     );
     if (confirmed != true || !mounted) return;
 
-    await GroupChannelService.instance
-        .leaveChannel(widget.channel.name);
+    // Use ChatProvider so the full leave/delete pipeline runs:
+    // tombstone + Nostr unsub + Kind-5 publication + local message cleanup.
+    await context.read<ChatProvider>().leaveOrDeleteChannel(widget.channel.name);
     if (mounted) Navigator.of(context).pop();
   }
 

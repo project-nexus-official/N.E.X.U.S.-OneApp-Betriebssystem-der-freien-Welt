@@ -62,24 +62,34 @@ class GroupChannelService {
 
   Future<void> load() async {
     try {
-      final rows = await PodDatabase.instance.listChannels();
+      // Load tombstones FIRST so we can filter _joined against them immediately.
+      _deletedChannelIds = await PodDatabase.instance.listDeletedChannelIds();
+      debugPrint('[CHANNEL-LOAD] Tombstones geladen: ${_deletedChannelIds.length} IDs');
+
+      final allRows = await PodDatabase.instance.listChannels();
+      final all = allRows.map(GroupChannel.fromJson).toList();
+
+      // Filter out tombstoned channels so they never reappear in the UI.
+      final active = all
+          .where((ch) => !_deletedChannelIds.contains(ch.id))
+          .toList();
+      final deletedOnes = all
+          .where((ch) => _deletedChannelIds.contains(ch.id))
+          .toList();
+
       _joined
         ..clear()
-        ..addAll(rows.map(GroupChannel.fromJson));
+        ..addAll(active);
 
-      // Load tombstoned channel IDs so the discovery filter works on startup.
-      _deletedChannelIds = await PodDatabase.instance.listDeletedChannelIds();
-
-      debugPrint('[CHANNEL-LOAD] Loaded ${_joined.length} channels from DB');
-      debugPrint('[CHANNEL-LOAD] Filtered ${_deletedChannelIds.length} deleted channels '
-          '(tombstone count)');
+      debugPrint('[CHANNEL-LOAD] Loaded ${_joined.length} channels from DB '
+          '(${all.length} total in DB)');
+      debugPrint('[CHANNEL-LOAD] Filtered ${deletedOnes.length} deleted channels: '
+          '${deletedOnes.map((c) => c.name).toList()}');
       for (final ch in _joined) {
         debugPrint('[CHANNEL-LOAD]   • ${ch.name} id=${ch.id}');
       }
-      if (_deletedChannelIds.isNotEmpty) {
-        debugPrint('[CHANNEL-LOAD] Tombstoned IDs: $_deletedChannelIds');
-      }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[CHANNEL-LOAD] Error: $e');
       // DB not yet open (e.g. during onboarding).
     }
   }

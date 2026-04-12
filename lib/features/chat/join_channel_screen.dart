@@ -140,8 +140,8 @@ class _JoinChannelScreenState extends State<JoinChannelScreen> {
         ],
       ),
     );
-    if (confirmed == true) {
-      await GroupChannelService.instance.leaveChannel(channel.name);
+    if (confirmed == true && mounted) {
+      await context.read<ChatProvider>().leaveOrDeleteChannel(channel.name);
       if (mounted) setState(_refreshChannels);
     }
   }
