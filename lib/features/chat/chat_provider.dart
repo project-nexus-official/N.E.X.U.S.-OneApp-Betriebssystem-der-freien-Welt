@@ -2166,6 +2166,13 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     final emoji = data['emoji'] as String? ?? '👍';
     if (referencedId == null || senderPubkey == null) return;
 
+    final shortTarget = referencedId.length >= 8
+        ? referencedId.substring(0, 8)
+        : referencedId;
+    final cacheSize = _conversationCache.values.fold<int>(0, (s, v) => s + v.length);
+    print('[REACTION-RECV] Chat-Handler: emoji=$emoji target=$shortTarget… '
+        '(searching $cacheSize msgs in ${_conversationCache.length} convs)');
+
     // Search conversation cache for a message authored by me with this ID.
     String? convId;
     bool isChannel = false;
@@ -2180,7 +2187,11 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
         break;
       }
     }
-    if (convId == null) return; // not my message
+    if (convId == null) {
+      print('[REACTION-RECV] Match found: false (no matching msg in conv cache)');
+      return; // not my message
+    }
+    print('[REACTION-RECV] Match found: true in conv=$convId isChannel=$isChannel');
 
     // Resolve sender name via nostrPubkey
     final matchedContact = ContactService.instance.contacts

@@ -334,12 +334,19 @@ class FeedService {
       final senderPubkey = data['senderPubkey'] as String?;
       if (referencedId == null || senderPubkey == null) return;
 
+      final shortTarget = referencedId.length >= 8
+          ? referencedId.substring(0, 8)
+          : referencedId;
+      print('[DORFPLATZ-REACT-RECV] Kind-7 received: emoji=$emoji target=$shortTarget…');
+
       final myDid = IdentityService.instance.currentIdentity?.did ?? '';
 
       // Find the post by its Nostr event ID
       final matchingPosts = _posts
           .where((p) => p.nostrEventId == referencedId && p.authorDid == myDid)
           .toList();
+      print('[DORFPLATZ-REACT-RECV] Match found: ${matchingPosts.isNotEmpty} '
+          '(${matchingPosts.length} post(s) matched out of ${_posts.length} cached)');
       if (matchingPosts.isEmpty) return;
       final myPost = matchingPosts.first;
 
@@ -390,7 +397,10 @@ class FeedService {
 
     // Publish Kind-5 deletion for the Nostr event (best-effort, NIP-09).
     if (_publisher != null && post.nostrEventId != null) {
-      _publisher!(
+      print('[FEED-DELETE] Publishing kind=5: postId=${post.id}');
+      print('[FEED-DELETE] e-tag: ${post.nostrEventId}');
+      print('[FEED-DELETE] Tags: e=${post.nostrEventId} t=nexus-dorfplatz');
+      final assignedEventId = _publisher!(
         NostrKind.deletion,
         '', // NIP-09: content should be empty or a human-readable reason
         [
@@ -398,7 +408,10 @@ class FeedService {
           ['t', 'nexus-dorfplatz'],
         ],
       );
-      print('[FEED-DELETE] kind=5 publiziert für id=${post.nostrEventId}');
+      print('[FEED-DELETE] Kind-5 event assigned id=${assignedEventId ?? 'null (relay not connected)'} '
+          '(see [RELAY-OK] for responses)');
+    } else if (_publisher == null) {
+      print('[FEED-DELETE] ⚠ Kein Publisher gesetzt — nur lokale Löschung für post ${post.id}');
     } else if (post.nostrEventId == null) {
       print('[FEED-DELETE] Nur lokale Löschung (kein nostrEventId) für post ${post.id}');
     }
@@ -413,14 +426,20 @@ class FeedService {
   Future<void> handleIncomingDelete(List<String> nostrEventIds) async {
     if (nostrEventIds.isEmpty) return;
     final idSet = nostrEventIds.toSet();
+    print('[FEED-DELETE-RECV] Kind-5 received: ${nostrEventIds.length} IDs — '
+        'checking ${_posts.where((p) => !_mutedAuthors.contains(p.authorDid)).length} cached posts');
     final toDelete = _posts.where((p) => p.nostrEventId != null && idSet.contains(p.nostrEventId)).toList();
-    if (toDelete.isEmpty) return;
+    if (toDelete.isEmpty) {
+      print('[FEED-DELETE-RECV] Matches removed: 0 '
+          '(IDs: ${nostrEventIds.map((id) => id.length >= 8 ? id.substring(0, 8) : id).join(', ')}…)');
+      return;
+    }
 
     for (final post in toDelete) {
       await PodDatabase.instance.softDeleteFeedPost(post.id);
       _posts.remove(post);
     }
-    print('[FEED-DELETE] Empfangen kind=5: ${toDelete.length} posts gelöscht');
+    print('[FEED-DELETE-RECV] Matches removed: ${toDelete.length}');
     _streamController.add(null);
   }
 

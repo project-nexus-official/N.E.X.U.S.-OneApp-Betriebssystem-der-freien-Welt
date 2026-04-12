@@ -383,6 +383,9 @@ class NostrTransport implements MessageTransport {
     if (_keys == null) return;
     final isPublic = (channelData['isPublic'] as bool?) ?? true;
     final isDiscoverable = (channelData['isDiscoverable'] as bool?) ?? true;
+    final channelId = channelData['id'] as String? ?? '';
+    final channelName = channelData['name'] as String? ?? '';
+    final nostrTag = channelData['nostrTag'] as String? ?? 'nexus-channel';
     // Strip channelSecret before publishing to Nostr.
     final publicData = Map<String, dynamic>.from(channelData)
       ..remove('channelSecret')
@@ -392,16 +395,19 @@ class NostrTransport implements MessageTransport {
       kind: NostrKind.channelCreate,
       content: jsonEncode(publicData),
       tags: [
-        ['t', channelData['nostrTag'] as String? ?? 'nexus-channel'],
+        ['t', nostrTag],
         ['t', 'nexus-channel'],
         ['access', isPublic ? 'public' : 'private'],
         ['discoverable', isDiscoverable ? 'true' : 'false'],
       ],
     );
+    final connectedRelays =
+        _relayManager.statuses.where((s) => s.state == RelayState.connected).length;
+    print('[CHANNEL-CREATE] Publishing: channelId=$channelId name=$channelName kind=40');
+    print('[CHANNEL-CREATE] EventId: ${event.id.length >= 8 ? event.id.substring(0, 8) : event.id}…');
+    print('[CHANNEL-CREATE] Tags: t=$nostrTag t=nexus-channel access=${isPublic ? 'public' : 'private'} discoverable=$isDiscoverable');
+    print('[CHANNEL-CREATE] Relays: $connectedRelays (see [RELAY-OK] for responses)');
     _relayManager.publish(event);
-    print('[NOSTR] Published Kind-40 channel: ${channelData['name']} '
-        '(${isPublic ? "public" : "private"}, '
-        '${isDiscoverable ? "discoverable" : "hidden"})');
   }
 
   /// Publishes a NIP-28 Kind-41 channel metadata update.
@@ -442,8 +448,12 @@ class NostrTransport implements MessageTransport {
         ['e', messageId],
       ],
     );
+    final connectedRelays =
+        _relayManager.statuses.where((s) => s.state == RelayState.connected).length;
+    print('[MSG-DELETE] Publishing kind=5: msgId=${messageId.length >= 8 ? messageId.substring(0, 8) : messageId}…');
+    print('[MSG-DELETE] e-tag: $messageId');
+    print('[MSG-DELETE] Relays: $connectedRelays (see [RELAY-OK] for responses)');
     _relayManager.publish(event);
-    print('[NOSTR] Published Kind-5 deletion for event: $messageId');
   }
 
   /// Publishes a Kind-30000 cell announcement so other nodes can discover the cell.
@@ -463,11 +473,13 @@ class NostrTransport implements MessageTransport {
         ['t', 'nexus-cell'],
       ],
     );
-    _relayManager.publish(event);
     final connectedRelays =
         _relayManager.statuses.where((s) => s.state == RelayState.connected).length;
-    print('[CELL] Publishing cell announcement: $cellId ($cellName) '
-        'to $connectedRelays relays');
+    print('[CELL-CREATE] Publishing: cellId=$cellId name=$cellName');
+    print('[CELL-CREATE] EventId: ${event.id.length >= 8 ? event.id.substring(0, 8) : event.id}…');
+    print('[CELL-CREATE] Tags: [d,$cellId] [t,nexus-cell]');
+    print('[CELL-CREATE] Relays: $connectedRelays (see [RELAY-OK] for responses)');
+    _relayManager.publish(event);
     print('[CELL-RENAME] Kind-30000 published: accepted=${connectedRelays > 0}');
   }
 
@@ -607,6 +619,11 @@ class NostrTransport implements MessageTransport {
         ['e', messageId],
       ],
     );
+    final connectedRelays =
+        _relayManager.statuses.where((s) => s.state == RelayState.connected).length;
+    print('[REACTION-SEND] Publishing kind=7: emoji=$emoji target=${messageId.length >= 8 ? messageId.substring(0, 8) : messageId}…');
+    print('[REACTION-SEND] Tags: e=$messageId');
+    print('[REACTION-SEND] Relays: $connectedRelays (see [RELAY-OK] for responses)');
     _relayManager.publish(event);
   }
 
@@ -623,8 +640,21 @@ class NostrTransport implements MessageTransport {
       content: content,
       tags: tags,
     );
+    final connectedRelays =
+        _relayManager.statuses.where((s) => s.state == RelayState.connected).length;
+    if (kind == NostrKind.reaction) {
+      final targetTag = tags.firstWhere(
+          (t) => t.isNotEmpty && t[0] == 'e',
+          orElse: () => ['e', '?']);
+      final targetId = targetTag.length > 1 ? targetTag[1] : '?';
+      final shortTarget = targetId.length >= 8 ? targetId.substring(0, 8) : targetId;
+      print('[DORFPLATZ-REACT-SEND] Publishing kind=7: emoji=$content target=$shortTarget…');
+      print('[DORFPLATZ-REACT-SEND] Relays: $connectedRelays (see [RELAY-OK] for responses)');
+    } else {
+      print('[NOSTR] Feed Kind-$kind published: ${event.id.substring(0, 8)}… '
+          '→ $connectedRelays relay(s)');
+    }
     _relayManager.publish(event);
-    print('[NOSTR] Feed Kind-$kind published: ${event.id.substring(0, 8)}…');
     return event.id;
   }
 
@@ -1521,7 +1551,18 @@ class NostrTransport implements MessageTransport {
     if (_keys == null) return;
     if (event.pubkey == _keys!.publicKeyHex) return; // own reaction
     final referencedEventId = event.tagValue('e');
-    if (referencedEventId == null) return;
+    if (referencedEventId == null) {
+      print('[REACTION-RECV] Kind-7 received but missing e-tag — ignored');
+      return;
+    }
+    final shortTarget = referencedEventId.length >= 8
+        ? referencedEventId.substring(0, 8)
+        : referencedEventId;
+    final shortSender = event.pubkey.length >= 8
+        ? event.pubkey.substring(0, 8)
+        : event.pubkey;
+    print('[REACTION-RECV] Kind-7 received: emoji=${event.content} target=$shortTarget…');
+    print('[REACTION-RECV] sender=$shortSender… → dispatching to feed+chat handlers');
     _feedReactionController.add({
       'emoji': event.content,
       'referencedEventId': referencedEventId,
@@ -1539,8 +1580,24 @@ class NostrTransport implements MessageTransport {
     if (event.pubkey == _keys!.publicKeyHex) return; // own deletion, already applied locally
     final ids = event.tagValues('e');
     if (ids.isEmpty) return;
-    print('[FEED-DELETE] Empfangen kind=5 von ${event.pubkey.substring(0, 8)}…: '
-        '${ids.length} event-id(s)');
+    final tTags = event.tagValues('t');
+    final isDorfplatz = tTags.contains('nexus-dorfplatz');
+    // Distinguish Dorfplatz post deletions (have t=nexus-dorfplatz) from
+    // chat message deletions (no t-tag) so we can diagnose routing gaps.
+    final prefix = isDorfplatz ? 'FEED-DELETE-RECV' : 'MSG-DELETE-RECV';
+    final shortSender = event.pubkey.length >= 8
+        ? event.pubkey.substring(0, 8)
+        : event.pubkey;
+    print('[$prefix] Kind-5 received from $shortSender…: '
+        '${ids.length} e-tag(s), t-tags=$tTags');
+    for (final id in ids) {
+      final shortId = id.length >= 8 ? id.substring(0, 8) : id;
+      print('[$prefix]   e-tag: $shortId…');
+    }
+    if (!isDorfplatz) {
+      print('[MSG-DELETE-RECV] ⚠ Chat-Löschung hat keinen separaten Recv-Handler — '
+          'wird an FeedService weitergeleitet (wird dort nicht matchen)');
+    }
     _feedDeleteController.add(ids);
   }
 
@@ -1689,14 +1746,23 @@ class NostrTransport implements MessageTransport {
   void _handleChannelCreateEvent(NostrEvent event) {
     try {
       final data = jsonDecode(event.content) as Map<String, dynamic>;
+      final channelName = data['name'] as String? ?? '?';
+      final channelId = data['id'] as String? ?? '?';
+      final shortSender = event.pubkey.length >= 8
+          ? event.pubkey.substring(0, 8)
+          : event.pubkey;
+      print('[CHANNEL-CREATE-RECV] Kind-40 received from $shortSender…: '
+          'name=$channelName id=$channelId');
+      print('[CHANNEL-CREATE-RECV] Dispatching to channel discovery stream');
       // Emit so GroupChannelService / ChatProvider can add to discovered list.
       _channelAnnouncedController.add({
         ...data,
         '_nostr_pubkey': event.pubkey,
         '_created_at': event.createdAt,
       });
-      print('[NOSTR] Kind-40 channel announced: ${data['name']}');
-    } catch (_) {}
+    } catch (e) {
+      print('[CHANNEL-CREATE-RECV] ✗ Parse FAILED: $e');
+    }
   }
 
   void _handleChannelMessageEvent(NostrEvent event) {
