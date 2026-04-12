@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -860,11 +861,27 @@ class _Footer extends StatefulWidget {
 class _FooterState extends State<_Footer> {
   Map<String, List<String>> _reactions = {};
   int _commentCount = 0;
+  StreamSubscription<void>? _feedSub;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    // Subscribe to FeedService stream so incoming reactions (Kind-7) and
+    // reaction deletions (Kind-5) trigger a UI rebuild without requiring the
+    // post object itself to change.
+    _feedSub = FeedService.instance.stream.listen((_) {
+      if (mounted) {
+        print('[DORFPLATZ-REACT-RECV] Post card rebuild triggered for postId=${widget.post.id}');
+        _loadData();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _feedSub?.cancel();
+    super.dispose();
   }
 
   @override

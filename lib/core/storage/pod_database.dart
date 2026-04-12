@@ -55,7 +55,7 @@ class PodDatabase {
 
     _db = await openDatabase(
       dbPath,
-      version: 14,
+      version: 15,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -208,10 +208,11 @@ class PodDatabase {
     // NIP-25 emoji reactions on messages.
     await db.execute('''
       CREATE TABLE message_reactions (
-        message_id   TEXT NOT NULL,
-        emoji        TEXT NOT NULL,
-        reactor_did  TEXT NOT NULL,
-        created_at   INTEGER NOT NULL,
+        message_id     TEXT NOT NULL,
+        emoji          TEXT NOT NULL,
+        reactor_did    TEXT NOT NULL,
+        created_at     INTEGER NOT NULL,
+        nostr_event_id TEXT,
         PRIMARY KEY (message_id, emoji, reactor_did)
       )
     ''');
@@ -735,6 +736,13 @@ class PodDatabase {
         )
       ''');
       await db.execute('CREATE INDEX IF NOT EXISTS idx_tombstones_type ON tombstones(type)');
+    }
+    if (oldVersion < 15) {
+      // Add nostr_event_id column to message_reactions so reaction deletions
+      // (NIP-09 Kind-5) can be synced across devices via the reaction event ID.
+      await db.execute(
+        'ALTER TABLE message_reactions ADD COLUMN nostr_event_id TEXT',
+      );
     }
   }
 
@@ -1533,6 +1541,7 @@ class PodDatabase {
     required String messageId,
     required String emoji,
     required String reactorDid,
+    String? nostrEventId,
   }) async {
     await _database.insert(
       'message_reactions',
@@ -1541,9 +1550,26 @@ class PodDatabase {
         'emoji': emoji,
         'reactor_did': reactorDid,
         'created_at': DateTime.now().millisecondsSinceEpoch,
+        if (nostrEventId != null) 'nostr_event_id': nostrEventId,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+  }
+
+  /// Returns the Nostr event ID stored for the given reaction, or null if not set.
+  Future<String?> getReactionEventId({
+    required String messageId,
+    required String emoji,
+    required String reactorDid,
+  }) async {
+    final rows = await _database.query(
+      'message_reactions',
+      columns: ['nostr_event_id'],
+      where: 'message_id = ? AND emoji = ? AND reactor_did = ?',
+      whereArgs: [messageId, emoji, reactorDid],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first['nostr_event_id'] as String?;
   }
 
   Future<void> deleteReaction({
@@ -1555,6 +1581,18 @@ class PodDatabase {
       'message_reactions',
       where: 'message_id = ? AND emoji = ? AND reactor_did = ?',
       whereArgs: [messageId, emoji, reactorDid],
+    );
+  }
+
+  /// Deletes all reactions whose [nostr_event_id] is in [eventIds].
+  /// Returns the number of deleted rows.
+  Future<int> deleteReactionsByNostrEventIds(Set<String> eventIds) async {
+    if (eventIds.isEmpty) return 0;
+    final placeholders = List.filled(eventIds.length, '?').join(', ');
+    return _database.delete(
+      'message_reactions',
+      where: 'nostr_event_id IN ($placeholders)',
+      whereArgs: eventIds.toList(),
     );
   }
 

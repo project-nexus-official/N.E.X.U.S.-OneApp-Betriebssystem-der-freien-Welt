@@ -24,6 +24,12 @@ class GroupChannelService {
   /// Stream that emits the joined channel list whenever it changes.
   Stream<List<GroupChannel>> get joinedStream => _joinedController.stream;
 
+  final _channelChangedController = StreamController<void>.broadcast();
+
+  /// Fires whenever _joined or _discovered changes (use to rebuild the
+  /// channel tab which shows both sections).
+  Stream<void> get channelChangedStream => _channelChangedController.stream;
+
   List<GroupChannel> get joinedChannels => List.unmodifiable(_joined);
 
   /// Joined channels that are NOT cell-internal (shown in the Kanäle tab).
@@ -42,6 +48,10 @@ class GroupChannelService {
       ..._discovered.where((c) => !joined.contains(c.name)),
     ];
   }
+
+  /// Channels that are discovered via Nostr but not yet joined by the user.
+  List<GroupChannel> get discoveredOnlyChannels =>
+      _discovered.where((c) => !_joined.any((j) => j.name == c.name)).toList();
 
   // ── Initialisation ────────────────────────────────────────────────────────
 
@@ -124,6 +134,7 @@ class GroupChannelService {
     _joined.add(channel);
     await PodDatabase.instance.upsertChannel(channel.id, channel.toJson());
     _joinedController.add(joinedChannels);
+    _channelChangedController.add(null);
     return channel;
   }
 
@@ -135,6 +146,7 @@ class GroupChannelService {
     _discovered.removeWhere((c) => c.name == channel.name);
     await PodDatabase.instance.upsertChannel(channel.id, channel.toJson());
     _joinedController.add(joinedChannels);
+    _channelChangedController.add(null);
     return channel;
   }
 
@@ -148,6 +160,7 @@ class GroupChannelService {
     _joined.removeWhere((c) => c.name == n);
     await PodDatabase.instance.deleteChannel(channel.id);
     _joinedController.add(joinedChannels);
+    _channelChangedController.add(null);
   }
 
   /// Called when a Nostr Kind-40 announcement arrives.
@@ -159,6 +172,7 @@ class GroupChannelService {
     if (_joined.any((c) => c.name == channel.name)) return;
     _discovered.removeWhere((c) => c.name == channel.name);
     _discovered.add(channel);
+    _channelChangedController.add(null);
   }
 
   /// Restores a channel from a backup JSON map (merge – only adds if not

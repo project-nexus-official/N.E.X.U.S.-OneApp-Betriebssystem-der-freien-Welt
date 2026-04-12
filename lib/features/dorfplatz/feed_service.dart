@@ -326,47 +326,63 @@ class FeedService {
   }
 
   /// Processes an incoming Kind-7 reaction from NostrTransport.
-  /// Fires a notification if the reaction targets one of my posts (Trigger 4).
+  ///
+  /// Saves the reaction to the local DB and updates the UI for any matching
+  /// post (regardless of author). Fires a notification if the reaction targets
+  /// one of my posts (Trigger 4).
   Future<void> handleIncomingReaction(Map<String, dynamic> data) async {
     try {
       final emoji = data['emoji'] as String? ?? '👍';
       final referencedId = data['referencedEventId'] as String?;
       final senderPubkey = data['senderPubkey'] as String?;
+      // The reaction's own Nostr event ID (added in _handleReaction so the
+      // receiver can delete it later when a Kind-5 arrives).
+      final reactionEventId = data['reactionEventId'] as String?;
       if (referencedId == null || senderPubkey == null) return;
 
       final shortTarget = referencedId.length >= 8
           ? referencedId.substring(0, 8)
           : referencedId;
-      print('[DORFPLATZ-REACT-RECV] Kind-7 received: emoji=$emoji target=$shortTarget…');
+      print('[DORFPLATZ-REACT-RECV] Kind-7 from $senderPubkey: emoji=$emoji target=$shortTarget…');
 
       final myDid = IdentityService.instance.currentIdentity?.did ?? '';
 
-      // Find the post by its Nostr event ID
-      final matchingPosts = _posts
-          .where((p) => p.nostrEventId == referencedId && p.authorDid == myDid)
-          .toList();
-      print('[DORFPLATZ-REACT-RECV] Match found: ${matchingPosts.isNotEmpty} '
-          '(${matchingPosts.length} post(s) matched out of ${_posts.length} cached)');
-      if (matchingPosts.isEmpty) return;
-      final myPost = matchingPosts.first;
+      // Find ANY post with this Nostr event ID (not just own posts).
+      final matched = _posts.where((p) => p.nostrEventId == referencedId).toList();
+      final matchingPost = matched.isEmpty ? null : matched.first;
 
-      if (await NotificationSettings.feedLikes()) {
-        // Try to resolve the sender's name via their Nostr pubkey.
-        final contact = ContactService.instance.contacts.firstWhere(
-          (c) => c.nostrPubkey == senderPubkey,
-          orElse: () => ContactService.instance.contacts.first,
+      print('[DORFPLATZ-REACT-RECV] Match found: ${matchingPost != null} — UI updated');
+
+      if (matchingPost != null) {
+        // Save the incoming reaction so it shows up in the UI immediately.
+        // Store reactionEventId so a later Kind-5 deletion can find this row
+        // via deleteReactionsByNostrEventIds.
+        await PodDatabase.instance.upsertReaction(
+          messageId: matchingPost.id,
+          emoji: emoji,
+          reactorDid: senderPubkey,
+          nostrEventId: reactionEventId,
         );
-        final senderName =
-            ContactService.instance.contacts.any((c) => c.nostrPubkey == senderPubkey)
-                ? contact.pseudonym
-                : (senderPubkey.length >= 8
-                    ? senderPubkey.substring(0, 8)
-                    : senderPubkey);
-        final preview = _truncate(myPost.content, 50);
-        NotificationService.instance.showGenericNotification(
-          title: '$senderName gefällt dein Beitrag',
-          body: '$emoji${preview.isNotEmpty ? ' · $preview' : ''}',
-        );
+        _streamController.add(null);
+
+        // Notification only for reactions on my own posts (Trigger 4).
+        if (matchingPost.authorDid == myDid && await NotificationSettings.feedLikes()) {
+          final contact = ContactService.instance.contacts.firstWhere(
+            (c) => c.nostrPubkey == senderPubkey,
+            orElse: () => ContactService.instance.contacts.first,
+          );
+          final senderName =
+              ContactService.instance.contacts.any((c) => c.nostrPubkey == senderPubkey)
+                  ? contact.pseudonym
+                  : (senderPubkey.length >= 8
+                      ? senderPubkey.substring(0, 8)
+                      : senderPubkey);
+          final preview = _truncate(matchingPost.content, 50);
+          NotificationService.instance.showGenericNotification(
+            title: '$senderName gefällt dein Beitrag',
+            body: '$emoji${preview.isNotEmpty ? ' · $preview' : ''}',
+          );
+        }
       }
     } catch (e) {
       debugPrint('[FEED] handleIncomingReaction error: $e');
@@ -428,19 +444,34 @@ class FeedService {
     final idSet = nostrEventIds.toSet();
     print('[FEED-DELETE-RECV] Kind-5 received: ${nostrEventIds.length} IDs — '
         'checking ${_posts.where((p) => !_mutedAuthors.contains(p.authorDid)).length} cached posts');
-    final toDelete = _posts.where((p) => p.nostrEventId != null && idSet.contains(p.nostrEventId)).toList();
-    if (toDelete.isEmpty) {
-      print('[FEED-DELETE-RECV] Matches removed: 0 '
-          '(IDs: ${nostrEventIds.map((id) => id.length >= 8 ? id.substring(0, 8) : id).join(', ')}…)');
-      return;
+    for (final post in _posts) {
+      final nostrId = post.nostrEventId ?? 'null';
+      for (final eTag in nostrEventIds) {
+        final shortNostr = nostrId.length >= 8 ? nostrId.substring(0, 8) : nostrId;
+        final shortETag = eTag.length >= 8 ? eTag.substring(0, 8) : eTag;
+        print('[FEED-DELETE-RECV] Comparing nostrEventId=$shortNostr… with e-tag=$shortETag…');
+      }
     }
+    final toDelete = _posts.where((p) => p.nostrEventId != null && idSet.contains(p.nostrEventId)).toList();
 
     for (final post in toDelete) {
       await PodDatabase.instance.softDeleteFeedPost(post.id);
       _posts.remove(post);
     }
     print('[FEED-DELETE-RECV] Matches removed: ${toDelete.length}');
-    _streamController.add(null);
+
+    // Also remove reactions whose own Nostr event ID matches (reaction deletions).
+    final removedReactions =
+        await PodDatabase.instance.deleteReactionsByNostrEventIds(idSet);
+    if (removedReactions > 0) {
+      for (final reactionId in nostrEventIds) {
+        print('[DORFPLATZ-REACT-DELETE-RECV] Reaction deleted: $reactionId');
+      }
+    }
+
+    if (toDelete.isNotEmpty || removedReactions > 0) {
+      _streamController.add(null);
+    }
   }
 
   /// Expands the visibility of a post to [newVisibility].
@@ -581,23 +612,52 @@ class FeedService {
     final reactions = await PodDatabase.instance.getReactionsForMessage(postId);
     final myVoters = reactions[emoji] ?? [];
     if (myVoters.contains(myDid)) {
+      // Look up the reaction's own Nostr event ID so we can publish Kind-5.
+      final reactionEventId = await PodDatabase.instance.getReactionEventId(
+        messageId: postId,
+        emoji: emoji,
+        reactorDid: myDid,
+      );
+
       await PodDatabase.instance.deleteReaction(
         messageId: postId,
         emoji: emoji,
         reactorDid: myDid,
       );
-    } else {
-      await PodDatabase.instance.upsertReaction(
-        messageId: postId,
-        emoji: emoji,
-        reactorDid: myDid,
-      );
-      // Publish Kind-7 reaction (best-effort).
-      if (_publisher != null && postNostrEventId != null) {
+
+      // Publish Kind-5 deletion for the reaction event (NIP-09).
+      if (_publisher != null && reactionEventId != null) {
+        print('[DORFPLATZ-REACT-DELETE] Publishing kind=5 for reaction: $reactionEventId');
         _publisher!(
+          NostrKind.deletion,
+          '',
+          [
+            ['e', reactionEventId],
+            ['t', 'nexus-dorfplatz'],
+          ],
+        );
+      }
+    } else {
+      // Publish Kind-7 reaction with t=nexus-dorfplatz so the feed subscription
+      // receives it on other devices (the subscription filters by #t tag).
+      if (_publisher != null && postNostrEventId != null) {
+        final reactionEventId = _publisher!(
           NostrKind.reaction,
           emoji,
-          [['e', postNostrEventId]],
+          [['e', postNostrEventId], ['t', 'nexus-dorfplatz']],
+        );
+        // Store with nostrEventId so we can publish Kind-5 on removal.
+        await PodDatabase.instance.upsertReaction(
+          messageId: postId,
+          emoji: emoji,
+          reactorDid: myDid,
+          nostrEventId: reactionEventId,
+        );
+      } else {
+        await PodDatabase.instance.upsertReaction(
+          messageId: postId,
+          emoji: emoji,
+          reactorDid: myDid,
         );
       }
     }

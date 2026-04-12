@@ -22,6 +22,7 @@ import 'conversation_service.dart';
 import 'channel_access_service.dart';
 import 'channel_requests_screen.dart';
 import 'create_channel_screen.dart';
+import 'group_channel.dart';
 import 'group_channel_service.dart';
 import 'join_channel_screen.dart';
 import 'message_search_screen.dart';
@@ -48,6 +49,7 @@ class _ConversationsScreenState extends State<ConversationsScreen>
   List<Conversation> _conversations = [];
   bool _loading = true;
   StreamSubscription<List<Conversation>>? _sub;
+  StreamSubscription<void>? _channelChangedSub;
 
   late final TabController _tabController;
 
@@ -68,12 +70,18 @@ class _ConversationsScreenState extends State<ConversationsScreen>
     _sub = ConversationService.instance.stream.listen((convs) {
       if (mounted) setState(() => _conversations = convs);
     });
+    // Rebuild when discovered channels arrive (they don't appear in _conversations).
+    _channelChangedSub =
+        GroupChannelService.instance.channelChangedStream.listen((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
   void dispose() {
     _tabController.dispose();
     _sub?.cancel();
+    _channelChangedSub?.cancel();
     super.dispose();
   }
 
@@ -122,6 +130,60 @@ class _ConversationsScreenState extends State<ConversationsScreen>
   /// Total unread count across all channel conversations (for tab badge).
   int get _channelUnreadCount =>
       _channelConversations.fold(0, (sum, c) => sum + c.unreadCount);
+
+  // ── Kanäle tab builder ──────────────────────────────────────────────────────
+
+  Widget _buildChannelTab() {
+    final joined = _channelConversations;
+    final discovered = GroupChannelService.instance.discoveredOnlyChannels
+        .where((c) => c.isDiscoverable)
+        .toList();
+
+    debugPrint(
+        '[CHANNEL-UI] Rendering joined=${joined.length} discovered=${discovered.length}');
+
+    if (joined.isEmpty && discovered.isEmpty) {
+      return _EmptyChannelsState(onDiscover: _joinChannel);
+    }
+
+    // Only joined channels, no discovered → simple list (existing behaviour).
+    if (discovered.isEmpty) {
+      return _ConversationList(
+        conversations: joined,
+        onTap: _openConversation,
+        onDelete: _deleteConversation,
+        onLeave: _leaveChannel,
+        pinnedId: '#nexus-global',
+      );
+    }
+
+    // Both sections: "Meine Kanäle" + "Entdeckte Kanäle".
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (joined.isNotEmpty) ...[
+            const _SectionHeader(title: 'Meine Kanäle'),
+            _ConversationList(
+              conversations: joined,
+              onTap: _openConversation,
+              onDelete: _deleteConversation,
+              onLeave: _leaveChannel,
+              pinnedId: '#nexus-global',
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+            ),
+          ],
+          const _SectionHeader(title: 'Entdeckte Kanäle'),
+          ...discovered.map((ch) => _DiscoveredChannelTile(
+                channel: ch,
+                onJoin: () => _joinDiscoveredChannel(ch),
+              )),
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
 
   // ── Navigation ──────────────────────────────────────────────────────────────
 
@@ -213,6 +275,23 @@ class _ConversationsScreenState extends State<ConversationsScreen>
         ),
       ),
     ).then((_) => _loadConversations());
+  }
+
+  Future<void> _joinDiscoveredChannel(GroupChannel channel) async {
+    await GroupChannelService.instance.joinChannel(channel);
+    if (!mounted) return;
+    context
+        .read<ChatProvider>()
+        .nostrTransport
+        ?.subscribeToChannel(channel.nostrTag);
+    await _loadConversations();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${channel.name} beigetreten'),
+        backgroundColor: AppColors.gold,
+      ),
+    );
   }
 
   Future<void> _deleteConversation(Conversation conv) async {
@@ -444,15 +523,7 @@ class _ConversationsScreenState extends State<ConversationsScreen>
                       ),
 
                 // ── Kanäle tab ────────────────────────────────────────────
-                _channelConversations.isEmpty
-                    ? _EmptyChannelsState(onDiscover: _joinChannel)
-                    : _ConversationList(
-                        conversations: _channelConversations,
-                        onTap: _openConversation,
-                        onDelete: _deleteConversation,
-                        onLeave: _leaveChannel,
-                        pinnedId: '#nexus-global',
-                      ),
+                _buildChannelTab(),
               ],
             ),
       floatingActionButton: FloatingActionButton(
@@ -475,6 +546,8 @@ class _ConversationList extends StatefulWidget {
     required this.onDelete,
     this.onLeave,
     this.pinnedId,
+    this.shrinkWrap = false,
+    this.physics,
   });
 
   final List<Conversation> conversations;
@@ -487,6 +560,14 @@ class _ConversationList extends StatefulWidget {
 
   /// ID of a conversation that should show a pin indicator (always first).
   final String? pinnedId;
+
+  /// Whether the list should shrink-wrap its content (needed inside a
+  /// SingleChildScrollView).
+  final bool shrinkWrap;
+
+  /// Scroll physics override (use [NeverScrollableScrollPhysics] inside a
+  /// SingleChildScrollView).
+  final ScrollPhysics? physics;
 
   @override
   State<_ConversationList> createState() => _ConversationListState();
@@ -522,6 +603,8 @@ class _ConversationListState extends State<_ConversationList> {
   @override
   Widget build(BuildContext context) {
     return ListView.separated(
+      shrinkWrap: widget.shrinkWrap,
+      physics: widget.physics,
       itemCount: _items.length,
       separatorBuilder: (_, __) =>
           const Divider(height: 1, indent: 72, color: AppColors.surfaceVariant),
@@ -920,6 +1003,101 @@ class _EmptyChannelsState extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ── Section header ─────────────────────────────────────────────────────────────
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.title});
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+      child: Text(
+        title.toUpperCase(),
+        style: const TextStyle(
+          color: Colors.grey,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.8,
+        ),
+      ),
+    );
+  }
+}
+
+// ── Discovered channel tile ────────────────────────────────────────────────────
+
+class _DiscoveredChannelTile extends StatelessWidget {
+  const _DiscoveredChannelTile({
+    required this.channel,
+    required this.onJoin,
+  });
+
+  final GroupChannel channel;
+  final VoidCallback onJoin;
+
+  @override
+  Widget build(BuildContext context) {
+    final isPrivate = !channel.isPublic;
+    final isAnnouncement = channel.channelMode == ChannelMode.announcement;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ListTile(
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          leading: Container(
+            width: 48,
+            height: 48,
+            decoration: const BoxDecoration(
+              color: AppColors.surfaceVariant,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              isPrivate
+                  ? Icons.lock
+                  : isAnnouncement
+                      ? Icons.campaign
+                      : Icons.tag,
+              color: AppColors.gold,
+              size: 22,
+            ),
+          ),
+          title: Text(
+            channel.name,
+            style: const TextStyle(
+              color: AppColors.gold,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          subtitle: channel.description.isNotEmpty
+              ? Text(
+                  channel.description,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: AppColors.onDark, fontSize: 13),
+                )
+              : null,
+          trailing: ElevatedButton(
+            onPressed: onJoin,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.gold,
+              foregroundColor: AppColors.deepBlue,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text('Beitreten', style: TextStyle(fontSize: 12)),
+          ),
+        ),
+        const Divider(height: 1, indent: 72, color: AppColors.surfaceVariant),
+      ],
     );
   }
 }

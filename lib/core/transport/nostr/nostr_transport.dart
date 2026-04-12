@@ -1567,6 +1567,9 @@ class NostrTransport implements MessageTransport {
       'emoji': event.content,
       'referencedEventId': referencedEventId,
       'senderPubkey': event.pubkey,
+      // The reaction's own Nostr event ID — needed so the receiver can store
+      // it in message_reactions.nostr_event_id and later delete it via Kind-5.
+      'reactionEventId': event.id,
     });
   }
 
