@@ -90,11 +90,12 @@ class NostrTransport implements MessageTransport {
       _channelAnnouncedController.stream;
 
   final _channelDeletedController =
-      StreamController<List<String>>.broadcast();
+      StreamController<List<({String id, String? name})>>.broadcast();
 
-  /// Emits a list of channel IDs whenever a Kind-5 nexus-channel-delete event
-  /// arrives from another peer.
-  Stream<List<String>> get onChannelDeleted =>
+  /// Emits a list of (id, name) pairs whenever a Kind-5 nexus-channel-delete
+  /// event arrives from another peer.  [name] is null when the sender did not
+  /// include a channel_name tag (legacy events).
+  Stream<List<({String id, String? name})>> get onChannelDeleted =>
       _channelDeletedController.stream;
 
   final _feedPostController =
@@ -455,6 +456,15 @@ class NostrTransport implements MessageTransport {
     } else {
       print('[CHANNEL-DEL-PUB] No valid nostrEventId available — '
           'channel_id custom tag only (legacy channel)');
+    }
+
+    // Channel name tag — allows receivers to tombstone by name even if the
+    // channel UUID is not (yet) known to them (discovered-only peers).
+    if (channelName.isNotEmpty && channelName != '(gelöschter Kanal)') {
+      tags.add(['channel_name', channelName]);
+      print('[CHANNEL-DEL-PUB] Including channel_name tag: name=$channelName');
+    } else {
+      print('[CHANNEL-DEL-PUB] No channel_name available (legacy republish)');
     }
 
     final event = NostrEvent.create(
@@ -1706,8 +1716,25 @@ class NostrTransport implements MessageTransport {
       return;
     }
 
-    print('[CHANNEL-DELETE-RECV] Forwarding ${resolvedIds.length} UUID(s) to channelDeletedController: $resolvedIds');
-    _channelDeletedController.add(resolvedIds);
+    // Extract optional channel_name tag added by v0.1.9+ senders.
+    final channelNameTags = event.tags
+        .where((t) => t.length >= 2 && t[0] == 'channel_name')
+        .map((t) => t[1])
+        .toList();
+    final String? channelName =
+        channelNameTags.isNotEmpty ? channelNameTags.first : null;
+    if (channelName != null) {
+      print('[CHANNEL-DEL-RECV] channel_name tag found: name=$channelName');
+    } else {
+      print('[CHANNEL-DEL-RECV] No channel_name tag, looking up locally');
+    }
+
+    final enriched = resolvedIds
+        .map((id) => (id: id, name: channelName))
+        .toList();
+
+    print('[CHANNEL-DELETE-RECV] Forwarding ${enriched.length} UUID(s) to channelDeletedController: $resolvedIds');
+    _channelDeletedController.add(enriched);
   }
 
   /// Handles incoming NIP-09 Kind-5 deletion requests for feed posts and

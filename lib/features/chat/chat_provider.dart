@@ -129,7 +129,7 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   StreamSubscription<NexusMessage>? _msgSub;
   StreamSubscription<List<NexusPeer>>? _peersSub;
   StreamSubscription<Map<String, dynamic>>? _channelAnnouncedSub;
-  StreamSubscription<List<String>>? _channelDeletedSub;
+  StreamSubscription<List<({String id, String? name})>>? _channelDeletedSub;
   Timer? _muteExpiryTimer;
 
   // ── Initialization ─────────────────────────────────────────────────────────
@@ -530,13 +530,19 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
   ///
   /// Marks the channel as deleted locally + tombstone so it cannot re-appear
   /// via Nostr discovery.  Also cleans up local messages for the channel.
-  Future<void> _onChannelDeletedFromNostr(List<String> channelIds) async {
-    for (final channelId in channelIds) {
+  Future<void> _onChannelDeletedFromNostr(
+      List<({String id, String? name})> channels) async {
+    for (final entry in channels) {
+      final channelId = entry.id;
+      final eventChannelName = entry.name; // from channel_name tag, may be null
       final channel = GroupChannelService.instance.findById(channelId);
-      final channelName = channel?.name ?? '?';
-      print('[CHANNEL-DELETE-RECV] Kanal entfernt: $channelName (id=$channelId)');
+      final displayName = channel?.name ?? eventChannelName ?? '?';
+      print('[CHANNEL-DELETE-RECV] Kanal entfernt: $displayName (id=$channelId)');
       // Mark deleted in service (tombstone + memory cleanup).
-      await GroupChannelService.instance.markChannelDeletedLocally(channelId);
+      // Pass the name from the delete event so discovered-only channels also
+      // get a name tombstone (Option A + C from the 2026-04-13 audit).
+      await GroupChannelService.instance
+          .markChannelDeletedLocally(channelId, channelName: eventChannelName);
       // If we had joined this channel, clean up local messages too.
       if (channel != null) {
         final nostrTag = channel.nostrTag;
@@ -832,6 +838,11 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       _nostrTransport?.publishCellAnnouncement(cell.toJson());
     }
   }
+
+  // TODO(tombstone-republish): add _republishCellTombstones() analogous to
+  // _republishZombieChannels() — lower priority because Kind-30000 is NIP-33
+  // replaceable and persists on compliant relays.
+  // See audit from 2026-04-13.
 
   /// One-shot republish of all channel tombstones so that devices that missed
   /// the original Kind-5 delete (because the event was rejected by the relay

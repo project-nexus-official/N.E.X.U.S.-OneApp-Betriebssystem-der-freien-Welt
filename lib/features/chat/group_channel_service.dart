@@ -280,11 +280,27 @@ class GroupChannelService {
 
   /// Marks a channel as deleted when a Kind-5 deletion event is received from
   /// another peer.  Handles both joined and discovered channels.
-  Future<void> markChannelDeletedLocally(String channelId) async {
+  /// Marks [channelId] as deleted locally.
+  ///
+  /// [channelName] is the name received from the Kind-5 delete event's
+  /// `channel_name` tag (Option A from the 2026-04-13 audit).  When provided
+  /// it is ALWAYS saved as a name tombstone so that discovered-only channels
+  /// (not in _joined) cannot re-appear via Kind-40 discovery.
+  ///
+  /// If [channelName] is null, the name is looked up from _joined or _discovered
+  /// as a fallback (Option C from the audit).
+  Future<void> markChannelDeletedLocally(String channelId,
+      {String? channelName}) async {
     if (_deletedChannelIds.contains(channelId)) return; // already tombstoned
 
     _deletedChannelIds.add(channelId);
     await PodDatabase.instance.addDeletedChannel(channelId);
+
+    // Determine the best name to tombstone, in priority order:
+    // 1. Explicit name from the delete event (channel_name tag — most reliable).
+    // 2. Name from _joined (pre-existing behaviour for joined channels).
+    // 3. Name from _discovered (new: Option C — covers discovered-only channels).
+    String? resolvedName = channelName;
 
     // Remove from _joined (if present) and delete from DB.
     GroupChannel? joinedChannel;
@@ -292,17 +308,35 @@ class GroupChannelService {
       joinedChannel = _joined.firstWhere((c) => c.id == channelId);
     } catch (_) {}
     if (joinedChannel != null) {
-      // Also tombstone by name so discovery cannot re-add it.
-      _deletedChannelNames.add(joinedChannel.name);
-      await PodDatabase.instance.addDeletedChannelName(joinedChannel.name);
+      resolvedName ??= joinedChannel.name;
+      debugPrint('[CHANNEL-DEL-RECV] Found in _joined: name=${joinedChannel.name}');
       _joined.removeWhere((c) => c.id == channelId);
       try {
         await PodDatabase.instance.deleteChannel(channelId);
       } catch (_) {}
     }
 
+    // Fallback: check _discovered for a name (Option C — discovered-only peer).
+    if (resolvedName == null) {
+      try {
+        final discoveredChannel =
+            _discovered.firstWhere((c) => c.id == channelId);
+        resolvedName = discoveredChannel.name;
+        debugPrint('[CHANNEL-DEL-RECV] Found in _discovered: name=$resolvedName');
+      } catch (_) {}
+    }
+
     // Remove from _discovered (if present).
     _discovered.removeWhere((c) => c.id == channelId);
+
+    // Tombstone by name so Kind-40 discovery cannot re-add the channel.
+    if (resolvedName != null && resolvedName.isNotEmpty) {
+      _deletedChannelNames.add(resolvedName);
+      await PodDatabase.instance.addDeletedChannelName(resolvedName);
+      debugPrint('[CHANNEL-TOMBSTONE] Saved: id=$channelId name=$resolvedName');
+    } else {
+      debugPrint('[CHANNEL-TOMBSTONE] Saved: id=$channelId name=null');
+    }
 
     _joinedController.add(joinedChannels);
     _channelChangedController.add(null);
