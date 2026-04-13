@@ -466,6 +466,23 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       final isOwnChannel = channel.createdBy == myDid;
       final alreadyJoined = GroupChannelService.instance.isJoined(channel.name);
 
+      // Tombstone check: block any Kind-40 event whose channel ID or name
+      // has been tombstoned by this user — even own channels (cross-device
+      // delete must be respected).
+      final idTombstoned = GroupChannelService.instance
+          .isTombstonedById(channel.id.trim());
+      final nameTombstoned = GroupChannelService.instance
+          .isTombstonedByName(channel.name.trim());
+      print('[CHANNEL-SYNC] Tombstone check: '
+          'idMatch=$idTombstoned nameMatch=$nameTombstoned '
+          'name=${channel.name} id=${channel.id}');
+      if (idTombstoned || nameTombstoned) {
+        print('[CHANNEL-SYNC] BLOCKED (tombstoned): '
+            'name=${channel.name} id=${channel.id}');
+        return;
+      }
+      print('[CHANNEL-SYNC] ALLOWED: name=${channel.name} id=${channel.id}');
+
       // Diagnostic: show which list the channel lands in.
       print('[CHANNEL-UI] Channel added to UI: ${channel.name}');
       print('[CHANNEL-UI] List source: ${alreadyJoined ? "_joined" : isOwnChannel ? "_joined (auto)" : "_discovered"}'

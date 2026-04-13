@@ -309,6 +309,14 @@ class GroupChannelService {
     debugPrint('[CHANNEL-DELETE-RECV] Kanal lokal gelöscht + tombstone: $channelId');
   }
 
+  /// Returns true if [channelId] is in the tombstoned-IDs set.
+  bool isTombstonedById(String channelId) =>
+      _deletedChannelIds.contains(channelId);
+
+  /// Returns true if [channelName] is in the tombstoned-names set.
+  bool isTombstonedByName(String channelName) =>
+      _deletedChannelNames.contains(channelName);
+
   /// Called when a Nostr Kind-40 announcement arrives.
   ///
   /// Skips channels that have been tombstoned (deleted by this user).
