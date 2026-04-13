@@ -5,7 +5,7 @@
 ; ============================================================
 
 #define AppName      "N.E.X.U.S. OneApp"
-#define AppVersion   "0.1.8"
+#define AppVersion   "0.1.9"
 #define AppPublisher "Projekt N.E.X.U.S. — Die Menschheitsfamilie"
 #define AppURL       "https://nexus-terminal.org"
 #define AppExeName   "nexus_oneapp.exe"
