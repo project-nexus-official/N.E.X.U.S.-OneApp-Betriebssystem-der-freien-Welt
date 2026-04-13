@@ -21,6 +21,7 @@ Der gesamte Quellcode ist Open Source (AGPL v3). Alle Nachrichten sind Ende-zu-E
 
 Den vollständigen Bauplan des N.E.X.U.S.-Projekts findest du auf **[nexus-terminal.org](https://nexus-terminal.org)**.
 
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/W7W71XP24H)
 ---
 
 ## Was funktioniert bereits? (v0.1.8-alpha)
