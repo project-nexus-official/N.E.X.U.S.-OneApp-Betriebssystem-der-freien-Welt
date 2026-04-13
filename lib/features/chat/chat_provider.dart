@@ -242,6 +242,25 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       await _restoreNostrTimestamp();
       await _initNostrKeys(identity);
       await _initEncryptionKeys();
+
+      // Pre-register channel/cell discovery listeners BEFORE relay subscriptions
+      // open to prevent a race condition on fast networks (e.g. Windows ~117 ms).
+      // GroupChannelService.load() must run first so tombstones are populated.
+      await GroupChannelService.instance.load();
+      await GroupChannelService.instance.ensureDefaults(identity.did);
+      _channelAnnouncedSub?.cancel();
+      final preRegPlatform = defaultTargetPlatform.name;
+      final preRegTs = DateTime.now().toIso8601String();
+      print('[DISCOVERY-INIT] _onChannelAnnounced listener registered on '
+          '$preRegPlatform at $preRegTs');
+      _channelAnnouncedSub =
+          _nostrTransport!.onChannelAnnounced.listen(_onChannelAnnounced);
+      _channelDeletedSub?.cancel();
+      _channelDeletedSub =
+          _nostrTransport!.onChannelDeleted.listen(_onChannelDeletedFromNostr);
+      _nostrTransport!.onCellAnnounced.listen(_onCellAnnounced);
+      _nostrTransport!.onCellDeleted.listen(_onCellDeleted);
+
       await _startNostrIfConnected();
       _watchConnectivity();
       await _initChannels(identity.did);
@@ -255,8 +274,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _initChannels(String myDid) async {
     try {
-      await GroupChannelService.instance.load();
-      await GroupChannelService.instance.ensureDefaults(myDid);
+      // GroupChannelService.load() + ensureDefaults() were called early in
+      // initialize() so that discovery listeners are registered before relay
+      // subscriptions open. ChannelAccessService still loads here.
       await ChannelAccessService.instance.load();
 
       // Clear any already-expired mutes on startup, then check every 60 s.
@@ -272,29 +292,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
         _nostrTransport?.subscribeToChannel(ch.nostrTag);
       }
 
-      // Listen for newly discovered channels via Kind-40.
-      _channelAnnouncedSub?.cancel();
-      if (_nostrTransport != null) {
-        final platform = defaultTargetPlatform.name;
-        final ts = DateTime.now().toIso8601String();
-        print('[DISCOVERY-INIT] _onChannelAnnounced listener registered on '
-            '$platform at $ts');
-        _channelAnnouncedSub =
-            _nostrTransport!.onChannelAnnounced.listen(_onChannelAnnounced);
-      }
-
-      // Listen for channel deletions (Kind-5 nexus-channel-delete) from other peers.
-      _channelDeletedSub?.cancel();
-      if (_nostrTransport != null) {
-        _channelDeletedSub =
-            _nostrTransport!.onChannelDeleted.listen(_onChannelDeletedFromNostr);
-      }
-
-      // Listen for newly discovered cells via Kind-30000.
-      if (_nostrTransport != null) {
-        _nostrTransport!.onCellAnnounced.listen(_onCellAnnounced);
-        _nostrTransport!.onCellDeleted.listen(_onCellDeleted);
-      }
+      // onChannelAnnounced, onChannelDeleted, onCellAnnounced, onCellDeleted
+      // are registered early in initialize() before _startNostrIfConnected()
+      // to avoid the race condition where relay events arrive before listeners.
 
       // Re-subscribe when channel list changes (join/leave).
       GroupChannelService.instance.joinedStream.listen((channels) {
