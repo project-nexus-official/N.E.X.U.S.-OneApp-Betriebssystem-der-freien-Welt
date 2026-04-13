@@ -275,6 +275,10 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       // Listen for newly discovered channels via Kind-40.
       _channelAnnouncedSub?.cancel();
       if (_nostrTransport != null) {
+        final platform = defaultTargetPlatform.name;
+        final ts = DateTime.now().toIso8601String();
+        print('[DISCOVERY-INIT] _onChannelAnnounced listener registered on '
+            '$platform at $ts');
         _channelAnnouncedSub =
             _nostrTransport!.onChannelAnnounced.listen(_onChannelAnnounced);
       }
@@ -445,6 +449,9 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
     try {
       final name = data['name'] as String?;
       final nostrTag = data['nostrTag'] as String?;
+      print('[DISCOVERY-HANDLE] _onChannelAnnounced called: '
+          'name=${name ?? "null"} nostrTag=${nostrTag ?? "null"} '
+          'ts=${DateTime.now().toIso8601String()}');
       if (name == null || nostrTag == null) return;
       final channel = GroupChannel(
         id: data['id'] as String? ?? nostrTag,
@@ -507,6 +514,8 @@ class ChatProvider extends ChangeNotifier with WidgetsBindingObserver {
       } else {
         // Another user's channel: add to _discovered for the discovery screen
         // (JoinChannelScreen). It intentionally does NOT appear in the Kanäle tab.
+        print('[DISCOVERY-ADD] About to call addDiscoveredFromNostr for '
+            '${channel.name} id=${channel.id}');
         GroupChannelService.instance.addDiscoveredFromNostr(channel);
         ConversationService.instance.notifyUpdate();
         print('[CHANNEL-UI] Rebuild triggered for channel list');

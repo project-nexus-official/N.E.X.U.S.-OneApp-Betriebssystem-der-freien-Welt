@@ -1926,6 +1926,10 @@ class NostrTransport implements MessageTransport {
       print('[CHANNEL-SYNC] Received Kind-40 event: name=$channelName '
           'id=$channelId from=$shortSender…');
       // Emit so GroupChannelService / ChatProvider can add to discovered list.
+      final hasListeners = _channelAnnouncedController.hasListener;
+      print('[DISCOVERY-PUSH] Pushing Kind-40 to stream: name=$channelName '
+          'id=$channelId hasListener=$hasListeners '
+          'ts=${DateTime.now().toIso8601String()}');
       _channelAnnouncedController.add({
         ...data,
         '_nostr_pubkey': event.pubkey,
